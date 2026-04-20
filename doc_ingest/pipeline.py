@@ -237,13 +237,16 @@ class DocumentationPipeline:
                 pending_changes += 1
                 return
 
-            extracted_doc = normalize_document(extracted_doc)
+            extracted_doc = normalize_document(extracted_doc, adapter=adapter)
             page.asset_type = extracted_doc.asset_type
             page.extractor = extracted_doc.metadata.get("extractor")
             page.extraction_score = extracted_doc.extraction.score if extracted_doc.extraction else None
             page.extraction_notes = extracted_doc.extraction.won_because if extracted_doc.extraction else []
             page.source_order_hint = extracted_doc.source_order_hint
             page.metadata = {"breadcrumbs": extracted_doc.breadcrumbs, "final_url": extracted_doc.final_url}
+            for code in self._quality_warning_codes(extracted_doc):
+                page.warning_codes.append(code)
+                report.warnings_by_code[code] = report.warnings_by_code.get(code, 0) + 1
 
             if extracted_doc.content_hash in processed_hashes:
                 page.status = "skipped"
@@ -329,7 +332,14 @@ class DocumentationPipeline:
 
         report.pages_discovered = len(state.pages)
         report.coverage_notes.extend(self._coverage_notes(state, report, plan))
-        report.output_path = compile_language_markdown(language, list(documents.values()), output_path, state=state, coverage_notes=report.coverage_notes)
+        report.output_path = compile_language_markdown(
+            language,
+            list(documents.values()),
+            output_path,
+            state=state,
+            coverage_notes=report.coverage_notes,
+            adapter=adapter,
+        )
         state.compiled = True
         state.compiled_at = datetime.now(timezone.utc)
         state.output_path = str(report.output_path)
@@ -463,13 +473,34 @@ class DocumentationPipeline:
         notes = list(plan.notes)
         failed = [page for page in state.pages.values() if page.status == "failed"]
         low_score = [page for page in state.pages.values() if (page.extraction_score or 0.0) < 0.35 and page.status == "processed"]
+        noisy = [page for page in state.pages.values() if "layout-noise" in page.warning_codes]
         if failed:
             notes.append(f"{len(failed)} pages failed and may require adapter tuning or another run.")
         if low_score:
             notes.append(f"{len(low_score)} processed pages scored poorly during extraction.")
+        if noisy:
+            notes.append(f"{len(noisy)} pages were kept but flagged for layout noise or weak structure.")
         if report.pages_processed < max(1, len(state.pages) // 4):
             notes.append("Coverage looks low relative to discovered URLs; inspect diagnostics tree and state file.")
         return notes
+
+    def _quality_warning_codes(self, document: ExtractedDocument) -> list[str]:
+        warnings: list[str] = []
+        extraction = document.extraction
+        if extraction is None:
+            return warnings
+        metrics = extraction.metrics
+        if extraction.score < 0.35:
+            warnings.append("low-extraction-score")
+        if metrics.link_line_ratio > 0.22 or metrics.boilerplate_ratio > 0.08:
+            warnings.append("layout-noise")
+        if metrics.repeated_line_ratio > 0.18:
+            warnings.append("repeated-blocks")
+        if metrics.malformed_ratio > 0.01:
+            warnings.append("encoding-artifacts")
+        if metrics.heading_count == 0 and metrics.word_count > 180:
+            warnings.append("low-structure")
+        return warnings
 
     def _build_discovered_tree_text(self, state: CrawlState) -> str:
         children: dict[str, list[str]] = {}
