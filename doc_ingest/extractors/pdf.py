@@ -3,13 +3,16 @@ from __future__ import annotations
 import io
 import re
 
-from pypdf import PdfReader
-
+from ..errors import OptionalDependencyError
 from ..models import ExtractedDocument, FetchResult
 from ..utils.text import normalize_whitespace, stable_hash
 
 
 def extract_pdf(fetch_result: FetchResult) -> ExtractedDocument:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:  # pragma: no cover - exercised via tests
+        raise OptionalDependencyError("pypdf", "PDF extraction", install_hint="pip install pypdf") from exc
     reader = PdfReader(io.BytesIO(fetch_result.content))
     parts: list[str] = []
     headings: list[str] = []

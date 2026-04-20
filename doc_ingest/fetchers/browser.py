@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from playwright.async_api import async_playwright
-
+from ..errors import OptionalDependencyError
 from ..config import AppConfig
 from ..models import FetchResult
 from ..utils.filesystem import write_bytes
@@ -34,6 +33,10 @@ class BrowserFetcher:
         async with self._startup_lock:
             if self._browser is not None:
                 return self._browser
+            try:
+                from playwright.async_api import async_playwright
+            except ImportError as exc:  # pragma: no cover - exercised via tests
+                raise OptionalDependencyError("playwright", "browser rendering", install_hint="pip install playwright && python -m playwright install chromium") from exc
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(headless=True)
             return self._browser

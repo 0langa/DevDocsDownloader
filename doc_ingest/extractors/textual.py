@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import io
 
-import mammoth
-
+from ..errors import OptionalDependencyError
 from ..models import ExtractedDocument, FetchResult
 from ..utils.text import normalize_whitespace, stable_hash
 
@@ -44,6 +43,10 @@ def extract_text(fetch_result: FetchResult) -> ExtractedDocument:
 
 
 def extract_docx(fetch_result: FetchResult) -> ExtractedDocument:
+    try:
+        import mammoth
+    except ImportError as exc:  # pragma: no cover - exercised via tests
+        raise OptionalDependencyError("mammoth", "DOCX extraction", install_hint="pip install mammoth") from exc
     result = mammoth.convert_to_markdown(io.BytesIO(fetch_result.content))
     markdown = normalize_whitespace(result.value)
     title = markdown.splitlines()[0].lstrip("# ").strip() if markdown.strip() else fetch_result.final_url
