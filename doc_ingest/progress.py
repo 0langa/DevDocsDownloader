@@ -31,7 +31,7 @@ class LanguageProgress:
 
 
 class CrawlProgressTracker:
-    def __init__(self, console: Console | None = None, *, single_terminal: bool = False, log_interval_seconds: float = 5.0) -> None:
+    def __init__(self, console: Console | None = None, *, single_terminal: bool = False, log_interval_seconds: float = 2.0) -> None:
         self.console = console or Console()
         self.single_terminal = single_terminal
         self.log_interval_seconds = max(1.0, log_interval_seconds)

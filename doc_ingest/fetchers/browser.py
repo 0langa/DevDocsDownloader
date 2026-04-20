@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from playwright.async_api import async_playwright
@@ -14,6 +15,28 @@ from ..utils.urls import normalize_url
 class BrowserFetcher:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self._playwright = None
+        self._browser = None
+        self._startup_lock = asyncio.Lock()
+        self._page_semaphore = asyncio.Semaphore(max(1, min(4, self.config.crawl.max_concurrency)))
+
+    async def close(self) -> None:
+        if self._browser is not None:
+            await self._browser.close()
+            self._browser = None
+        if self._playwright is not None:
+            await self._playwright.stop()
+            self._playwright = None
+
+    async def _get_browser(self):
+        if self._browser is not None:
+            return self._browser
+        async with self._startup_lock:
+            if self._browser is not None:
+                return self._browser
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(headless=True)
+            return self._browser
 
     async def fetch(self, url: str, cache_dir: Path) -> FetchResult:
         normalized = normalize_url(url)
@@ -30,13 +53,15 @@ class BrowserFetcher:
                 history_status_codes=[],
             )
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+        async with self._page_semaphore:
+            browser = await self._get_browser()
             page = await browser.new_page(user_agent=self.config.crawl.user_agent)
-            await page.goto(normalized, wait_until="networkidle", timeout=int(self.config.crawl.browser_timeout_seconds * 1000))
-            content = await page.content()
-            final_url = page.url
-            await browser.close()
+            try:
+                await page.goto(normalized, wait_until="networkidle", timeout=int(self.config.crawl.browser_timeout_seconds * 1000))
+                content = await page.content()
+                final_url = page.url
+            finally:
+                await page.close()
 
         cache_dir.mkdir(parents=True, exist_ok=True)
         write_bytes(cache_path, content.encode("utf-8"))

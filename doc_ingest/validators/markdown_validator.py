@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 from ..config import AppConfig
@@ -22,7 +23,8 @@ def validate_markdown(language: str, output_path: Path, config: AppConfig) -> Va
         issues.append(ValidationIssue(level="error", code="missing_title", message="Missing top-level title."))
 
     lines = text.splitlines()
-    duplicate_lines = [line for line in lines if line.strip() and lines.count(line) > 15]
+    line_counts = Counter(line for line in lines if line.strip())
+    duplicate_lines = [line for line, count in line_counts.items() if count > 15]
     if duplicate_lines:
         issues.append(ValidationIssue(level="warning", code="duplication", message="High repeated-line duplication detected."))
 
