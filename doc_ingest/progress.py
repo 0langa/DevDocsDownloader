@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import contextmanager
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 from rich.console import Console, Group
@@ -29,13 +31,16 @@ class LanguageProgress:
 
 
 class CrawlProgressTracker:
-    def __init__(self, console: Console | None = None) -> None:
+    def __init__(self, console: Console | None = None, *, single_terminal: bool = False, log_interval_seconds: float = 5.0) -> None:
         self.console = console or Console()
+        self.single_terminal = single_terminal
+        self.log_interval_seconds = max(1.0, log_interval_seconds)
         self._lock = asyncio.Lock()
         self._live: Live | None = None
         self._languages: dict[str, LanguageProgress] = {}
         self._total_languages = 1
         self._failed_requests = 0
+        self._last_single_terminal_log = 0.0
         self._progress = Progress(
             TextColumn("[bold cyan]Overall progress[/bold cyan]"),
             BarColumn(bar_width=None),
@@ -46,6 +51,12 @@ class CrawlProgressTracker:
 
     @contextmanager
     def live(self):
+        if self.single_terminal:
+            self._emit_single_terminal_snapshot(force=True)
+            with nullcontext(self):
+                yield self
+            self._emit_single_terminal_snapshot(force=True)
+            return
         with Live(self._build_renderable(), console=self.console, refresh_per_second=8, transient=False) as live:
             self._live = live
             self._refresh()
@@ -110,8 +121,36 @@ class CrawlProgressTracker:
     def _refresh(self) -> None:
         completed_value = self._completed_languages() + self._active_fraction()
         self._progress.update(self._overall_task, total=float(self._total_languages), completed=min(float(self._total_languages), completed_value))
-        if self._live is not None:
+        if self.single_terminal:
+            self._emit_single_terminal_snapshot()
+        elif self._live is not None:
             self._live.update(self._build_renderable())
+
+    def _emit_single_terminal_snapshot(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self._last_single_terminal_log) < self.log_interval_seconds:
+            return
+        self._last_single_terminal_log = now
+        totals = self._totals()
+        active_languages = sorted(
+            self._languages.values(),
+            key=lambda item: (item.completed, -(item.pages_crawled + item.queue_size), item.language.lower()),
+        )[:5]
+        active_summary = ", ".join(
+            f"{item.language}: crawled={item.pages_crawled}, queue={item.queue_size}, found={item.links_found}, added={item.links_added}, state={'done' if item.completed else 'running' if (item.pages_crawled or item.queue_size) else 'queued'}"
+            for item in active_languages
+        ) or "waiting for crawl to start"
+        self.console.print(
+            "[cyan][progress][/cyan] "
+            f"complete={totals['languages_complete']}/{self._total_languages} "
+            f"pages={totals['pages_crawled']:,} "
+            f"found={totals['links_found']:,} "
+            f"added={totals['links_added']:,} "
+            f"queued={totals['queue_size']:,} "
+            f"cache_hits={totals['cache_hits']:,} "
+            f"failures={self._failed_requests:,}"
+        )
+        self.console.print(f"[dim]active:[/dim] {active_summary}")
 
     def _completed_languages(self) -> int:
         return sum(1 for item in self._languages.values() if item.completed)
