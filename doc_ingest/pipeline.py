@@ -67,8 +67,6 @@ class DocumentationPipeline:
             await progress_tracker.register_languages(entries)
 
         concurrency = max(1, language_concurrency or self.config.crawl.language_concurrency)
-        if self.config.crawl.smart_mode:
-            concurrency = await self.adaptive_controller.get_language_concurrency()
         summary = RunSummary()
         semaphore = asyncio.Semaphore(concurrency)
 
@@ -157,10 +155,7 @@ class DocumentationPipeline:
             ):
                 return
             max_discovered_urls = self.config.crawl.max_discovered_urls_per_language
-            if self.config.crawl.smart_mode:
-                max_discovered_urls = await self.adaptive_controller.get_max_discovered()
             if len(discovered_urls) >= max_discovered_urls:
-                await self.adaptive_controller.tune(queue_fill_ratio=queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language), limit_hit=True)
                 return
             queued_urls.add(record.normalized_url)
             discovered_urls.setdefault(
@@ -211,8 +206,6 @@ class DocumentationPipeline:
             nonlocal report
             while True:
                 max_pages = self.config.crawl.max_pages_per_language
-                if self.config.crawl.smart_mode:
-                    max_pages = await self.adaptive_controller.get_max_pages()
                 if len(processed_docs) >= max_pages and not split_mode:
                     return
                 record = await queue.get()
@@ -247,10 +240,7 @@ class DocumentationPipeline:
                         added_links = 0
                         for link in new_links:
                             max_discovered_urls = self.config.crawl.max_discovered_urls_per_language
-                            if self.config.crawl.smart_mode:
-                                max_discovered_urls = await self.adaptive_controller.get_max_discovered()
                             if len(discovered_urls) >= max_discovered_urls:
-                                await self.adaptive_controller.tune(queue_fill_ratio=queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language), limit_hit=True)
                                 break
                             if link.normalized_url not in discovered_urls:
                                 discovered_urls[link.normalized_url] = {
@@ -276,8 +266,6 @@ class DocumentationPipeline:
                         dirty_discovery = True
                         pending_changes += 1 + added_links
                         await persist_caches()
-                        if self.config.crawl.smart_mode:
-                            await self.adaptive_controller.tune(queue_fill_ratio=queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language))
                 finally:
                     queue.task_done()
                     await update_queue_progress()
@@ -297,13 +285,10 @@ class DocumentationPipeline:
             semaphore = asyncio.Semaphore(max(1, self.config.crawl.max_concurrency))
 
             async def process_record(record: UrlRecord) -> None:
-                nonlocal report
+                nonlocal report, dirty_state, pending_changes
                 async with semaphore:
                     max_pages = self.config.crawl.max_pages_per_language
-                    if self.config.crawl.smart_mode:
-                        max_pages = await self.adaptive_controller.get_max_pages()
                     if len(processed_docs) >= max_pages:
-                        await self.adaptive_controller.tune(limit_hit=True)
                         return
                     try:
                         page_result = await self._process_url(record, plan, progress_tracker)
@@ -344,14 +329,10 @@ class DocumentationPipeline:
                         dirty_state = True
                         pending_changes += 1
                         await persist_caches()
-                        if self.config.crawl.smart_mode:
-                            await self.adaptive_controller.tune()
 
             await asyncio.gather(*[process_record(record) for record in discovered_records])
 
         worker_count = max(1, self.config.crawl.max_concurrency)
-        if self.config.crawl.smart_mode:
-            worker_count = await self.adaptive_controller.get_page_concurrency()
         workers = [asyncio.create_task(discovery_worker()) for _ in range(worker_count)]
         await queue.join()
         for _ in workers:
