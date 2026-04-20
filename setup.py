@@ -28,7 +28,6 @@ def ensure_directories() -> None:
         "output/markdown",
         "output/reports",
         "cache",
-        "cache/discovered_links",
         "logs",
         "state",
         "tmp",
@@ -66,6 +65,7 @@ def main() -> None:
     print("[setup] Setup complete.")
     print(f"[setup] Use interpreter: {python_path}")
     print(f"[setup] Example run: {python_path} documentation_downloader.py run --mode important")
+    print("[setup] Fresh clone ready: requirements installed, directories created, Playwright Chromium installed.")
 
 
 if __name__ == "__main__":
