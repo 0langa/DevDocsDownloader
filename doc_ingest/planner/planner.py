@@ -13,8 +13,9 @@ _PATH_OVERRIDES: dict[str, dict] = {}
 if _OVERRIDES_PATH.exists():
     try:
         _PATH_OVERRIDES = json.loads(_OVERRIDES_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging as _logging
+        _logging.getLogger("doc_ingest").warning("Failed to load path overrides from %s: %s", _OVERRIDES_PATH, _e)
 
 
 def _norm_url(url: str) -> str:

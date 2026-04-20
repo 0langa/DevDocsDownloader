@@ -56,7 +56,11 @@ class CrawlProgressTracker:
         if self.single_terminal:
             self.console.file.write("\n")
             self.console.file.flush()
-        self.console.print(f"[{level}] {message}")
+        text = f"[{level}] {message}"
+        if self._live is not None:
+            self._live.console.out(text, markup=False, highlight=False)
+        else:
+            self.console.print(text, markup=False, highlight=False)
         if self.single_terminal:
             self._emit_single_terminal_snapshot(force=True)
 

@@ -43,13 +43,14 @@ class BrowserFetcher:
         cache_key = stable_hash(f"browser:{normalized}")
         cache_path = cache_dir / f"{cache_key}.html"
         if cache_path.exists():
+            content_bytes = await asyncio.to_thread(cache_path.read_bytes)
             return FetchResult(
                 url=normalized,
                 final_url=normalized,
                 content_type="text/html; charset=utf-8",
                 status_code=200,
                 method="cache",
-                content=cache_path.read_bytes(),
+                content=content_bytes,
                 history_status_codes=[],
             )
 
@@ -63,8 +64,7 @@ class BrowserFetcher:
             finally:
                 await page.close()
 
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        write_bytes(cache_path, content.encode("utf-8"))
+        await asyncio.to_thread(write_bytes, cache_path, content.encode("utf-8"))
         return FetchResult(
             url=normalized,
             final_url=final_url,
