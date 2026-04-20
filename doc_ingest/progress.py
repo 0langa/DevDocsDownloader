@@ -5,6 +5,7 @@ import time
 from contextlib import contextmanager
 from contextlib import nullcontext
 from dataclasses import dataclass
+import logging
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -50,6 +51,14 @@ class CrawlProgressTracker:
             expand=True,
         )
         self._overall_task = self._progress.add_task("overall", total=1, completed=0)
+
+    def emit_log(self, level: str, message: str) -> None:
+        if self.single_terminal:
+            self.console.file.write("\n")
+            self.console.file.flush()
+        self.console.print(f"[{level}] {message}")
+        if self.single_terminal:
+            self._emit_single_terminal_snapshot(force=True)
 
     @contextmanager
     def live(self):
