@@ -52,6 +52,7 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show planning only."),
     validate_only: bool = typer.Option(False, "--validate-only", help="Validate existing outputs only."),
     single_terminal: bool = typer.Option(False, "--single-terminal", help="Disable the live dashboard and print periodic progress lines for SSH or plain terminals."),
+    splitmode: bool = typer.Option(False, "--splitmode", help="First crawl only for link discovery, then process the discovered URLs in a second phase."),
     language_concurrency: int | None = typer.Option(None, "--language-concurrency", help="Number of languages to process in parallel."),
     page_concurrency: int | None = typer.Option(None, "--page-concurrency", help="Number of pages to process concurrently per language."),
     max_pages: int | None = typer.Option(None, "--max-pages", help="Hard cap on processed pages per language."),
@@ -101,6 +102,7 @@ def run(
                     validate_only=validate_only,
                     language_concurrency=language_concurrency,
                     crawl_mode=mode,
+                    split_mode=splitmode,
                     progress_tracker=progress_tracker,
                 )
         finally:

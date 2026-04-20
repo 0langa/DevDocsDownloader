@@ -41,6 +41,7 @@ class DocumentationPipeline:
         validate_only: bool = False,
         language_concurrency: int | None = None,
         crawl_mode: CrawlMode | None = None,
+        split_mode: bool = False,
         progress_tracker: CrawlProgressTracker | None = None,
     ) -> RunSummary:
         entries = parse_language_file(self.config.paths.input_file)
@@ -64,6 +65,7 @@ class DocumentationPipeline:
                     dry_run=dry_run,
                     validate_only=validate_only,
                     crawl_mode=crawl_mode,
+                    split_mode=split_mode,
                     progress_tracker=progress_tracker,
                 )
 
@@ -80,6 +82,7 @@ class DocumentationPipeline:
         dry_run: bool,
         validate_only: bool,
         crawl_mode: CrawlMode | None,
+        split_mode: bool,
         progress_tracker: CrawlProgressTracker | None,
     ) -> LanguageRunReport:
         plan = self.planner.plan(language)
@@ -162,9 +165,9 @@ class DocumentationPipeline:
             write_json(discovered_cache_path, {"roots": roots, "urls": discovered_urls})
             write_text(discovered_tree_path, self._build_discovered_tree_text(discovered_urls, roots))
 
-        async def worker() -> None:
+        async def discovery_worker() -> None:
             nonlocal report
-            while len(processed_docs) < self.config.crawl.max_pages_per_language:
+            while True:
                 record = await queue.get()
                 await update_queue_progress()
                 if record is None:
@@ -172,13 +175,13 @@ class DocumentationPipeline:
                     return
 
                 try:
-                    if record.normalized_url in state.get("processed", {}):
+                    if record.normalized_url in state.get("processed", {}) or record.normalized_url in state.get("failed", {}):
                         continue
 
                     try:
-                        page_result = await self._process_url(record, plan, progress_tracker)
+                        document = await self._fetch_document_for_discovery(record, plan, progress_tracker)
                     except Exception as exc:
-                        LOGGER.exception("Failed processing %s", record.url)
+                        LOGGER.exception("Failed discovering %s", record.url)
                         async with state_lock:
                             state.setdefault("failed", {})[record.normalized_url] = str(exc)
                             discovered_urls.pop(record.normalized_url, None)
@@ -186,32 +189,11 @@ class DocumentationPipeline:
                             await persist_caches()
                         continue
 
-                    if page_result.status != "processed" or not page_result.document:
-                        async with state_lock:
-                            state.setdefault("failed", {})[record.normalized_url] = page_result.message
-                            discovered_urls.pop(record.normalized_url, None)
-                            report.failures.append(f"{record.url}: {page_result.message}")
-                            await persist_caches()
-                        continue
-
-                    document = normalize_document(page_result.document)
                     new_links = self._discover_links(document, plan, record.depth)
                     if progress_tracker is not None:
                         await progress_tracker.on_links_found(language.slug, len(document.links))
 
                     async with state_lock:
-                        if document.content_hash not in processed_hashes:
-                            processed_docs[record.normalized_url] = document
-                            processed_hashes.add(document.content_hash)
-                            state.setdefault("processed", {})[record.normalized_url] = {
-                                "title": document.title,
-                                "hash": document.content_hash,
-                                "asset_type": document.asset_type,
-                            }
-                            report.pages_processed += 1
-                            if document.asset_type != "html":
-                                report.assets_processed += 1
-
                         added_links = 0
                         for link in new_links:
                             if len(discovered_urls) >= self.config.crawl.max_discovered_urls_per_language:
@@ -232,16 +214,86 @@ class DocumentationPipeline:
                             await progress_tracker.on_links_added(language.slug, added_links)
                             await update_queue_progress()
 
+                        state.setdefault("processed", {})[record.normalized_url] = {
+                            "title": document.title,
+                            "hash": "discovered-only",
+                            "asset_type": "html",
+                            "phase": "discovered",
+                        }
                         await persist_caches()
                 finally:
                     queue.task_done()
                     await update_queue_progress()
 
-        workers = [asyncio.create_task(worker()) for _ in range(max(1, self.config.crawl.max_concurrency))]
+        async def processing_phase() -> None:
+            discovered_records = [
+                UrlRecord(
+                    url=url,
+                    normalized_url=url,
+                    depth=int(meta.get("depth", 0) or 0),
+                    parent_url=meta.get("parent"),
+                    discovered_from=str(meta.get("source") or "splitmode"),
+                )
+                for url, meta in discovered_urls.items()
+            ]
+
+            semaphore = asyncio.Semaphore(max(1, self.config.crawl.max_concurrency))
+
+            async def process_record(record: UrlRecord) -> None:
+                nonlocal report
+                async with semaphore:
+                    if len(processed_docs) >= self.config.crawl.max_pages_per_language:
+                        return
+                    try:
+                        page_result = await self._process_url(record, plan, progress_tracker)
+                    except Exception as exc:
+                        LOGGER.exception("Failed processing %s", record.url)
+                        async with state_lock:
+                            state.setdefault("failed", {})[record.normalized_url] = str(exc)
+                            report.failures.append(f"{record.url}: {exc}")
+                            await persist_caches()
+                        return
+
+                    if page_result.status != "processed" or not page_result.document:
+                        async with state_lock:
+                            state.setdefault("failed", {})[record.normalized_url] = page_result.message
+                            report.failures.append(f"{record.url}: {page_result.message}")
+                            await persist_caches()
+                        return
+
+                    document = normalize_document(page_result.document)
+                    async with state_lock:
+                        if document.content_hash in processed_hashes:
+                            return
+                        processed_docs[record.normalized_url] = document
+                        processed_hashes.add(document.content_hash)
+                        state.setdefault("processed", {})[record.normalized_url] = {
+                            "title": document.title,
+                            "hash": document.content_hash,
+                            "asset_type": document.asset_type,
+                            "phase": "processed",
+                        }
+                        report.pages_processed += 1
+                        if document.asset_type != "html":
+                            report.assets_processed += 1
+                        await persist_caches()
+
+            await asyncio.gather(*[process_record(record) for record in discovered_records])
+
+        workers = [asyncio.create_task(discovery_worker()) for _ in range(max(1, self.config.crawl.max_concurrency))]
         await queue.join()
         for _ in workers:
             await queue.put(None)
         await asyncio.gather(*workers)
+
+        if split_mode:
+            state["processed"] = {
+                url: meta
+                for url, meta in state.get("processed", {}).items()
+                if meta.get("phase") != "discovered"
+            }
+            await persist_caches()
+            await processing_phase()
 
         if not processed_docs:
             report.failures.append("No documents were processed.")
@@ -256,6 +308,17 @@ class DocumentationPipeline:
         if progress_tracker is not None:
             await progress_tracker.on_language_complete(language.slug, report)
         return report
+
+    async def _fetch_document_for_discovery(
+        self,
+        record: UrlRecord,
+        plan: PlannedSource,
+        progress_tracker: CrawlProgressTracker | None,
+    ) -> ExtractedDocument:
+        page_result = await self._process_url(record, plan, progress_tracker)
+        if page_result.status != "processed" or not page_result.document:
+            raise RuntimeError(page_result.message or "Failed to discover links")
+        return page_result.document
 
     async def _process_url(
         self,
