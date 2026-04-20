@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import httpx
@@ -12,6 +13,8 @@ from ..models import FetchResult
 from ..utils.filesystem import read_json, write_bytes, write_json
 from ..utils.text import stable_hash
 from ..utils.urls import normalize_url
+
+_MAX_HOST_ENTRIES = 2000
 
 
 class HttpFetcher:
@@ -26,8 +29,8 @@ class HttpFetcher:
             ),
             headers={"User-Agent": self.config.crawl.user_agent},
         )
-        self._host_state_locks: dict[str, asyncio.Lock] = {}
-        self._host_next_allowed_at: dict[str, float] = {}
+        self._host_state_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
+        self._host_next_allowed_at: OrderedDict[str, float] = OrderedDict()
         self.adaptive_controller = None
 
     def set_adaptive_controller(self, controller) -> None:
@@ -93,7 +96,15 @@ class HttpFetcher:
         if self.adaptive_controller is not None:
             delay_seconds = await self.adaptive_controller.get_per_host_delay()
 
-        lock = self._host_state_locks.setdefault(host, asyncio.Lock())
+        if host not in self._host_state_locks:
+            if len(self._host_state_locks) >= _MAX_HOST_ENTRIES:
+                self._host_state_locks.popitem(last=False)
+                self._host_next_allowed_at.popitem(last=False)
+            self._host_state_locks[host] = asyncio.Lock()
+        else:
+            self._host_state_locks.move_to_end(host)
+
+        lock = self._host_state_locks[host]
         sleep_for = 0.0
         async with lock:
             now = time.monotonic()
@@ -102,6 +113,7 @@ class HttpFetcher:
                 sleep_for = next_allowed - now
                 now = next_allowed
             self._host_next_allowed_at[host] = now + max(0.0, delay_seconds)
+            self._host_next_allowed_at.move_to_end(host)
 
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)

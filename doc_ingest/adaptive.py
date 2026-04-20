@@ -19,7 +19,6 @@ class AdaptiveSnapshot:
 class AdaptiveRuntimeController:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
-        self.enabled = bool(config.crawl.smart_mode)
         self._lock = asyncio.Lock()
         self.page_concurrency = max(1, config.crawl.max_concurrency)
         self.language_concurrency = max(1, config.crawl.language_concurrency)
@@ -28,8 +27,6 @@ class AdaptiveRuntimeController:
         self.max_discovered_urls_per_language = max(1, config.crawl.max_discovered_urls_per_language)
 
     async def tune(self, *, queue_fill_ratio: float = 0.0, limit_hit: bool = False) -> None:
-        if not self.enabled:
-            return
         snapshot = self._snapshot()
         async with self._lock:
             pressure_high = snapshot.cpu_percent >= 88 or snapshot.memory_percent >= 88 or snapshot.disk_percent >= 95

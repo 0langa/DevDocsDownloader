@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from .config import load_config
@@ -16,17 +17,17 @@ from .progress import CrawlProgressTracker
 
 app = typer.Typer(
     help=(
-        "Ingest official programming-language documentation and compile one normalized Markdown manual per language.\n\n"
-        "Typical workflow:\n"
-        "  1. python documentation_downloader.py init\n"
-        "  2. python documentation_downloader.py run --mode full\n"
-        "  3. python documentation_downloader.py validate\n\n"
+        "Ingest official programming-language documentation into normalized Markdown.\n\n"
+        "Run [bold]without arguments[/bold] to launch the interactive setup wizard.\n"
+        "Use the [bold]run[/bold] sub-command for scripted or automated invocations.\n\n"
         "Examples:\n"
+        "  python documentation_downloader.py\n"
         "  python documentation_downloader.py run --language python --mode important\n"
-        "  python documentation_downloader.py run --mode full --language-concurrency 6 --page-concurrency 16\n"
-        "  python documentation_downloader.py validate --language rust"
+        "  python documentation_downloader.py validate --language rust\n"
+        "  python documentation_downloader.py init"
     ),
-    no_args_is_help=True,
+    invoke_without_command=True,
+    no_args_is_help=False,
     rich_markup_mode="rich",
 )
 console = Console()
@@ -73,57 +74,21 @@ def _setup_logging(log_path: Path, *, verbosity: str, progress_tracker: CrawlPro
         logging.getLogger().addHandler(console_handler)
 
 
-@app.command(help="Crawl documentation sources, extract content, and compile Markdown outputs.")
-def run(
-    language: str | None = typer.Option(None, "--language", "-l", help="Run a single language by name or slug."),
-    mode: CrawlMode = typer.Option("full", "--mode", help="Choose 'important' for core docs only or 'full' for broad coverage."),
-    force_refresh: bool = typer.Option(False, "--force-refresh", help="Ignore saved state for selected languages."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show planning only."),
-    validate_only: bool = typer.Option(False, "--validate-only", help="Validate existing outputs only."),
-    single_terminal: bool = typer.Option(False, "--single-terminal", help="Compatibility flag currently disabled; normal console UI is always used."),
-    silent: bool = typer.Option(False, "--silent", help="Only show errors in terminal output."),
-    info: bool = typer.Option(False, "--info", help="Show informational runtime logs in terminal output."),
-    debug: bool = typer.Option(False, "--debug", help="Show debug-level runtime logs in terminal output."),
-    verbose: bool = typer.Option(False, "--verbose", help="Show the most chatty runtime logs, including lower-level library output."),
-    splitmode: bool = typer.Option(False, "--splitmode", help="First crawl only for link discovery, then process the discovered URLs in a second phase."),
-    smart: bool = typer.Option(False, "--smart", help="Compatibility flag currently disabled; static crawl settings are used."),
-    language_concurrency: int | None = typer.Option(None, "--language-concurrency", help="Number of languages to process in parallel."),
-    page_concurrency: int | None = typer.Option(None, "--page-concurrency", help="Number of pages to process concurrently per language."),
-    max_pages: int | None = typer.Option(None, "--max-pages", help="Hard cap on processed pages per language."),
-    max_discovered: int | None = typer.Option(None, "--max-discovered", help="Hard cap on discovered URLs per language."),
-    per_host_delay: float | None = typer.Option(None, "--per-host-delay", help="Delay between requests to the same host in seconds."),
+def _execute_run(
+    *,
+    language: str | None,
+    mode: CrawlMode,
+    force_refresh: bool,
+    dry_run: bool,
+    validate_only: bool,
+    verbosity: str,
+    language_concurrency: int | None,
+    page_concurrency: int | None,
+    max_pages: int | None,
+    max_discovered: int | None,
+    per_host_delay: float | None,
 ) -> None:
-    """Run the documentation ingestion pipeline.
-
-    This command plans crawl roots, fetches documentation pages and assets,
-    extracts normalized Markdown, merges them per language, and writes
-    validation/report outputs.
-
-    Output locations:
-    - Markdown manuals: output/markdown/
-    - Reports: output/reports/
-    - Logs: logs/run.log
-
-    Recommended examples:
-    - Full crawl: python documentation_downloader.py run --mode full
-    - One language: python documentation_downloader.py run --language python
-    - Standard interactive mode: python documentation_downloader.py run --mode full
-    - Fast VM run: python documentation_downloader.py run --mode full --language-concurrency 6 --page-concurrency 16 --max-pages 1200 --max-discovered 5000 --per-host-delay 0.03
-    """
     config = load_config()
-    selected_levels = sum(1 for flag in [silent, info, debug, verbose] if flag)
-    if selected_levels > 1:
-        raise typer.BadParameter("Use only one of --silent, --info, --debug, or --verbose.")
-    verbosity = "info"
-    if silent:
-        verbosity = "silent"
-    elif debug:
-        verbosity = "debug"
-    elif verbose:
-        verbosity = "verbose"
-    elif info:
-        verbosity = "info"
-
     config.planner.crawl_mode = mode
     if language_concurrency is not None:
         config.crawl.language_concurrency = max(1, language_concurrency)
@@ -135,16 +100,11 @@ def run(
         config.crawl.max_discovered_urls_per_language = max(1, max_discovered)
     if per_host_delay is not None:
         config.crawl.per_host_delay_seconds = max(0.0, per_host_delay)
-    config.crawl.smart_mode = False
 
     async def _runner() -> None:
-        pipeline = DocumentationPipeline(config)
         progress_tracker = CrawlProgressTracker(console=console, single_terminal=False)
         _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity, progress_tracker=progress_tracker)
-        if single_terminal:
-            logging.getLogger("doc_ingest").warning("--single-terminal is currently disabled; using normal console UI.")
-        if smart:
-            logging.getLogger("doc_ingest").warning("--smart is currently disabled; using static crawl settings.")
+        pipeline = DocumentationPipeline(config)
         try:
             with progress_tracker.live():
                 summary = await pipeline.run(
@@ -154,7 +114,6 @@ def run(
                     validate_only=validate_only,
                     language_concurrency=language_concurrency,
                     crawl_mode=mode,
-                    split_mode=splitmode,
                     progress_tracker=progress_tracker,
                 )
         finally:
@@ -177,14 +136,155 @@ def run(
     asyncio.run(_runner())
 
 
-@app.command(help="Validate existing compiled Markdown outputs without crawling.")
-def validate(language: str | None = typer.Option(None, "--language", "-l")) -> None:
-    """Validate generated Markdown files and report quality scores.
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        _wizard()
 
-    Use this after a crawl to check whether outputs exist and how complete they
-    appear to be.
+
+def _wizard() -> None:
+    console.print()
+    console.print(Panel(
+        "[bold cyan]Documentation Ingestion Wizard[/bold cyan]\n\n"
+        "Press [bold]Enter[/bold] to accept the default shown in [dim][brackets][/dim].\n"
+        "All settings are also available as flags on the [bold]run[/bold] sub-command for automation.",
+        border_style="cyan",
+        expand=False,
+    ))
+    console.print()
+
+    lang_input = typer.prompt("Language to crawl (press Enter for all languages)", default="")
+    language = lang_input.strip() or None
+
+    while True:
+        mode_input = typer.prompt("Crawl mode", default="important", prompt_suffix=" [important/full]: ", show_default=False)
+        mode_str = mode_input.strip().lower()
+        if mode_str in ("important", "full"):
+            mode = CrawlMode(mode_str)
+            break
+        console.print("[red]Please type 'important' or 'full'.[/red]")
+
+    page_concurrency: int = typer.prompt("Parallel pages per language", default=4, type=int)
+    lang_concurrency: int = typer.prompt("Languages crawled in parallel", default=2, type=int)
+    max_pages: int = typer.prompt("Max pages per language", default=1000, type=int)
+    per_host_delay: float = typer.prompt("Delay between requests to the same host (seconds)", default=0.15, type=float)
+    force_refresh: bool = typer.confirm("Discard existing crawl state and re-crawl from scratch?", default=False)
+
+    console.print()
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold white")
+    grid.add_column(style="cyan")
+    grid.add_row("Language:", language or "[all]")
+    grid.add_row("Mode:", mode.value)
+    grid.add_row("Page concurrency:", str(page_concurrency))
+    grid.add_row("Language concurrency:", str(lang_concurrency))
+    grid.add_row("Max pages:", f"{max_pages:,}")
+    grid.add_row("Request delay:", f"{per_host_delay}s")
+    grid.add_row("Force refresh:", "yes" if force_refresh else "no")
+    console.print(Panel(grid, title="Crawl configuration", border_style="green", expand=False))
+    console.print()
+
+    if not typer.confirm("Start crawl?", default=True):
+        console.print("Aborted.")
+        raise typer.Exit()
+
+    _execute_run(
+        language=language,
+        mode=mode,
+        force_refresh=force_refresh,
+        dry_run=False,
+        validate_only=False,
+        verbosity="info",
+        language_concurrency=lang_concurrency,
+        page_concurrency=page_concurrency,
+        max_pages=max_pages,
+        max_discovered=None,
+        per_host_delay=per_host_delay,
+    )
+
+
+@app.command(help="Crawl documentation sources, extract content, and compile Markdown outputs.")
+def run(
+    language: str | None = typer.Option(None, "--language", "-l", help="Single language by name or slug."),
+    mode: CrawlMode = typer.Option("full", "--mode", help="'important' for core docs only, 'full' for broad coverage."),
+    force_refresh: bool = typer.Option(False, "--force-refresh", help="Ignore saved state for selected languages."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show planning only, do not crawl."),
+    validate_only: bool = typer.Option(False, "--validate-only", help="Validate existing outputs without crawling."),
+    silent: bool = typer.Option(False, "--silent", help="Only show errors in terminal output."),
+    info: bool = typer.Option(False, "--info", help="Show informational runtime logs."),
+    debug: bool = typer.Option(False, "--debug", help="Show debug-level runtime logs."),
+    verbose: bool = typer.Option(False, "--verbose", help="Show the most detailed logs, including library output."),
+    language_concurrency: int | None = typer.Option(None, "--language-concurrency", help="Languages to process in parallel."),
+    page_concurrency: int | None = typer.Option(None, "--page-concurrency", help="Pages to process concurrently per language."),
+    max_pages: int | None = typer.Option(None, "--max-pages", help="Hard cap on processed pages per language."),
+    max_discovered: int | None = typer.Option(None, "--max-discovered", help="Hard cap on discovered URLs per language."),
+    per_host_delay: float | None = typer.Option(None, "--per-host-delay", help="Delay between requests to the same host (seconds)."),
+) -> None:
+    """Run the documentation ingestion pipeline.
+
+    Output locations:
+    - Markdown manuals: output/markdown/
+    - Reports:          output/reports/
+    - Logs:             logs/run.log
+
+    Examples:
+      python documentation_downloader.py run --language python
+      python documentation_downloader.py run --mode important --language-concurrency 3 --page-concurrency 8
+      python documentation_downloader.py run --mode full --page-concurrency 16 --max-pages 1200 --per-host-delay 0.05
     """
-    run(language=language, validate_only=True)
+    selected_levels = sum(1 for flag in [silent, info, debug, verbose] if flag)
+    if selected_levels > 1:
+        raise typer.BadParameter("Use only one of --silent, --info, --debug, or --verbose.")
+    verbosity = "info"
+    if silent:
+        verbosity = "silent"
+    elif debug:
+        verbosity = "debug"
+    elif verbose:
+        verbosity = "verbose"
+
+    _execute_run(
+        language=language,
+        mode=mode,
+        force_refresh=force_refresh,
+        dry_run=dry_run,
+        validate_only=validate_only,
+        verbosity=verbosity,
+        language_concurrency=language_concurrency,
+        page_concurrency=page_concurrency,
+        max_pages=max_pages,
+        max_discovered=max_discovered,
+        per_host_delay=per_host_delay,
+    )
+
+
+@app.command(help="Validate existing compiled Markdown outputs without crawling.")
+def validate(language: str | None = typer.Option(None, "--language", "-l", help="Single language by name or slug.")) -> None:
+    """Validate generated Markdown files and report quality scores."""
+    config = load_config()
+
+    async def _runner() -> None:
+        progress_tracker = CrawlProgressTracker(console=console, single_terminal=False)
+        _setup_logging(config.paths.logs_dir / "run.log", verbosity="info", progress_tracker=progress_tracker)
+        pipeline = DocumentationPipeline(config)
+        try:
+            with progress_tracker.live():
+                summary = await pipeline.run(language_name=language, validate_only=True, progress_tracker=progress_tracker)
+        finally:
+            await pipeline.close()
+
+        table = Table(title="Validation Summary")
+        table.add_column("Language")
+        table.add_column("Score")
+        table.add_column("Issues")
+        table.add_column("Output")
+        for report in summary.reports:
+            score = str(report.validation.score if report.validation else "N/A")
+            issues = str(len(report.validation.issues) if report.validation else "N/A")
+            table.add_row(report.language, score, issues, str(report.output_path or "N/A"))
+        console.print(table)
+
+    asyncio.run(_runner())
 
 
 @app.command(help="Create the required project directories under the configured root.")
