@@ -126,10 +126,14 @@ class DocumentationPipeline:
         discovered_cache_path = self.config.paths.crawl_cache_dir / f"{language.slug}.json"
         discovered_tree_path = self.config.paths.crawl_cache_dir / f"{language.slug}.tree.txt"
         discovered_cache = read_json(discovered_cache_path, {"urls": {}, "roots": []})
+        skip_manifest = read_json(self.config.paths.cache_dir / "skip_manifest.json", {"languages": {}})
+        language_skip_data = skip_manifest.get("languages", {}).get(language.slug, {})
         processed_docs: dict[str, ExtractedDocument] = {}
         processed_hashes: set[str] = set()
-        processed_state_urls = set(state.get("processed", {}).keys())
-        failed_state_urls = set(state.get("failed", {}).keys())
+        processed_state_urls = {normalize_url(url) for url in state.get("processed", {}).keys()}
+        failed_state_urls = {normalize_url(url) for url in state.get("failed", {}).keys()}
+        precomputed_skip_urls = {normalize_url(url) for url in language_skip_data.get("skip", [])}
+        processed_state_urls.update(precomputed_skip_urls)
         queued_urls: set[str] = set()
         discovered_urls: dict[str, dict[str, str | int | None]] = discovered_cache.get("urls", {})
         queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=self.config.crawl.max_queue_size_per_language)
@@ -146,7 +150,11 @@ class DocumentationPipeline:
                 await progress_tracker.on_queue_size_changed(language.slug, queue.qsize())
 
         async def enqueue(record: UrlRecord) -> None:
-            if record.normalized_url in queued_urls or record.normalized_url in processed_state_urls:
+            if (
+                record.normalized_url in queued_urls
+                or record.normalized_url in processed_state_urls
+                or record.normalized_url in failed_state_urls
+            ):
                 return
             max_discovered_urls = self.config.crawl.max_discovered_urls_per_language
             if self.config.crawl.smart_mode:
@@ -251,10 +259,8 @@ class DocumentationPipeline:
                                     "source": link.discovered_from,
                                 }
                                 report.pages_discovered = max(report.pages_discovered, len(discovered_urls))
-                                queued_urls.add(link.normalized_url)
                                 added_links += 1
-                                if not queue.full():
-                                    await queue.put(link)
+                                await enqueue(link)
 
                         if progress_tracker is not None and added_links:
                             await progress_tracker.on_links_added(language.slug, added_links)
