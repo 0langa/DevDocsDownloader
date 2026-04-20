@@ -26,6 +26,10 @@ class HttpFetcher:
             headers={"User-Agent": self.config.crawl.user_agent},
         )
         self._host_locks: dict[str, asyncio.Lock] = {}
+        self.adaptive_controller = None
+
+    def set_adaptive_controller(self, controller) -> None:
+        self.adaptive_controller = controller
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -52,7 +56,10 @@ class HttpFetcher:
         lock = self._host_locks.setdefault(host, asyncio.Lock())
 
         async with lock:
-            await asyncio.sleep(self.config.crawl.per_host_delay_seconds)
+            delay_seconds = self.config.crawl.per_host_delay_seconds
+            if self.adaptive_controller is not None:
+                delay_seconds = await self.adaptive_controller.get_per_host_delay()
+            await asyncio.sleep(delay_seconds)
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self.config.crawl.retries),
                 wait=wait_exponential(multiplier=self.config.crawl.backoff_base_seconds, min=1, max=12),

@@ -53,6 +53,7 @@ def run(
     validate_only: bool = typer.Option(False, "--validate-only", help="Validate existing outputs only."),
     single_terminal: bool = typer.Option(False, "--single-terminal", help="Disable the live dashboard and print periodic progress lines for SSH or plain terminals."),
     splitmode: bool = typer.Option(False, "--splitmode", help="First crawl only for link discovery, then process the discovered URLs in a second phase."),
+    smart: bool = typer.Option(False, "--smart", help="Adapt concurrency, delays, and crawl limits at runtime based on available system resources."),
     language_concurrency: int | None = typer.Option(None, "--language-concurrency", help="Number of languages to process in parallel."),
     page_concurrency: int | None = typer.Option(None, "--page-concurrency", help="Number of pages to process concurrently per language."),
     max_pages: int | None = typer.Option(None, "--max-pages", help="Hard cap on processed pages per language."),
@@ -88,6 +89,7 @@ def run(
         config.crawl.max_discovered_urls_per_language = max(1, max_discovered)
     if per_host_delay is not None:
         config.crawl.per_host_delay_seconds = max(0.0, per_host_delay)
+    config.crawl.smart_mode = smart
     _setup_logging(config.paths.logs_dir / "run.log")
 
     async def _runner() -> None:

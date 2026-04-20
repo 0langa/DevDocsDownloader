@@ -64,6 +64,15 @@ class CrawlConfig(BaseModel):
     browser_timeout_seconds: float = 45.0
     duplicate_similarity_threshold: float = 0.96
     tiny_output_char_threshold: int = 2000
+    smart_mode: bool = False
+    smart_min_page_concurrency: int = 2
+    smart_max_page_concurrency: int = 24
+    smart_min_language_concurrency: int = 1
+    smart_max_language_concurrency: int = 8
+    smart_min_per_host_delay_seconds: float = 0.01
+    smart_max_per_host_delay_seconds: float = 1.5
+    smart_max_pages_per_language: int = 20000
+    smart_max_discovered_urls_per_language: int = 50000
 
 
 class PlannerConfig(BaseModel):
