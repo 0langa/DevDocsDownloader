@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
 from markdownify import markdownify as html_to_markdown
@@ -24,6 +25,41 @@ JUNK_SELECTORS = [
     ".advertisement",
     ".feedback",
 ]
+
+
+@dataclass
+class HtmlDiscoveryResult:
+    title: str
+    final_url: str
+    links: list[str]
+    headings: list[str]
+
+
+def extract_html_links(fetch_result: FetchResult) -> HtmlDiscoveryResult:
+    html = fetch_result.content.decode("utf-8", errors="ignore")
+    soup = BeautifulSoup(html, "lxml")
+
+    for selector in JUNK_SELECTORS:
+        for element in soup.select(selector):
+            element.decompose()
+
+    main = None
+    for selector in ["main", "article", "[role='main']", ".main-content", ".content", "body"]:
+        main = soup.select_one(selector)
+        if main:
+            break
+    if main is None:
+        main = soup
+
+    title = soup.title.get_text(strip=True) if soup.title else fetch_result.final_url
+    links: list[str] = []
+    for anchor in main.select("a[href]"):
+        href = anchor.get("href")
+        if href:
+            links.append(resolve_url(fetch_result.final_url, href))
+
+    headings = [node.get_text(" ", strip=True) for node in main.select("h1, h2, h3, h4")]
+    return HtmlDiscoveryResult(title=title, final_url=fetch_result.final_url, links=links, headings=headings)
 
 
 def extract_html(fetch_result: FetchResult) -> ExtractedDocument:

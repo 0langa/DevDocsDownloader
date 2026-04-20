@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from urllib.parse import parse_qsl, urlparse
 
 from .adaptive import AdaptiveRuntimeController
 from .config import AppConfig
+from .extractors.html import extract_html_links
 from .extractors.dispatcher import detect_asset_type, extract_document
 from .fetchers.browser import BrowserFetcher
 from .fetchers.http import HttpFetcher
@@ -24,6 +26,13 @@ from .validators.markdown_validator import validate_markdown
 LOGGER = logging.getLogger("doc_ingest")
 
 
+class DiscoveryDocument:
+    def __init__(self, *, title: str, final_url: str, links: list[str]) -> None:
+        self.title = title
+        self.final_url = final_url
+        self.links = links
+
+
 class DocumentationPipeline:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -35,6 +44,7 @@ class DocumentationPipeline:
 
     async def close(self) -> None:
         await self.http_fetcher.close()
+        await self.browser_fetcher.close()
 
     async def run(
         self,
@@ -124,6 +134,12 @@ class DocumentationPipeline:
         discovered_urls: dict[str, dict[str, str | int | None]] = discovered_cache.get("urls", {})
         queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=self.config.crawl.max_queue_size_per_language)
         state_lock = asyncio.Lock()
+        dirty_state = False
+        dirty_discovery = False
+        last_persist_at = time.monotonic()
+        persist_every_seconds = 10.0
+        persist_every_changes = 50
+        pending_changes = 0
 
         async def update_queue_progress() -> None:
             if progress_tracker is not None:
@@ -168,11 +184,20 @@ class DocumentationPipeline:
 
         report.pages_discovered = len(discovered_urls)
 
-        async def persist_caches() -> None:
+        async def persist_caches(force: bool = False) -> None:
+            nonlocal dirty_state, dirty_discovery, last_persist_at, pending_changes
+            if not force and not (dirty_state or dirty_discovery):
+                return
+            if not force and pending_changes < persist_every_changes and (time.monotonic() - last_persist_at) < persist_every_seconds:
+                return
             write_json(state_path, state)
             roots = sorted(url for url, meta in discovered_urls.items() if not meta.get("parent"))
             write_json(discovered_cache_path, {"roots": roots, "urls": discovered_urls})
             write_text(discovered_tree_path, self._build_discovered_tree_text(discovered_urls, roots))
+            dirty_state = False
+            dirty_discovery = False
+            pending_changes = 0
+            last_persist_at = time.monotonic()
 
         async def discovery_worker() -> None:
             nonlocal report
@@ -200,6 +225,9 @@ class DocumentationPipeline:
                             state.setdefault("failed", {})[record.normalized_url] = str(exc)
                             discovered_urls.pop(record.normalized_url, None)
                             report.failures.append(f"{record.url}: {exc}")
+                            dirty_state = True
+                            dirty_discovery = True
+                            pending_changes += 1
                             await persist_caches()
                         continue
 
@@ -238,6 +266,9 @@ class DocumentationPipeline:
                             "asset_type": "html",
                             "phase": "discovered",
                         }
+                        dirty_state = True
+                        dirty_discovery = True
+                        pending_changes += 1 + added_links
                         await persist_caches()
                         if self.config.crawl.smart_mode:
                             await self.adaptive_controller.tune(queue_fill_ratio=queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language))
@@ -275,6 +306,8 @@ class DocumentationPipeline:
                         async with state_lock:
                             state.setdefault("failed", {})[record.normalized_url] = str(exc)
                             report.failures.append(f"{record.url}: {exc}")
+                            dirty_state = True
+                            pending_changes += 1
                             await persist_caches()
                         return
 
@@ -282,6 +315,8 @@ class DocumentationPipeline:
                         async with state_lock:
                             state.setdefault("failed", {})[record.normalized_url] = page_result.message
                             report.failures.append(f"{record.url}: {page_result.message}")
+                            dirty_state = True
+                            pending_changes += 1
                             await persist_caches()
                         return
 
@@ -300,6 +335,8 @@ class DocumentationPipeline:
                         report.pages_processed += 1
                         if document.asset_type != "html":
                             report.assets_processed += 1
+                        dirty_state = True
+                        pending_changes += 1
                         await persist_caches()
                         if self.config.crawl.smart_mode:
                             await self.adaptive_controller.tune()
@@ -321,8 +358,12 @@ class DocumentationPipeline:
                 for url, meta in state.get("processed", {}).items()
                 if meta.get("phase") != "discovered"
             }
-            await persist_caches()
+            dirty_state = True
+            pending_changes += 1
+            await persist_caches(force=True)
             await processing_phase()
+
+        await persist_caches(force=True)
 
         if not processed_docs:
             report.failures.append("No documents were processed.")
@@ -343,11 +384,36 @@ class DocumentationPipeline:
         record: UrlRecord,
         plan: PlannedSource,
         progress_tracker: CrawlProgressTracker | None,
-    ) -> ExtractedDocument:
-        page_result = await self._process_url(record, plan, progress_tracker)
-        if page_result.status != "processed" or not page_result.document:
-            raise RuntimeError(page_result.message or "Failed to discover links")
-        return page_result.document
+    ) -> DiscoveryDocument:
+        cache_dir = self.config.paths.cache_dir / plan.language.slug
+        try:
+            fetch_result = await self.http_fetcher.fetch(record.normalized_url, cache_dir)
+        except Exception:
+            if progress_tracker is not None:
+                await progress_tracker.on_request_failure(plan.language.slug)
+            raise
+
+        if progress_tracker is not None:
+            await progress_tracker.on_fetch_complete(
+                plan.language.slug,
+                fetch_result.status_code,
+                fetch_result.history_status_codes,
+                fetch_result.method,
+            )
+
+        if fetch_result.status_code >= 400:
+            raise RuntimeError(f"HTTP {fetch_result.status_code}")
+
+        asset_type = detect_asset_type(fetch_result)
+        if asset_type == "unknown" and self.config.crawl.browser_enabled:
+            fetch_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
+            asset_type = detect_asset_type(fetch_result)
+
+        if asset_type != "html":
+            return DiscoveryDocument(title=fetch_result.final_url, final_url=fetch_result.final_url, links=[])
+
+        lightweight = extract_html_links(fetch_result)
+        return DiscoveryDocument(title=lightweight.title, final_url=lightweight.final_url, links=lightweight.links)
 
     async def _process_url(
         self,
