@@ -41,6 +41,8 @@ class CrawlProgressTracker:
         self._total_languages = 1
         self._failed_requests = 0
         self._last_single_terminal_log = 0.0
+        self._last_single_terminal_summary = 0.0
+        self._last_status_line_length = 0
         self._progress = Progress(
             TextColumn("[bold cyan]Overall progress[/bold cyan]"),
             BarColumn(bar_width=None),
@@ -55,7 +57,7 @@ class CrawlProgressTracker:
             self._emit_single_terminal_snapshot(force=True)
             with nullcontext(self):
                 yield self
-            self._emit_single_terminal_snapshot(force=True)
+            self._emit_single_terminal_snapshot(force=True, final=True)
             return
         with Live(self._build_renderable(), console=self.console, refresh_per_second=8, transient=False) as live:
             self._live = live
@@ -126,7 +128,7 @@ class CrawlProgressTracker:
         elif self._live is not None:
             self._live.update(self._build_renderable())
 
-    def _emit_single_terminal_snapshot(self, force: bool = False) -> None:
+    def _emit_single_terminal_snapshot(self, force: bool = False, final: bool = False) -> None:
         now = time.monotonic()
         if not force and (now - self._last_single_terminal_log) < self.log_interval_seconds:
             return
@@ -136,21 +138,37 @@ class CrawlProgressTracker:
             self._languages.values(),
             key=lambda item: (item.completed, -(item.pages_crawled + item.queue_size), item.language.lower()),
         )[:5]
-        active_summary = ", ".join(
-            f"{item.language}: crawled={item.pages_crawled}, queue={item.queue_size}, found={item.links_found}, added={item.links_added}, state={'done' if item.completed else 'running' if (item.pages_crawled or item.queue_size) else 'queued'}"
-            for item in active_languages
-        ) or "waiting for crawl to start"
-        self.console.print(
-            "[cyan][progress][/cyan] "
-            f"complete={totals['languages_complete']}/{self._total_languages} "
-            f"pages={totals['pages_crawled']:,} "
-            f"found={totals['links_found']:,} "
-            f"added={totals['links_added']:,} "
-            f"queued={totals['queue_size']:,} "
-            f"cache_hits={totals['cache_hits']:,} "
-            f"failures={self._failed_requests:,}"
+        top = active_languages[0] if active_languages else None
+        top_text = (
+            f" top={top.language} c={top.pages_crawled} q={top.queue_size}"
+            if top is not None
+            else " top=waiting"
         )
-        self.console.print(f"[dim]active:[/dim] {active_summary}")
+        status_line = (
+            f"[progress] {totals['languages_complete']}/{self._total_languages} done"
+            f" | pages={totals['pages_crawled']:,}"
+            f" | found={totals['links_found']:,}"
+            f" | added={totals['links_added']:,}"
+            f" | queued={totals['queue_size']:,}"
+            f" | cache={totals['cache_hits']:,}"
+            f" | fail={self._failed_requests:,}"
+            f"{top_text}"
+        )
+        padded_status_line = status_line.ljust(self._last_status_line_length)
+        self._last_status_line_length = max(self._last_status_line_length, len(status_line))
+        self.console.file.write("\r" + padded_status_line)
+        self.console.file.flush()
+
+        should_print_summary = final or force or (now - self._last_single_terminal_summary) >= 30.0
+        if should_print_summary:
+            self._last_single_terminal_summary = now
+            self.console.file.write("\n")
+            self.console.file.flush()
+            active_summary = " | ".join(
+                f"{item.language}: crawled={item.pages_crawled}, queue={item.queue_size}, found={item.links_found}, added={item.links_added}, state={'done' if item.completed else 'running' if (item.pages_crawled or item.queue_size) else 'queued'}"
+                for item in active_languages[:3]
+            ) or "waiting for crawl to start"
+            self.console.print(f"[dim]active:[/dim] {active_summary}")
 
     def _completed_languages(self) -> int:
         return sum(1 for item in self._languages.values() if item.completed)
