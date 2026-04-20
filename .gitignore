@@ -1,0 +1,69 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build / packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Coverage / test artifacts
+.coverage
+.coverage.*
+htmlcov/
+
+# Runtime logs
+logs/
+*.log
+
+# Runtime state, fetched assets, generated outputs
+cache/
+state/
+output/
+tmp/
+
+# Local environment / secrets
+.env
+.env.*
+*.env
+*.local
+.python-version
+
+# Playwright / browser leftovers
+playwright-report/
+test-results/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Git merge / patch leftovers
+*.orig
+*.rej
+
+# Keep source-controlled project inputs/configs
+# (intentionally not ignored)
+# - top_50_programming_languages_with_official_docs.txt
+# - doc_path_overrides.json
+# - requirements.txt
+# - README.md
+# - doc_ingest/
+# - documentation_downloader.py

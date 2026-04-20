@@ -1,0 +1,574 @@
+{
+  "https://docs.python.org/3": {
+    "name": "Python",
+    "source_url": "https://docs.python.org/3/",
+    "start_urls": [
+      "https://docs.python.org/3/"
+    ],
+    "allowed_path_prefixes": [
+      "/3/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://tc39.es/ecma262": {
+    "name": "JavaScript",
+    "source_url": "https://tc39.es/ecma262/",
+    "start_urls": [
+      "https://tc39.es/ecma262/"
+    ],
+    "allowed_path_prefixes": [
+      "/ecma262/"
+    ],
+    "note": "static override – tc39 spec only"
+  },
+  "https://docs.oracle.com/en/java": {
+    "name": "Java",
+    "source_url": "https://docs.oracle.com/en/java/",
+    "start_urls": [
+      "https://docs.oracle.com/en/java/"
+    ],
+    "allowed_path_prefixes": [
+      "/en/java/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://learn.microsoft.com/en-us/dotnet/csharp": {
+    "name": "C#",
+    "source_url": "https://learn.microsoft.com/en-us/dotnet/csharp/",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/dotnet/csharp/"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/dotnet/csharp/"
+    ],
+    "note": "static override"
+  },
+  "https://www.iso.org/standard/83626.html": {
+    "name": "C++",
+    "source_url": "https://www.iso.org/standard/83626.html",
+    "start_urls": [
+      "https://www.iso.org/standard/83626.html"
+    ],
+    "allowed_path_prefixes": [
+      "/standard/83626"
+    ],
+    "note": "static override – ISO paywall page"
+  },
+  "https://www.typescriptlang.org/docs": {
+    "name": "TypeScript",
+    "source_url": "https://www.typescriptlang.org/docs/",
+    "start_urls": [
+      "https://www.typescriptlang.org/docs/"
+    ],
+    "allowed_path_prefixes": [
+      "/docs"
+    ],
+    "note": "auto-detected"
+  },
+  "https://www.php.net/docs.php": {
+    "name": "PHP",
+    "source_url": "https://www.php.net/docs.php",
+    "start_urls": [
+      "https://www.php.net/manual/en/"
+    ],
+    "allowed_path_prefixes": [
+      "/manual/en/"
+    ],
+    "note": "static override"
+  },
+  "https://www.iso.org/standard/82075.html": {
+    "name": "C",
+    "source_url": "https://www.iso.org/standard/82075.html",
+    "start_urls": [
+      "https://www.iso.org/standard/82075.html"
+    ],
+    "allowed_path_prefixes": [
+      "/standard/82075"
+    ],
+    "note": "static override – ISO paywall page"
+  },
+  "https://cran.r-project.org/manuals.html": {
+    "name": "R",
+    "source_url": "https://cran.r-project.org/manuals.html",
+    "start_urls": [
+      "https://cran.r-project.org/manuals.html"
+    ],
+    "allowed_path_prefixes": [
+      "/doc/"
+    ],
+    "note": "static override"
+  },
+  "https://docs.swift.org/swift-book/documentation/the-swift-programming-language": {
+    "name": "Swift",
+    "source_url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/",
+    "start_urls": [
+      "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/"
+    ],
+    "allowed_path_prefixes": [
+      "/swift-book/documentation/the-swift-programming-language/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://go.dev/doc": {
+    "name": "Go",
+    "source_url": "https://go.dev/doc/",
+    "start_urls": [
+      "https://go.dev/doc/"
+    ],
+    "allowed_path_prefixes": [
+      "/doc",
+      "/help",
+      "/learn",
+      "/ref/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://learn.microsoft.com/en-us/dotnet/visual-basic": {
+    "name": "Visual Basic",
+    "source_url": "https://learn.microsoft.com/en-us/dotnet/visual-basic/",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/dotnet/visual-basic/"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/dotnet/visual-basic/"
+    ],
+    "note": "static override"
+  },
+  "https://doc.rust-lang.org": {
+    "name": "Rust",
+    "source_url": "https://doc.rust-lang.org/",
+    "start_urls": [
+      "https://doc.rust-lang.org/book/",
+      "https://doc.rust-lang.org/std/"
+    ],
+    "allowed_path_prefixes": [
+      "/book/",
+      "/std/",
+      "/reference/",
+      "/nomicon/",
+      "/rustdoc/"
+    ],
+    "note": "static override"
+  },
+  "https://www.ruby-lang.org/en/documentation": {
+    "name": "Ruby",
+    "source_url": "https://www.ruby-lang.org/en/documentation/",
+    "start_urls": [
+      "https://www.ruby-lang.org/en/documentation/"
+    ],
+    "allowed_path_prefixes": [
+      "/en/documentation/"
+    ],
+    "note": "static override"
+  },
+  "https://kotlinlang.org/docs/home.html": {
+    "name": "Kotlin",
+    "source_url": "https://kotlinlang.org/docs/home.html",
+    "start_urls": [
+      "https://kotlinlang.org/docs/home.html"
+    ],
+    "allowed_path_prefixes": [
+      "/docs/",
+      "/api/"
+    ],
+    "note": "static override"
+  },
+  "https://www.iso.org/standard/76583.html": {
+    "name": "SQL",
+    "source_url": "https://www.iso.org/standard/76583.html",
+    "start_urls": [
+      "https://www.iso.org/standard/76583.html"
+    ],
+    "allowed_path_prefixes": [
+      "/standard/76583"
+    ],
+    "note": "static override – ISO paywall page"
+  },
+  "https://www.mathworks.com/help/matlab": {
+    "name": "Matlab",
+    "source_url": "https://www.mathworks.com/help/matlab/",
+    "start_urls": [
+      "https://www.mathworks.com/help/matlab/"
+    ],
+    "allowed_path_prefixes": [
+      "/help/matlab/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://www.gnu.org/software/bash/manual": {
+    "name": "Shell",
+    "source_url": "https://www.gnu.org/software/bash/manual/",
+    "start_urls": [
+      "https://www.gnu.org/software/bash/manual/"
+    ],
+    "allowed_path_prefixes": [
+      "/software/bash/manual/"
+    ],
+    "note": "static override"
+  },
+  "https://learn.microsoft.com/en-us/powershell": {
+    "name": "PowerShell",
+    "source_url": "https://learn.microsoft.com/en-us/powershell/",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/powershell/"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/powershell/"
+    ],
+    "note": "static override"
+  },
+  "https://dart.dev/language": {
+    "name": "Dart",
+    "source_url": "https://dart.dev/language",
+    "start_urls": [
+      "https://dart.dev/language"
+    ],
+    "allowed_path_prefixes": [
+      "/docs",
+      "/language",
+      "/learn",
+      "/libraries",
+      "/overview",
+      "/resources/",
+      "/tools/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://www.lua.org/docs.html": {
+    "name": "Lua",
+    "source_url": "https://www.lua.org/docs.html",
+    "start_urls": [
+      "https://www.lua.org/manual/5.4/"
+    ],
+    "allowed_path_prefixes": [
+      "/manual/"
+    ],
+    "note": "static override"
+  },
+  "https://ada-lang.io/docs": {
+    "name": "Ada",
+    "source_url": "https://ada-lang.io/docs/",
+    "start_urls": [
+      "https://ada-lang.io/docs/"
+    ],
+    "allowed_path_prefixes": [
+      "/docs/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ProgrammingWithObjectiveC/Introduction/Introduction.html": {
+    "name": "Objective-C",
+    "source_url": "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ProgrammingWithObjectiveC/Introduction/Introduction.html",
+    "start_urls": [
+      "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ProgrammingWithObjectiveC/Introduction/Introduction.html"
+    ],
+    "allowed_path_prefixes": [
+      "/library/archive/documentation/Cocoa/",
+      "/library/archive/documentation/General/"
+    ],
+    "note": "static override"
+  },
+  "https://docwiki.embarcadero.com/RADStudio/en/Delphi": {
+    "name": "Delphi/Object Pascal",
+    "source_url": "https://docwiki.embarcadero.com/RADStudio/en/Delphi",
+    "start_urls": [
+      "https://docwiki.embarcadero.com/RADStudio/en/Delphi"
+    ],
+    "allowed_path_prefixes": [
+      "/RADStudio/en/"
+    ],
+    "note": "static override"
+  },
+  "https://perldoc.perl.org": {
+    "name": "Perl",
+    "source_url": "https://perldoc.perl.org/",
+    "start_urls": [
+      "https://perldoc.perl.org/"
+    ],
+    "allowed_path_prefixes": [
+      "/"
+    ],
+    "note": "static override – entire perldoc.perl.org is documentation"
+  },
+  "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html": {
+    "name": "Assembly",
+    "source_url": "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html",
+    "start_urls": [
+      "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html"
+    ],
+    "allowed_path_prefixes": [
+      "/content/www/us/en/developer/articles/technical/"
+    ],
+    "note": "static override"
+  },
+  "https://docs.scala-lang.org": {
+    "name": "Scala",
+    "source_url": "https://docs.scala-lang.org/",
+    "start_urls": [
+      "https://docs.scala-lang.org/"
+    ],
+    "allowed_path_prefixes": [
+      "/api/all.html",
+      "/books.html",
+      "/getting-started/",
+      "/overviews/",
+      "/scala3/",
+      "/toolkit/",
+      "/tutorials/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://www.iso.org/standard/82170.html": {
+    "name": "Fortran",
+    "source_url": "https://www.iso.org/standard/82170.html",
+    "start_urls": [
+      "https://www.iso.org/standard/82170.html"
+    ],
+    "allowed_path_prefixes": [
+      "/standard/82170"
+    ],
+    "note": "static override – ISO paywall page"
+  },
+  "https://learn.microsoft.com/en-us/office/vba/api/overview": {
+    "name": "VBA",
+    "source_url": "https://learn.microsoft.com/en-us/office/vba/api/overview/",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/office/vba/api/overview/"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/office/vba/"
+    ],
+    "note": "static override"
+  },
+  "https://scratch.mit.edu/help": {
+    "name": "Scratch",
+    "source_url": "https://scratch.mit.edu/help/",
+    "start_urls": [
+      "https://scratch.mit.edu/help/"
+    ],
+    "allowed_path_prefixes": [
+      "/help/"
+    ],
+    "note": "static override"
+  },
+  "https://docs.julialang.org/en/v1": {
+    "name": "Julia",
+    "source_url": "https://docs.julialang.org/en/v1/",
+    "start_urls": [
+      "https://docs.julialang.org/en/v1/"
+    ],
+    "allowed_path_prefixes": [
+      "/en/v1/"
+    ],
+    "note": "static override"
+  },
+  "https://ziglang.org/documentation/master": {
+    "name": "Zig",
+    "source_url": "https://ziglang.org/documentation/master/",
+    "start_urls": [
+      "https://ziglang.org/documentation/master/"
+    ],
+    "allowed_path_prefixes": [
+      "/documentation/"
+    ],
+    "note": "auto-detected"
+  },
+  "https://www.lispworks.com/documentation/HyperSpec/Front": {
+    "name": "Lisp",
+    "source_url": "https://www.lispworks.com/documentation/HyperSpec/Front/",
+    "start_urls": [
+      "https://www.lispworks.com/documentation/HyperSpec/Front/"
+    ],
+    "allowed_path_prefixes": [
+      "/documentation/HyperSpec/"
+    ],
+    "note": "static override"
+  },
+  "https://www.iso.org/standard/21413.html": {
+    "name": "Prolog",
+    "source_url": "https://www.iso.org/standard/21413.html",
+    "start_urls": [
+      "https://www.iso.org/standard/21413.html"
+    ],
+    "allowed_path_prefixes": [
+      "/standard/21413"
+    ],
+    "note": "static override – ISO paywall page"
+  },
+  "https://www.iso.org/standard/74527.html": {
+    "name": "COBOL",
+    "source_url": "https://www.iso.org/standard/74527.html",
+    "start_urls": [
+      "https://www.iso.org/standard/74527.html"
+    ],
+    "allowed_path_prefixes": [
+      "/standard/74527"
+    ],
+    "note": "static override – ISO paywall page"
+  },
+  "https://docs.oracle.com/en/database/oracle/oracle-database": {
+    "name": "PL/SQL",
+    "source_url": "https://docs.oracle.com/en/database/oracle/oracle-database/",
+    "start_urls": [
+      "https://docs.oracle.com/en/database/oracle/oracle-database/"
+    ],
+    "allowed_path_prefixes": [
+      "/en/database/oracle/oracle-database/"
+    ],
+    "note": "static override"
+  },
+  "https://groovy-lang.org/documentation.html": {
+    "name": "Groovy",
+    "source_url": "https://groovy-lang.org/documentation.html",
+    "start_urls": [
+      "https://groovy-lang.org/documentation.html"
+    ],
+    "allowed_path_prefixes": [
+      "/documentation.html",
+      "/single-page-documentation.html",
+      "/apidocs/",
+      "/style-guide.html"
+    ],
+    "note": "static override"
+  },
+  "https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/index.htm": {
+    "name": "ABAP",
+    "source_url": "https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/index.htm",
+    "start_urls": [
+      "https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/index.htm"
+    ],
+    "allowed_path_prefixes": [
+      "/doc/abapdocu_latest_index_htm/"
+    ],
+    "note": "static override"
+  },
+  "https://documentation.sas.com": {
+    "name": "SAS",
+    "source_url": "https://documentation.sas.com/",
+    "start_urls": [
+      "https://documentation.sas.com/doc/en/pgmsascdc/"
+    ],
+    "allowed_path_prefixes": [
+      "/doc/en/"
+    ],
+    "note": "static override"
+  },
+  "https://www.haskell.org/documentation": {
+    "name": "Haskell",
+    "source_url": "https://www.haskell.org/documentation/",
+    "start_urls": [
+      "https://www.haskell.org/documentation/"
+    ],
+    "allowed_path_prefixes": [
+      "/documentation",
+      "/tutorial"
+    ],
+    "note": "static override"
+  },
+  "https://www.erlang.org/docs": {
+    "name": "Erlang",
+    "source_url": "https://www.erlang.org/docs",
+    "start_urls": [
+      "https://www.erlang.org/docs"
+    ],
+    "allowed_path_prefixes": [
+      "/doc"
+    ],
+    "note": "auto-detected"
+  },
+  "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript": {
+    "name": "GDScript",
+    "source_url": "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/",
+    "start_urls": [
+      "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/"
+    ],
+    "allowed_path_prefixes": [
+      "/en/stable/tutorials/scripting/gdscript/",
+      "/en/stable/getting_started/"
+    ],
+    "note": "static override – narrowed from full /en/ site"
+  },
+  "https://ocaml.org/docs": {
+    "name": "Caml",
+    "source_url": "https://ocaml.org/docs",
+    "start_urls": [
+      "https://ocaml.org/docs"
+    ],
+    "allowed_path_prefixes": [
+      "/api",
+      "/books",
+      "/cookbook",
+      "/docs",
+      "/manual",
+      "/packages"
+    ],
+    "note": "auto-detected"
+  },
+  "https://elixir-lang.org/docs.html": {
+    "name": "Elixir",
+    "source_url": "https://elixir-lang.org/docs.html",
+    "start_urls": [
+      "https://elixir-lang.org/docs.html"
+    ],
+    "allowed_path_prefixes": [
+      "/docs.html",
+      "/learning.html"
+    ],
+    "note": "static override"
+  },
+  "https://smlfamily.github.io/Basis": {
+    "name": "ML",
+    "source_url": "https://smlfamily.github.io/Basis/",
+    "start_urls": [
+      "https://smlfamily.github.io/Basis/"
+    ],
+    "allowed_path_prefixes": [
+      "/Basis/"
+    ],
+    "note": "static override"
+  },
+  "https://docs.micropython.org": {
+    "name": "MicroPython",
+    "source_url": "https://docs.micropython.org/",
+    "start_urls": [
+      "https://docs.micropython.org/en/latest/"
+    ],
+    "allowed_path_prefixes": [
+      "/en/latest/"
+    ],
+    "note": "static override"
+  },
+  "https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/xpp-language-reference": {
+    "name": "X++",
+    "source_url": "https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/xpp-language-reference",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/xpp-language-reference"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/"
+    ],
+    "note": "static override"
+  },
+  "https://learn.microsoft.com/en-us/dotnet/fsharp": {
+    "name": "F#",
+    "source_url": "https://learn.microsoft.com/en-us/dotnet/fsharp/",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/dotnet/fsharp/"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/dotnet/fsharp/"
+    ],
+    "note": "static override"
+  },
+  "https://learn.microsoft.com/en-us/sql/t-sql/language-reference": {
+    "name": "Transact-SQL",
+    "source_url": "https://learn.microsoft.com/en-us/sql/t-sql/language-reference",
+    "start_urls": [
+      "https://learn.microsoft.com/en-us/sql/t-sql/language-reference"
+    ],
+    "allowed_path_prefixes": [
+      "/en-us/sql/t-sql/"
+    ],
+    "note": "static override"
+  }
+}

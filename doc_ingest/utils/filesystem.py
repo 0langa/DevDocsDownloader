@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+try:
+    import orjson
+except ImportError:  # pragma: no cover
+    orjson = None
+
+import json
+
+
+def read_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    if orjson is not None:
+        return orjson.loads(path.read_bytes())
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if orjson is not None:
+        payload_bytes = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+    else:
+        payload_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    temp_path = path.with_name(f"{path.name}.tmp")
+    with temp_path.open("wb") as handle:
+        handle.write(payload_bytes)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path)
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload_bytes = text.encode("utf-8")
+    temp_path = path.with_name(f"{path.name}.tmp")
+    with temp_path.open("wb") as handle:
+        handle.write(payload_bytes)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path)
+
+
+def write_bytes(path: Path, payload_bytes: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.tmp")
+    with temp_path.open("wb") as handle:
+        handle.write(payload_bytes)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path)
