@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import httpx
@@ -25,7 +26,8 @@ class HttpFetcher:
             ),
             headers={"User-Agent": self.config.crawl.user_agent},
         )
-        self._host_locks: dict[str, asyncio.Lock] = {}
+        self._host_state_locks: dict[str, asyncio.Lock] = {}
+        self._host_next_allowed_at: dict[str, float] = {}
         self.adaptive_controller = None
 
     def set_adaptive_controller(self, controller) -> None:
@@ -53,40 +55,53 @@ class HttpFetcher:
             )
 
         host = httpx.URL(normalized).host or "default"
-        lock = self._host_locks.setdefault(host, asyncio.Lock())
+        await self._wait_for_host_slot(host)
 
-        async with lock:
-            delay_seconds = self.config.crawl.per_host_delay_seconds
-            if self.adaptive_controller is not None:
-                delay_seconds = await self.adaptive_controller.get_per_host_delay()
-            await asyncio.sleep(delay_seconds)
-            async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(self.config.crawl.retries),
-                wait=wait_exponential(multiplier=self.config.crawl.backoff_base_seconds, min=1, max=12),
-                retry=retry_if_exception_type((httpx.HTTPError, TimeoutError)),
-                reraise=True,
-            ):
-                with attempt:
-                    response = await self._client.get(normalized)
-                    result = FetchResult(
-                        url=normalized,
-                        final_url=str(response.url),
-                        content_type=response.headers.get("content-type", "application/octet-stream"),
-                        status_code=response.status_code,
-                        method="http",
-                        content=response.content,
-                        history_status_codes=[item.status_code for item in response.history],
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.config.crawl.retries),
+            wait=wait_exponential(multiplier=self.config.crawl.backoff_base_seconds, min=1, max=12),
+            retry=retry_if_exception_type((httpx.HTTPError, TimeoutError)),
+            reraise=True,
+        ):
+            with attempt:
+                response = await self._client.get(normalized)
+                result = FetchResult(
+                    url=normalized,
+                    final_url=str(response.url),
+                    content_type=response.headers.get("content-type", "application/octet-stream"),
+                    status_code=response.status_code,
+                    method="http",
+                    content=response.content,
+                    history_status_codes=[item.status_code for item in response.history],
+                )
+                if response.is_success:
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    write_bytes(cache_path, response.content)
+                    write_json(
+                        meta_path,
+                        {
+                            "final_url": result.final_url,
+                            "content_type": result.content_type,
+                            "status_code": result.status_code,
+                            "history_status_codes": result.history_status_codes,
+                        },
                     )
-                    if response.is_success:
-                        cache_dir.mkdir(parents=True, exist_ok=True)
-                        write_bytes(cache_path, response.content)
-                        write_json(
-                            meta_path,
-                            {
-                                "final_url": result.final_url,
-                                "content_type": result.content_type,
-                                "status_code": result.status_code,
-                                "history_status_codes": result.history_status_codes,
-                            },
-                        )
-                    return result
+                return result
+
+    async def _wait_for_host_slot(self, host: str) -> None:
+        delay_seconds = self.config.crawl.per_host_delay_seconds
+        if self.adaptive_controller is not None:
+            delay_seconds = await self.adaptive_controller.get_per_host_delay()
+
+        lock = self._host_state_locks.setdefault(host, asyncio.Lock())
+        sleep_for = 0.0
+        async with lock:
+            now = time.monotonic()
+            next_allowed = self._host_next_allowed_at.get(host, now)
+            if next_allowed > now:
+                sleep_for = next_allowed - now
+                now = next_allowed
+            self._host_next_allowed_at[host] = now + max(0.0, delay_seconds)
+
+        if sleep_for > 0:
+            await asyncio.sleep(sleep_for)
