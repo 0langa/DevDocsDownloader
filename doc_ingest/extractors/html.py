@@ -101,6 +101,7 @@ def extract_html(fetch_result: FetchResult) -> ExtractedDocument:
             links.append(resolve_url(fetch_result.final_url, href))
 
     headings = [node.get_text(" ", strip=True) for node in main.select("h1, h2, h3, h4")]
+    breadcrumbs = [node.get_text(" ", strip=True) for node in soup.select(".breadcrumb a, .breadcrumbs a, nav[aria-label='breadcrumb'] a") if node.get_text(" ", strip=True)]
     return ExtractedDocument(
         url=fetch_result.url,
         final_url=fetch_result.final_url,
@@ -112,4 +113,5 @@ def extract_html(fetch_result: FetchResult) -> ExtractedDocument:
         word_count=len(markdown.split()),
         content_hash=stable_hash(markdown),
         source_order_hint=title.lower(),
+        breadcrumbs=breadcrumbs,
     )

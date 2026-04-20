@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import asyncio
+import tempfile
+import unittest
+from pathlib import Path
+
+from doc_ingest.config import load_config
+from doc_ingest.models import FetchResult
+from doc_ingest.pipeline import DocumentationPipeline
+
+
+class _FakeHttpFetcher:
+    def __init__(self, pages: dict[str, bytes]) -> None:
+        self.pages = pages
+
+    def set_adaptive_controller(self, _controller) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def fetch(self, url: str, _cache_dir: Path) -> FetchResult:
+        content = self.pages[url]
+        return FetchResult(
+            url=url,
+            final_url=url,
+            content_type="text/html",
+            status_code=200,
+            method="http",
+            content=content,
+        )
+
+
+class _FakeBrowserFetcher:
+    async def close(self) -> None:
+        return None
+
+    async def fetch(self, _url: str, _cache_dir: Path) -> FetchResult:
+        raise AssertionError("Browser fetch should not be used in this test")
+
+
+class PipelineResumeTests(unittest.TestCase):
+    def test_pipeline_writes_resumable_state_and_output(self) -> None:
+        async def run_case() -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "top_50_programming_languages_with_official_docs.txt").write_text(
+                    "Python - https://docs.python.org/3/\n",
+                    encoding="utf-8",
+                )
+                config = load_config(root)
+                config.crawl.browser_enabled = False
+                config.crawl.max_concurrency = 1
+                config.crawl.max_discovered_urls_per_language = 8
+                pages = {
+                    "https://docs.python.org/3": b"""
+                    <html><head><title>Python</title></head><body><main>
+                    <h1>Python</h1><p>Intro text for python docs with enough useful prose to survive quality checks and normalization without being marked as noise.</p>
+                    <a href=\"https://docs.python.org/3/tutorial\">Tutorial</a>
+                    </main></body></html>
+                    """,
+                    "https://docs.python.org/3/tutorial": b"""
+                    <html><head><title>Tutorial</title></head><body><main>
+                    <h1>Tutorial</h1><p>Tutorial body with enough useful text to be kept and processed by the resumable pipeline during the test run.</p>
+                    </main></body></html>
+                    """,
+                }
+                pipeline = DocumentationPipeline(config)
+                pipeline.http_fetcher = _FakeHttpFetcher(pages)
+                pipeline.browser_fetcher = _FakeBrowserFetcher()
+                try:
+                    summary = await pipeline.run(language_name="python")
+                finally:
+                    await pipeline.close()
+                report = summary.reports[0]
+                self.assertEqual(report.pages_processed, 2)
+                self.assertTrue(report.output_path and report.output_path.exists())
+                state_path = config.paths.state_dir / "python.json"
+                self.assertTrue(state_path.exists())
+                state_text = state_path.read_text(encoding="utf-8")
+                self.assertIn('"compiled": true', state_text.lower())
+
+        asyncio.run(run_case())
+
+
+if __name__ == "__main__":
+    unittest.main()

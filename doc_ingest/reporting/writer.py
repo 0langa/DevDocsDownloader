@@ -19,12 +19,24 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
                 f"## {report.language}",
                 f"- Source: {report.source_url}",
                 f"- Strategy: {report.strategy}",
+                f"- Adapter: {report.adapter}",
                 f"- Discovered: {report.pages_discovered}",
+                f"- Queued: {report.pages_queued}",
+                f"- Fetched: {report.pages_fetched}",
                 f"- Processed: {report.pages_processed}",
+                f"- Skipped: {report.pages_skipped}",
+                f"- Failed: {report.pages_failed}",
+                f"- Deduplicated: {report.pages_deduplicated}",
                 f"- Output: {report.output_path or 'N/A'}",
                 f"- Validation score: {report.validation.score if report.validation else 'N/A'}",
             ]
         )
+        if report.coverage_notes:
+            lines.append("- Coverage Notes:")
+            lines.extend(f"  - {note}" for note in report.coverage_notes)
+        if report.extractor_choices:
+            lines.append("- Extractor Choices:")
+            lines.extend(f"  - {name}: {count}" for name, count in sorted(report.extractor_choices.items()))
         if report.warnings:
             lines.append("- Warnings:")
             lines.extend(f"  - {warning}" for warning in report.warnings)
