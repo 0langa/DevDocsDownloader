@@ -3,22 +3,28 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qsl, urlparse
 
 from .adaptive import AdaptiveRuntimeController
+from .adapters import select_adapter
 from .config import AppConfig
+from .discovery import DiscoveryHelper, RobotsCache
 from .extractors.dispatcher import detect_asset_type, extract_document
 from .fetchers.browser import BrowserFetcher
 from .fetchers.http import HttpFetcher
 from .mergers.compiler import compile_language_markdown
-from .models import CrawlMode, ExtractedDocument, LanguageEntry, LanguageRunReport, PlannedSource, RunSummary, UrlRecord
+from .models import CrawlMode, CrawlState, ExtractedDocument, LanguageEntry, LanguageRunReport, PageState, PlannedSource, RunSummary, UrlRecord
 from .normalizers.markdown import normalize_document
 from .parser import parse_language_file
 from .planner.planner import CrawlPlanner
 from .progress import CrawlProgressTracker
 from .reporting.writer import write_reports
+from .state import CrawlStateStore
 from .utils.filesystem import read_json, write_json, write_text
-from .utils.urls import normalize_url
+from .utils.text import stable_hash
+from .utils.urls import canonicalize_url_for_content, normalize_url
 from .validators.markdown_validator import validate_markdown
 
 
@@ -26,10 +32,11 @@ LOGGER = logging.getLogger("doc_ingest")
 
 
 class DiscoveryDocument:
-    def __init__(self, *, title: str, final_url: str, links: list[str]) -> None:
+    def __init__(self, *, title: str, final_url: str, links: list[str], breadcrumbs: list[str]) -> None:
         self.title = title
         self.final_url = final_url
         self.links = links
+        self.breadcrumbs = breadcrumbs
 
 
 class DocumentationPipeline:
@@ -39,6 +46,7 @@ class DocumentationPipeline:
         self.browser_fetcher = BrowserFetcher(config)
         self.planner = CrawlPlanner(config)
         self.adaptive_controller = AdaptiveRuntimeController(config)
+        self.robots = RobotsCache(config)
         self.http_fetcher.set_adaptive_controller(self.adaptive_controller)
 
     async def close(self) -> None:
@@ -81,7 +89,6 @@ class DocumentationPipeline:
 
         reports = await asyncio.gather(*[_run_entry(entry) for entry in entries])
         summary.reports.extend(reports)
-
         write_reports(summary, self.config.paths.reports_dir)
         return summary
 
@@ -97,9 +104,18 @@ class DocumentationPipeline:
         plan = self.planner.plan(language)
         if crawl_mode is not None:
             plan.crawl_mode = crawl_mode
-        report = LanguageRunReport(language=language.name, slug=language.slug, source_url=str(language.source_url), strategy=plan.strategy)
-        state_path = self.config.paths.state_dir / f"{language.slug}.json"
+        adapter, _override = select_adapter(language, self.config)
+        report = LanguageRunReport(
+            language=language.name,
+            slug=language.slug,
+            source_url=str(language.source_url),
+            strategy=plan.strategy,
+            adapter=adapter.name,
+        )
         output_path = self.config.paths.markdown_dir / f"{language.slug}.md"
+        state_path = self.config.paths.state_dir / f"{language.slug}.json"
+        diagnostics_path = self.config.paths.diagnostics_dir / f"{language.slug}.tree.txt"
+        state_store = CrawlStateStore(state_path, language=language.name, slug=language.slug, source_url=str(language.source_url))
 
         if validate_only:
             if output_path.exists():
@@ -110,212 +126,214 @@ class DocumentationPipeline:
             return report
 
         if dry_run:
+            report.coverage_notes.extend(plan.notes)
             report.warnings.extend(plan.notes)
             return report
 
         if force_refresh and state_path.exists():
             state_path.unlink()
 
-        state = read_json(state_path, {"processed": {}, "failed": {}})
-        discovered_cache_path = self.config.paths.crawl_cache_dir / f"{language.slug}.json"
-        discovered_tree_path = self.config.paths.crawl_cache_dir / f"{language.slug}.tree.txt"
-        discovered_cache = read_json(discovered_cache_path, {"urls": {}, "roots": []})
-        skip_manifest = read_json(self.config.paths.cache_dir / "skip_manifest.json", {"languages": {}})
-        language_skip_data = skip_manifest.get("languages", {}).get(language.slug, {})
-        processed_docs: dict[str, ExtractedDocument] = {}
-        processed_hashes: set[str] = set()
-        processed_state_urls = {normalize_url(url) for url in state.get("processed", {}).keys()}
-        failed_state_urls = {normalize_url(url) for url in state.get("failed", {}).keys()}
-        precomputed_skip_urls = {normalize_url(url) for url in language_skip_data.get("skip", [])}
-        processed_state_urls.update(precomputed_skip_urls)
+        state = state_store.load()
+        state.plan = plan.model_dump(mode="json")
+        documents: dict[str, ExtractedDocument] = self._load_cached_documents(language.slug, state)
+        processed_hashes = {document.content_hash for document in documents.values()}
+        helper = DiscoveryHelper(self.config, adapter, plan)
+        queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=max(0, self.config.crawl.max_queue_size_per_language))
         queued_urls: set[str] = set()
-        discovered_urls: dict[str, dict[str, str | int | None]] = discovered_cache.get("urls", {})
-        queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=self.config.crawl.max_queue_size_per_language)
-        state_lock = asyncio.Lock()
-        dirty_state = False
-        dirty_discovery = False
-        last_persist_at = time.monotonic()
-        persist_every_seconds = 10.0
-        persist_every_changes = 50
+        dirty = False
         pending_changes = 0
+        last_persist_at = time.monotonic()
 
         async def update_queue_progress() -> None:
             if progress_tracker is not None:
                 await progress_tracker.on_queue_size_changed(language.slug, queue.qsize())
 
-        async def enqueue(record: UrlRecord) -> None:
+        async def persist_state(force: bool = False) -> None:
+            nonlocal dirty, pending_changes, last_persist_at
+            if not dirty and not force:
+                return
             if (
-                record.normalized_url in queued_urls
-                or record.normalized_url in processed_state_urls
-                or record.normalized_url in failed_state_urls
+                not force
+                and pending_changes < self.config.crawl.persist_every_changes
+                and (time.monotonic() - last_persist_at) < self.config.crawl.persist_every_seconds
             ):
                 return
-            max_discovered_urls = self.config.crawl.max_discovered_urls_per_language
-            if len(discovered_urls) >= max_discovered_urls:
-                return
-            queued_urls.add(record.normalized_url)
-            discovered_urls.setdefault(
-                record.normalized_url,
-                {
-                    "parent": record.parent_url,
-                    "depth": record.depth,
-                    "source": record.discovered_from,
-                },
-            )
-            await queue.put(record)
-            await update_queue_progress()
-
-        async def persist_caches(force: bool = False) -> None:
-            nonlocal dirty_state, dirty_discovery, last_persist_at, pending_changes
-            if not force and not (dirty_state or dirty_discovery):
-                return
-            if not force and pending_changes < persist_every_changes and (time.monotonic() - last_persist_at) < persist_every_seconds:
-                return
-            state_snap = {k: dict(v) if isinstance(v, dict) else v for k, v in state.items()}
-            disc_snap = dict(discovered_urls)
-            dirty_state = False
-            dirty_discovery = False
+            tree = self._build_discovered_tree_text(state)
+            await asyncio.to_thread(state_store.save, state)
+            await asyncio.to_thread(write_text, diagnostics_path, tree)
+            dirty = False
             pending_changes = 0
             last_persist_at = time.monotonic()
-            roots = sorted(url for url, meta in disc_snap.items() if not meta.get("parent"))
-            tree = self._build_discovered_tree_text(disc_snap, roots)
-            await asyncio.to_thread(write_json, state_path, state_snap)
-            await asyncio.to_thread(write_json, discovered_cache_path, {"roots": roots, "urls": disc_snap})
-            await asyncio.to_thread(write_text, discovered_tree_path, tree)
+
+        async def enqueue(record: UrlRecord) -> None:
+            normalized = canonicalize_url_for_content(record.normalized_url)
+            if normalized in queued_urls:
+                return
+            page = state.pages.get(normalized)
+            if page is not None and page.status in {"processed", "failed", "skipped"}:
+                return
+            if len(state.pages) >= self.config.crawl.max_discovered_urls_per_language:
+                return
+            if not helper.should_visit(normalized):
+                return
+            if not await self.robots.allowed(normalized):
+                return
+            queued_urls.add(normalized)
+            state.pages.setdefault(
+                normalized,
+                PageState(
+                    normalized_url=normalized,
+                    discovered_url=record.url,
+                    parent_url=record.parent_url,
+                    depth=record.depth,
+                    discovered_from=record.discovered_from,
+                    status="pending",
+                ),
+            )
+            await queue.put(record.model_copy(update={"normalized_url": normalized}))
+            await update_queue_progress()
+
+        async def process_record(record: UrlRecord) -> None:
+            nonlocal dirty, pending_changes
+            normalized = canonicalize_url_for_content(record.normalized_url)
+            page = state.pages.setdefault(
+                normalized,
+                PageState(
+                    normalized_url=normalized,
+                    discovered_url=record.url,
+                    parent_url=record.parent_url,
+                    depth=record.depth,
+                    discovered_from=record.discovered_from,
+                    status="pending",
+                ),
+            )
+            if page.status in {"processed", "failed", "skipped"}:
+                return
+            page.attempts += 1
+            report.pages_queued = max(report.pages_queued, len(state.pages))
+            try:
+                discovery_doc, extracted_doc = await self._fetch_and_process(record, plan, progress_tracker)
+            except Exception as exc:
+                LOGGER.exception("Failed fetching %s", record.url)
+                page.status = "failed"
+                page.last_error = str(exc)
+                report.pages_failed += 1
+                report.failures.append(f"{record.url}: {exc}")
+                dirty = True
+                pending_changes += 1
+                return
+
+            report.pages_fetched += 1
+            page.title = discovery_doc.title
+
+            for link in self._discover_links(discovery_doc, helper, plan, record.depth):
+                await enqueue(link)
+
+            if extracted_doc is None or extracted_doc.word_count < 10:
+                page.status = "skipped"
+                page.warning_codes.append("low-content")
+                report.pages_skipped += 1
+                dirty = True
+                pending_changes += 1
+                return
+
+            extracted_doc = normalize_document(extracted_doc)
+            page.asset_type = extracted_doc.asset_type
+            page.extractor = extracted_doc.metadata.get("extractor")
+            page.extraction_score = extracted_doc.extraction.score if extracted_doc.extraction else None
+            page.extraction_notes = extracted_doc.extraction.won_because if extracted_doc.extraction else []
+            page.source_order_hint = extracted_doc.source_order_hint
+            page.metadata = {"breadcrumbs": extracted_doc.breadcrumbs, "final_url": extracted_doc.final_url}
+
+            if extracted_doc.content_hash in processed_hashes:
+                page.status = "skipped"
+                page.duplicate_of = next((url for url, document in documents.items() if document.content_hash == extracted_doc.content_hash), None)
+                page.warning_codes.append("duplicate-content")
+                report.pages_deduplicated += 1
+                report.pages_skipped += 1
+            else:
+                page.status = "processed"
+                page.content_hash = extracted_doc.content_hash
+                documents[normalized] = extracted_doc
+                processed_hashes.add(extracted_doc.content_hash)
+                report.pages_processed = len(documents)
+                report.assets_processed += 1 if extracted_doc.asset_type != "html" else 0
+                report.extractor_choices[page.extractor or "unknown"] = report.extractor_choices.get(page.extractor or "unknown", 0) + 1
+                await asyncio.to_thread(self._persist_document_cache, language.slug, normalized, extracted_doc)
+
+            dirty = True
+            pending_changes += 1
 
         async def discovery_worker() -> None:
-            nonlocal report
             while True:
-                if len(processed_docs) >= self.config.crawl.max_pages_per_language:
-                    return
                 record = await queue.get()
                 await update_queue_progress()
                 if record is None:
                     queue.task_done()
                     return
-
                 try:
-                    if record.normalized_url in state.get("processed", {}) or record.normalized_url in state.get("failed", {}):
-                        continue
-
-                    try:
-                        document, raw_doc = await self._fetch_and_process(record, plan, progress_tracker)
-                    except Exception as exc:
-                        LOGGER.exception("Failed fetching %s", record.url)
-                        async with state_lock:
-                            state.setdefault("failed", {})[record.normalized_url] = str(exc)
-                            discovered_urls.pop(record.normalized_url, None)
-                            report.failures.append(f"{record.url}: {exc}")
-                            dirty_state = True
-                            dirty_discovery = True
-                            pending_changes += 1
-                        await persist_caches()
-                        continue
-
-                    new_links = self._discover_links(document, plan, record.depth)
-                    if progress_tracker is not None:
-                        await progress_tracker.on_links_found(language.slug, len(document.links))
-
-                    extracted_doc = None
-                    if raw_doc is not None:
-                        try:
-                            extracted_doc = normalize_document(raw_doc)
-                        except Exception:
-                            LOGGER.debug("Normalization failed for %s", record.normalized_url, exc_info=True)
-
-                    async with state_lock:
-                        added_links = 0
-                        for link in new_links:
-                            max_discovered_urls = self.config.crawl.max_discovered_urls_per_language
-                            if len(discovered_urls) >= max_discovered_urls:
-                                break
-                            if link.normalized_url not in discovered_urls:
-                                discovered_urls[link.normalized_url] = {
-                                    "parent": link.parent_url,
-                                    "depth": link.depth,
-                                    "source": link.discovered_from,
-                                }
-                                report.pages_discovered = max(report.pages_discovered, len(discovered_urls))
-                                added_links += 1
-                                await enqueue(link)
-
-                        if progress_tracker is not None and added_links:
-                            await progress_tracker.on_links_added(language.slug, added_links)
-                            await update_queue_progress()
-
-                        if extracted_doc is not None and extracted_doc.content_hash not in processed_hashes:
-                            processed_docs[record.normalized_url] = extracted_doc
-                            processed_hashes.add(extracted_doc.content_hash)
-                            report.pages_processed += 1
-                            if extracted_doc.asset_type != "html":
-                                report.assets_processed += 1
-
-                        state.setdefault("processed", {})[record.normalized_url] = {
-                            "title": document.title,
-                            "hash": extracted_doc.content_hash if extracted_doc else "discovered-only",
-                            "asset_type": extracted_doc.asset_type if extracted_doc else "html",
-                        }
-                        dirty_state = True
-                        dirty_discovery = True
-                        pending_changes += 1 + added_links
-                    await persist_caches()
+                    await process_record(record)
+                    await persist_state()
                 finally:
                     queue.task_done()
                     await update_queue_progress()
 
-        worker_count = max(1, self.config.crawl.max_concurrency)
-        workers = [asyncio.create_task(discovery_worker()) for _ in range(worker_count)]
-
-        for url in plan.start_urls:
-            await enqueue(UrlRecord(url=url, normalized_url=normalize_url(url), depth=0))
-
-        for url, meta in discovered_cache.get("urls", {}).items():
-            normalized = normalize_url(url)
-            if normalized not in processed_state_urls and normalized not in failed_state_urls:
-                await enqueue(
-                    UrlRecord(
-                        url=normalized,
-                        normalized_url=normalized,
-                        depth=int(meta.get("depth", 1) or 1),
-                        parent_url=meta.get("parent"),
-                        discovered_from="cache",
+        initial_urls = [helper.make_record(url, depth=0, discovered_from="seed") for url in plan.start_urls]
+        sitemap_urls = await helper.load_sitemap_urls()
+        initial_urls.extend(helper.make_record(url, depth=1, discovered_from="sitemap") for url in sitemap_urls)
+        for page in state.pages.values():
+            if page.status in {"pending", "discovered"}:
+                initial_urls.append(
+                    helper.make_record(
+                        page.normalized_url,
+                        depth=page.depth,
+                        parent_url=page.parent_url,
+                        discovered_from=page.discovered_from or "resume",
                     )
                 )
+        for record in initial_urls:
+            await enqueue(record)
 
-        report.pages_discovered = len(discovered_urls)
+        report.pages_discovered = len(state.pages)
+        workers = [asyncio.create_task(discovery_worker()) for _ in range(max(1, self.config.crawl.max_concurrency))]
 
         async def _tune_loop() -> None:
             while True:
                 await asyncio.sleep(5.0)
-                await self.adaptive_controller.tune()
+                queue_fill_ratio = queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language or max(1, queue.qsize()))
+                await self.adaptive_controller.tune(queue_fill_ratio=queue_fill_ratio, limit_hit=len(state.pages) >= self.config.crawl.max_discovered_urls_per_language)
 
-        _tune_task = asyncio.create_task(_tune_loop())
+        tune_task = asyncio.create_task(_tune_loop())
         try:
             await queue.join()
         finally:
-            _tune_task.cancel()
+            tune_task.cancel()
             try:
-                await _tune_task
+                await tune_task
             except asyncio.CancelledError:
                 pass
 
         for _ in workers:
             await queue.put(None)
-        _worker_results = await asyncio.gather(*workers, return_exceptions=True)
-        for _exc in _worker_results:
-            if isinstance(_exc, BaseException) and not isinstance(_exc, asyncio.CancelledError):
-                LOGGER.warning("Discovery worker exited with error: %s", _exc)
+        await asyncio.gather(*workers, return_exceptions=True)
 
-        await persist_caches(force=True)
+        state.compiled = False
+        await persist_state(force=True)
 
-        if not processed_docs:
+        if not documents:
             report.failures.append("No documents were processed.")
             report.suspected_incompleteness = True
             if progress_tracker is not None:
                 await progress_tracker.on_language_complete(language.slug, report)
             return report
 
-        report.output_path = compile_language_markdown(language, list(processed_docs.values()), output_path)
+        report.pages_discovered = len(state.pages)
+        report.coverage_notes.extend(self._coverage_notes(state, report, plan))
+        report.output_path = compile_language_markdown(language, list(documents.values()), output_path, state=state, coverage_notes=report.coverage_notes)
+        state.compiled = True
+        state.compiled_at = datetime.now(timezone.utc)
+        state.output_path = str(report.output_path)
+        await persist_state(force=True)
         report.validation = validate_markdown(language.name, output_path, self.config)
         report.suspected_incompleteness = bool(report.validation and report.validation.score < 0.7)
         if progress_tracker is not None:
@@ -328,7 +346,6 @@ class DocumentationPipeline:
         plan: PlannedSource,
         progress_tracker: CrawlProgressTracker | None,
     ) -> tuple[DiscoveryDocument, ExtractedDocument | None]:
-        """Fetch once, extract once — returns both the discovery view (links) and the full document."""
         cache_dir = self.config.paths.cache_dir / plan.language.slug
         try:
             fetch_result = await self.http_fetcher.fetch(record.normalized_url, cache_dir)
@@ -338,12 +355,7 @@ class DocumentationPipeline:
             raise
 
         if progress_tracker is not None:
-            await progress_tracker.on_fetch_complete(
-                plan.language.slug,
-                fetch_result.status_code,
-                fetch_result.history_status_codes,
-                fetch_result.method,
-            )
+            await progress_tracker.on_fetch_complete(plan.language.slug, fetch_result.status_code, fetch_result.history_status_codes, fetch_result.method)
 
         if fetch_result.status_code >= 400:
             raise RuntimeError(f"HTTP {fetch_result.status_code}")
@@ -353,55 +365,43 @@ class DocumentationPipeline:
             fetch_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
             asset_type = detect_asset_type(fetch_result)
 
-        document = await asyncio.to_thread(extract_document, fetch_result)
-
-        if asset_type == "html" and document.word_count < 40 and self.config.crawl.browser_enabled and fetch_result.method != "browser":
+        document = await asyncio.to_thread(extract_document, fetch_result, preferred_extractors=plan.preferred_extractors)
+        if asset_type == "html" and document.word_count < 50 and self.config.crawl.browser_enabled and fetch_result.method != "browser":
             try:
                 browser_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
-                browser_document = await asyncio.to_thread(extract_document, browser_result)
-                if browser_document.word_count > document.word_count:
+                browser_document = await asyncio.to_thread(extract_document, browser_result, preferred_extractors=plan.preferred_extractors)
+                if browser_document.extraction and document.extraction and browser_document.extraction.score > document.extraction.score:
                     document = browser_document
             except Exception:
                 LOGGER.debug("Browser fallback failed for %s", record.normalized_url, exc_info=True)
 
-        disc = DiscoveryDocument(
+        discovery = DiscoveryDocument(
             title=document.title,
             final_url=document.final_url,
             links=document.links if asset_type == "html" else [],
+            breadcrumbs=document.breadcrumbs,
         )
-        return disc, document
+        return discovery, document
 
-    def _discover_links(self, document: DiscoveryDocument | ExtractedDocument, plan: PlannedSource, depth: int) -> list[UrlRecord]:
+    def _discover_links(self, document: DiscoveryDocument, helper: DiscoveryHelper, plan: PlannedSource, depth: int) -> list[UrlRecord]:
         if depth >= plan.max_depth:
             return []
-        discovered: list[UrlRecord] = []
-
+        discovered: dict[str, UrlRecord] = {}
         for link in document.links:
-            normalized = normalize_url(link)
-            parsed = urlparse(normalized)
-            if parsed.netloc not in plan.allowed_domains:
-                continue
-            if plan.allowed_path_prefixes and not any(
-                parsed.path.startswith(p) for p in plan.allowed_path_prefixes
-            ):
+            normalized = normalize_url(link, drop_query_params=self.config.crawl.drop_query_params, keep_query_params=self.config.crawl.keep_query_params)
+            if not helper.should_visit(normalized):
                 continue
             if not self._is_preferred_locale_url(normalized):
                 continue
-            if not self._is_relevant_doc_link(normalized):
-                continue
             if plan.crawl_mode == "important" and not self._is_important_link(normalized):
                 continue
-            discovered.append(UrlRecord(url=link, normalized_url=normalized, depth=depth + 1, parent_url=document.final_url))
-
-        return list({item.normalized_url: item for item in discovered}.values())
-
-    def _is_relevant_doc_link(self, url: str) -> bool:
-        lowered = url.lower()
-        negative_tokens = ["blog", "news", "press", "careers", "pricing", "contact", "privacy", "terms", "login", "signup"]
-        if any(token in lowered for token in negative_tokens):
-            return False
-        positive_tokens = ["doc", "reference", "manual", "guide", "tutorial", "library", "spec", "language", "stdlib", "book", "learn", "chapter"]
-        return any(token in lowered for token in positive_tokens) or lowered.endswith((".html", "/", ".md", ".pdf", ".txt", ".docx"))
+            discovered[normalized] = helper.make_record(
+                normalized,
+                depth=depth + 1,
+                parent_url=document.final_url,
+                discovered_from="internal-link",
+            )
+        return list(discovered.values())
 
     def _is_preferred_locale_url(self, url: str) -> bool:
         parsed = urlparse(url)
@@ -436,33 +436,71 @@ class DocumentationPipeline:
         keywords = [keyword.lower() for keyword in self.config.planner.important_path_keywords]
         return any(keyword in lowered for keyword in keywords)
 
-    def _build_discovered_tree_text(self, discovered_urls: dict[str, dict[str, str | int | None]], roots: list[str]) -> str:
+    def _persist_document_cache(self, slug: str, normalized_url: str, document: ExtractedDocument) -> None:
+        cache_dir = self.config.paths.cache_dir / slug / "normalized"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / f"{stable_hash(normalized_url)}.json"
+        write_json(cache_path, document.model_dump(mode="json"))
+
+    def _load_cached_documents(self, slug: str, state: CrawlState) -> dict[str, ExtractedDocument]:
+        cache_dir = self.config.paths.cache_dir / slug / "normalized"
+        documents: dict[str, ExtractedDocument] = {}
+        if not cache_dir.exists():
+            return documents
+        for normalized_url, page in state.pages.items():
+            if page.status != "processed":
+                continue
+            cache_path = cache_dir / f"{stable_hash(normalized_url)}.json"
+            if not cache_path.exists():
+                continue
+            try:
+                documents[normalized_url] = ExtractedDocument.model_validate(read_json(cache_path, {}))
+            except Exception:
+                LOGGER.debug("Failed to load cached document %s", cache_path, exc_info=True)
+        return documents
+
+    def _coverage_notes(self, state: CrawlState, report: LanguageRunReport, plan: PlannedSource) -> list[str]:
+        notes = list(plan.notes)
+        failed = [page for page in state.pages.values() if page.status == "failed"]
+        low_score = [page for page in state.pages.values() if (page.extraction_score or 0.0) < 0.35 and page.status == "processed"]
+        if failed:
+            notes.append(f"{len(failed)} pages failed and may require adapter tuning or another run.")
+        if low_score:
+            notes.append(f"{len(low_score)} processed pages scored poorly during extraction.")
+        if report.pages_processed < max(1, len(state.pages) // 4):
+            notes.append("Coverage looks low relative to discovered URLs; inspect diagnostics tree and state file.")
+        return notes
+
+    def _build_discovered_tree_text(self, state: CrawlState) -> str:
         children: dict[str, list[str]] = {}
-        for url, meta in discovered_urls.items():
-            parent = meta.get("parent")
-            if parent:
-                children.setdefault(str(parent), []).append(url)
-
-        for node_children in children.values():
-            node_children.sort()
-
-        lines = ["# Discovered Documentation Link Tree", ""]
+        roots: list[str] = []
+        for url, page in state.pages.items():
+            if page.parent_url:
+                children.setdefault(page.parent_url, []).append(url)
+            else:
+                roots.append(url)
+        for urls in children.values():
+            urls.sort()
+        roots.sort()
+        lines = [
+            "# Discovered Documentation Link Tree",
+            "",
+            f"- Language: {state.language}",
+            f"- Source: {state.source_url}",
+            "",
+        ]
 
         def walk(root_url: str) -> None:
             stack = [(root_url, "")]
             while stack:
                 url, prefix = stack.pop()
-                meta = discovered_urls.get(url, {})
-                lines.append(f"{prefix}- {url} (depth={meta.get('depth', '?')})")
+                page = state.pages.get(url)
+                status = page.status if page is not None else "unknown"
+                lines.append(f"{prefix}- {url} [{status}]")
                 for child in reversed(children.get(url, [])):
                     stack.append((child, prefix + "  "))
 
         for root in roots:
             walk(root)
-        orphaned = sorted(url for url in discovered_urls if url not in roots and all(url not in child_list for child_list in children.values()))
-        if orphaned:
-            lines.extend(["", "# Orphaned / Cached-only URLs", ""])
-            for url in orphaned:
-                lines.append(f"- {url}")
         lines.append("")
         return "\n".join(lines)

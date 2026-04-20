@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from ..models import ExtractedDocument, FetchResult
 from .html import extract_html
 from .html_docling import extract_html_docling
 from .pdf import extract_pdf
+from .scoring import score_extraction
 from .textual import extract_docx, extract_markdown, extract_text
 
 
@@ -23,14 +26,74 @@ def detect_asset_type(fetch_result: FetchResult) -> str:
     return "unknown"
 
 
-def extract_document(fetch_result: FetchResult) -> ExtractedDocument:
+def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterable[str] | None = None) -> ExtractedDocument:
     asset_type = detect_asset_type(fetch_result)
     if asset_type == "html":
-        return extract_html_docling(fetch_result)
+        return _extract_html_with_scoring(fetch_result, preferred_extractors=preferred_extractors or [])
     if asset_type == "markdown":
-        return extract_markdown(fetch_result)
+        document = extract_markdown(fetch_result)
+        document.extraction = score_extraction(document, "markdown_passthrough")
+        document.metadata["extractor"] = document.extraction.extractor
+        return document
     if asset_type == "pdf":
-        return extract_pdf(fetch_result)
+        document = extract_pdf(fetch_result)
+        document.extraction = score_extraction(document, "pdf_text")
+        document.metadata["extractor"] = document.extraction.extractor
+        return document
     if asset_type == "docx":
-        return extract_docx(fetch_result)
-    return extract_text(fetch_result)
+        document = extract_docx(fetch_result)
+        document.extraction = score_extraction(document, "docx_mammoth")
+        document.metadata["extractor"] = document.extraction.extractor
+        return document
+    document = extract_text(fetch_result)
+    document.extraction = score_extraction(document, "text_plain")
+    document.metadata["extractor"] = document.extraction.extractor
+    return document
+
+
+def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractors: Iterable[str]) -> ExtractedDocument:
+    candidates: list[tuple[str, ExtractedDocument]] = []
+    extractor_map = {
+        "html_docling": extract_html_docling,
+        "html_readability": extract_html,
+        "html_bs4": extract_html,
+    }
+    preferred = [name for name in preferred_extractors if name in extractor_map]
+    order = preferred + [name for name in ["html_docling", "html_readability"] if name not in preferred]
+
+    for extractor_name in order:
+        extractor = extractor_map[extractor_name]
+        try:
+            document = extractor(fetch_result)
+        except Exception:
+            continue
+        decision = score_extraction(document, extractor_name)
+        candidates.append((extractor_name, document.model_copy(update={"extraction": decision})))
+
+    if not candidates:
+        document = extract_html(fetch_result)
+        decision = score_extraction(document, "html_readability")
+        document.extraction = decision
+        document.metadata["extractor"] = decision.extractor
+        return document
+
+    winner_name, winner = max(
+        candidates,
+        key=lambda item: (
+            item[1].extraction.score if item[1].extraction else 0.0,
+            item[1].word_count,
+            len(item[1].headings),
+        ),
+    )
+    winner.extraction.candidates = [
+        {
+            "extractor": name,
+            "score": doc.extraction.score if doc.extraction else 0.0,
+            "word_count": doc.word_count,
+            "heading_count": len(doc.headings),
+        }
+        for name, doc in candidates
+    ]
+    winner.metadata["extractor"] = winner_name
+    return winner
+

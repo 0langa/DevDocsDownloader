@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
 
 AssetType = Literal["html", "markdown", "pdf", "docx", "text", "binary", "unknown"]
 FetchMethod = Literal["http", "browser", "cache"]
-StatusType = Literal["pending", "processed", "failed", "skipped"]
+StatusType = Literal["pending", "discovered", "processed", "failed", "skipped"]
 CrawlMode = Literal["important", "full"]
 
 
@@ -27,6 +27,13 @@ class PlannedSource(BaseModel):
     notes: list[str] = Field(default_factory=list)
     allowed_domains: list[str] = Field(default_factory=list)
     allowed_path_prefixes: list[str] = Field(default_factory=list)
+    ignored_path_prefixes: list[str] = Field(default_factory=list)
+    ignored_url_patterns: list[str] = Field(default_factory=list)
+    preferred_extractors: list[str] = Field(default_factory=list)
+    content_selectors: list[str] = Field(default_factory=list)
+    sitemap_urls: list[str] = Field(default_factory=list)
+    include_changelog: bool = False
+    honor_robots: bool = True
     max_depth: int = 8
 
 
@@ -37,6 +44,29 @@ class UrlRecord(BaseModel):
     parent_url: str | None = None
     priority: int = 0
     discovered_from: str | None = None
+
+
+class ExtractionMetrics(BaseModel):
+    text_length: int = 0
+    word_count: int = 0
+    heading_count: int = 0
+    code_block_count: int = 0
+    table_count: int = 0
+    link_line_ratio: float = 0.0
+    repeated_line_ratio: float = 0.0
+    boilerplate_ratio: float = 0.0
+    malformed_ratio: float = 0.0
+    blank_line_ratio: float = 0.0
+    score: float = 0.0
+    signals: list[str] = Field(default_factory=list)
+
+
+class ExtractionDecision(BaseModel):
+    extractor: str
+    score: float
+    won_because: list[str] = Field(default_factory=list)
+    metrics: ExtractionMetrics = Field(default_factory=ExtractionMetrics)
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FetchResult(BaseModel):
@@ -61,6 +91,9 @@ class ExtractedDocument(BaseModel):
     word_count: int = 0
     content_hash: str
     source_order_hint: str = ""
+    breadcrumbs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    extraction: ExtractionDecision | None = None
 
 
 class PageProcessResult(BaseModel):
@@ -83,15 +116,60 @@ class ValidationResult(BaseModel):
     issues: list[ValidationIssue] = Field(default_factory=list)
 
 
+class PageState(BaseModel):
+    normalized_url: str
+    discovered_url: str
+    parent_url: str | None = None
+    depth: int = 0
+    discovered_from: str | None = None
+    title: str | None = None
+    status: StatusType = "discovered"
+    asset_type: AssetType | None = None
+    attempts: int = 0
+    last_error: str | None = None
+    extractor: str | None = None
+    extraction_score: float | None = None
+    extraction_notes: list[str] = Field(default_factory=list)
+    content_hash: str | None = None
+    duplicate_of: str | None = None
+    warning_codes: list[str] = Field(default_factory=list)
+    source_order_hint: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CrawlState(BaseModel):
+    language: str
+    slug: str
+    source_url: str
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    plan: dict[str, Any] = Field(default_factory=dict)
+    pages: dict[str, PageState] = Field(default_factory=dict)
+    compiled: bool = False
+    compiled_at: datetime | None = None
+    output_path: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    failures: list[str] = Field(default_factory=list)
+
+
 class LanguageRunReport(BaseModel):
     language: str
     slug: str
     source_url: str
     strategy: str
     output_path: Path | None = None
+    adapter: str = "generic"
     pages_discovered: int = 0
+    pages_queued: int = 0
+    pages_fetched: int = 0
     pages_processed: int = 0
+    pages_skipped: int = 0
+    pages_failed: int = 0
+    pages_deduplicated: int = 0
     assets_processed: int = 0
+    extractor_choices: dict[str, int] = Field(default_factory=dict)
+    warnings_by_code: dict[str, int] = Field(default_factory=dict)
+    coverage_notes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     suspected_incompleteness: bool = False

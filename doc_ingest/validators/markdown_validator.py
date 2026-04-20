@@ -28,6 +28,17 @@ def validate_markdown(language: str, output_path: Path, config: AppConfig) -> Va
     if duplicate_lines:
         issues.append(ValidationIssue(level="warning", code="duplication", message="High repeated-line duplication detected."))
 
+    required_sections = ["## Source Metadata", "## Crawl Summary"]
+    for section in required_sections:
+        if section not in text:
+            issues.append(ValidationIssue(level="warning", code="missing_section", message=f"Missing expected section: {section}"))
+
+    if re.search(r"(?m)^#{1,6}[^\s#]", text):
+        issues.append(ValidationIssue(level="warning", code="heading_spacing", message="One or more headings are missing a space after the hash marks."))
+
+    if re.search(r"(?m)^-{3,}\s*$", text) is None:
+        issues.append(ValidationIssue(level="info", code="separator_absent", message="No section separators found in merged output."))
+
     bad_artifacts = ["\ufffd", "Â", "cookie", "accept all"]
     artifact_hits = [artifact for artifact in bad_artifacts if artifact in text]
     if artifact_hits:

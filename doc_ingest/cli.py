@@ -79,6 +79,7 @@ def _execute_run(
     language: str | None,
     mode: CrawlMode,
     force_refresh: bool,
+    resume: bool,
     dry_run: bool,
     validate_only: bool,
     verbosity: str,
@@ -87,8 +88,10 @@ def _execute_run(
     max_pages: int | None,
     max_discovered: int | None,
     per_host_delay: float | None,
+    input_file: Path | None,
+    output_dir: Path | None,
 ) -> None:
-    config = load_config()
+    config = load_config(input_file=input_file, output_dir=output_dir)
     config.planner.crawl_mode = mode
     if language_concurrency is not None:
         config.crawl.language_concurrency = max(1, language_concurrency)
@@ -109,7 +112,7 @@ def _execute_run(
             with progress_tracker.live():
                 summary = await pipeline.run(
                     language_name=language,
-                    force_refresh=force_refresh,
+                    force_refresh=force_refresh and not resume,
                     dry_run=dry_run,
                     validate_only=validate_only,
                     language_concurrency=language_concurrency,
@@ -192,6 +195,7 @@ def _wizard() -> None:
         language=language,
         mode=mode,
         force_refresh=force_refresh,
+        resume=True,
         dry_run=False,
         validate_only=False,
         verbosity="info",
@@ -200,6 +204,8 @@ def _wizard() -> None:
         max_pages=max_pages,
         max_discovered=None,
         per_host_delay=per_host_delay,
+        input_file=None,
+        output_dir=None,
     )
 
 
@@ -208,6 +214,7 @@ def run(
     language: str | None = typer.Option(None, "--language", "-l", help="Single language by name or slug."),
     mode: CrawlMode = typer.Option("full", "--mode", help="'important' for core docs only, 'full' for broad coverage."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Ignore saved state for selected languages."),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from saved crawl state when available."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show planning only, do not crawl."),
     validate_only: bool = typer.Option(False, "--validate-only", help="Validate existing outputs without crawling."),
     silent: bool = typer.Option(False, "--silent", help="Only show errors in terminal output."),
@@ -219,6 +226,8 @@ def run(
     max_pages: int | None = typer.Option(None, "--max-pages", help="Hard cap on processed pages per language."),
     max_discovered: int | None = typer.Option(None, "--max-discovered", help="Hard cap on discovered URLs per language."),
     per_host_delay: float | None = typer.Option(None, "--per-host-delay", help="Delay between requests to the same host (seconds)."),
+    input_file: Path | None = typer.Option(None, "--input-file", help="Alternate language input file."),
+    output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
 ) -> None:
     """Run the documentation ingestion pipeline.
 
@@ -247,6 +256,7 @@ def run(
         language=language,
         mode=mode,
         force_refresh=force_refresh,
+        resume=resume,
         dry_run=dry_run,
         validate_only=validate_only,
         verbosity=verbosity,
@@ -255,6 +265,8 @@ def run(
         max_pages=max_pages,
         max_discovered=max_discovered,
         per_host_delay=per_host_delay,
+        input_file=input_file,
+        output_dir=output_dir,
     )
 
 

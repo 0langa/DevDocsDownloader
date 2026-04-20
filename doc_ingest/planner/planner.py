@@ -1,26 +1,10 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from urllib.parse import parse_qsl, urlparse
 
+from ..adapters import apply_adapter
 from ..config import AppConfig
 from ..models import LanguageEntry, PlannedSource
-
-# Loaded once at import time.  Keys are normalised source URLs (no trailing slash).
-_OVERRIDES_PATH = Path(__file__).parent.parent.parent / "doc_path_overrides.json"
-_PATH_OVERRIDES: dict[str, dict] = {}
-if _OVERRIDES_PATH.exists():
-    try:
-        _PATH_OVERRIDES = json.loads(_OVERRIDES_PATH.read_text(encoding="utf-8"))
-    except Exception as _e:
-        import logging as _logging
-        _logging.getLogger("doc_ingest").warning("Failed to load path overrides from %s: %s", _OVERRIDES_PATH, _e)
-
-
-def _norm_url(url: str) -> str:
-    return url.rstrip("/")
-
 
 KNOWN_PDF_HINTS = (".pdf", "/pdf", "manual", "spec", "standard")
 
@@ -58,29 +42,18 @@ class CrawlPlanner:
         if locale:
             notes.append(f"Preferred locale locked to '{locale}'.")
 
-        # Apply path-prefix overrides derived from doc_path_overrides.json
-        override_entry = _PATH_OVERRIDES.get(_norm_url(source), {})
-        override_start_urls: list[str] = override_entry.get("start_urls") or [source]
-        override_path_prefixes: list[str] = override_entry.get("allowed_path_prefixes") or []
-        if override_entry:
-            # Expand allowed_domains to cover any extra hosts in override_start_urls
-            for s_url in override_start_urls:
-                extra = urlparse(s_url).netloc
-                if extra:
-                    allowed_domains.append(extra)
-            if override_entry.get("note"):
-                notes.append(f"Path override: {override_entry['note']}")
-
-        return PlannedSource(
+        plan = PlannedSource(
             language=language,
             strategy=strategy,
-            crawl_mode=self.config.planner.crawl_mode, 
-            start_urls=override_start_urls,
+            crawl_mode=self.config.planner.crawl_mode,
+            start_urls=[source],
             notes=notes,
             allowed_domains=sorted(set(allowed_domains)),
-            allowed_path_prefixes=override_path_prefixes,
+            allowed_path_prefixes=[],
             max_depth=self.config.planner.max_depth_default,
         )
+        plan, _adapter = apply_adapter(language, self.config, plan)
+        return plan
 
     def _detect_locale_hint(self, source: str) -> str | None:
         parsed = urlparse(source)
