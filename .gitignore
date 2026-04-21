@@ -32,7 +32,6 @@ logs/
 # Runtime state, fetched assets, generated outputs
 cache/
 state/
-output/
 tmp/
 
 # Local environment / secrets
