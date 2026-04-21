@@ -28,15 +28,16 @@ def validate_markdown(language: str, output_path: Path, config: AppConfig, *, st
     if duplicate_lines:
         issues.append(ValidationIssue(level="warning", code="duplication", message="High repeated-line duplication detected."))
 
-    required_sections = ["## Metadata", "## Table of Contents", "## Documentation", "## Appendix"]
+    required_sections = {"Metadata", "Table of Contents", "Documentation", "Appendix"}
+    heading_level_two = {line[3:].strip() for line in headings if line.startswith("## ")}
     for section in required_sections:
-        if section not in text:
+        if section not in heading_level_two:
             issues.append(ValidationIssue(level="warning", code="missing_section", message=f"Missing expected section: {section}"))
 
     if re.search(r"(?m)^#{1,6}[^\s#]", text):
         issues.append(ValidationIssue(level="warning", code="heading_spacing", message="One or more headings are missing a space after the hash marks."))
 
-    if re.search(r"(?m)^###\s+", text) is None or re.search(r"(?m)^####\s+", text) is None:
+    if re.search(r"(?m)^###\s+", text) is None and re.search(r"(?m)^####\s+", text) is None:
         issues.append(ValidationIssue(level="warning", code="weak_structure", message="Compiled output is missing reconstructed section hierarchy."))
 
     bad_artifacts = ["\ufffd", "Â", "cookie", "accept all"]

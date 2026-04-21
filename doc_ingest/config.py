@@ -61,7 +61,8 @@ class CrawlConfig(BaseModel):
     max_pages_per_language: int = 2000
     max_assets_per_language: int = 300
     max_discovered_urls_per_language: int = 5000
-    max_queue_size_per_language: int = 0
+    max_queue_size_per_language: int = 512
+    smart_queue_soft_cap: int = 512
     user_agent: str = "DocIngestBot/1.0 (+local documentation ingestion)"
     browser_enabled: bool = True
     browser_timeout_seconds: float = 45.0
