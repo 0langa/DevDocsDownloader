@@ -103,6 +103,17 @@ class PageProcessResult(BaseModel):
     document: ExtractedDocument | None = None
 
 
+class QualityMetrics(BaseModel):
+    structure_quality: float = 0.0
+    duplication_ratio: float = 0.0
+    noise_ratio: float = 0.0
+    completeness: float = 0.0
+    extraction_confidence: float = 0.0
+    section_count: int = 0
+    subsection_count: int = 0
+    low_quality_pages: int = 0
+
+
 class ValidationIssue(BaseModel):
     level: Literal["info", "warning", "error"]
     code: str
@@ -113,6 +124,8 @@ class ValidationResult(BaseModel):
     language: str
     output_path: Path
     score: float
+    quality_score: float = 0.0
+    metrics: QualityMetrics = Field(default_factory=QualityMetrics)
     issues: list[ValidationIssue] = Field(default_factory=list)
 
 

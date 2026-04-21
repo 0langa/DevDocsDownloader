@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from doc_ingest.adapters import PythonDocsAdapter
+from doc_ingest.adapters import PythonDocsAdapter, TypeScriptAdapter
 from doc_ingest.config import load_config
 from doc_ingest.mergers.compiler import compile_language_markdown
 from doc_ingest.models import CrawlState, ExtractedDocument, LanguageEntry, PageState
@@ -48,20 +48,26 @@ class CompilerAndValidatorTests(unittest.TestCase):
             compile_language_markdown(language, docs, output, state=state, adapter=PythonDocsAdapter())
             text = output.read_text(encoding="utf-8")
             self.assertLess(text.index("### Tutorial"), text.index("### Library"))
+            self.assertIn("## Metadata", text)
+            self.assertIn("## Documentation", text)
+            self.assertIn("## Appendix", text)
 
     def test_validator_accepts_expected_output_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "top_50_programming_languages_with_official_docs.txt").write_text("", encoding="utf-8")
+            source_documents = root / "source-documents"
+            source_documents.mkdir(parents=True, exist_ok=True)
+            (source_documents / "renamed-link-source.md").write_text("", encoding="utf-8")
             config = load_config(root)
             output = root / "output" / "markdown" / "python.md"
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(
-                "# Python Documentation\n\n## Source Metadata\n\n- Language: Python\n\n## Crawl Summary\n\n- Processed pages: 1\n\n## Table of Contents\n\n- [Intro](#intro)\n\n## Guide\n\n### Intro\n\nText\n",
+                "# Python Documentation\n\n## Metadata\n\n- Source: https://docs.python.org/3/\n- Crawl Date: 2026-04-21T00:00:00+00:00\n- Pages Processed: 1\n- Pages Skipped: 0\n- Adapter Used: python-docs\n\n## Table of Contents\n\n- [Guide](#guide)\n  - [Intro](#guide-intro)\n\n## Documentation\n\n### Guide\n\n#### Intro\n\nText\n\n## Appendix\n\n### Skipped Pages\n\n- None\n\n### Low-Quality Pages\n\n- None\n\n### Notes\n\n- None\n",
                 encoding="utf-8",
             )
             result = validate_markdown("Python", output, config)
             self.assertGreater(result.score, 0.5)
+            self.assertGreater(result.metrics.structure_quality, 0.7)
 
     def test_compiler_deduplicates_near_duplicate_pages_and_builds_appendix(self) -> None:
         language = LanguageEntry(name="Python", source_url="https://docs.python.org/3/", slug="python")
@@ -101,8 +107,31 @@ class CompilerAndValidatorTests(unittest.TestCase):
             compile_language_markdown(language, docs, output, state=state, adapter=PythonDocsAdapter())
             text = output.read_text(encoding="utf-8")
             self.assertEqual(text.count("Shared body text."), 1)
-            self.assertIn("## Appendix: Failed Pages", text)
-            self.assertIn("## Tutorial", text)
+            self.assertIn("## Appendix", text)
+            self.assertIn("### Low-Quality Pages", text)
+            self.assertIn("### Tutorial", text)
+
+    def test_compiler_ignores_adapter_noise_headings(self) -> None:
+        language = LanguageEntry(name="TypeScript", source_url="https://www.typescriptlang.org/docs/", slug="typescript")
+        docs = [
+            ExtractedDocument(
+                url="https://www.typescriptlang.org/docs/handbook/intro.html",
+                final_url="https://www.typescriptlang.org/docs/handbook/intro.html",
+                title="TypeScript Handbook",
+                markdown="## On this page\n\n- Link one\n\n## Handbook\n\nUseful handbook text.",
+                asset_type="html",
+                content_hash="ts-1",
+                word_count=8,
+                breadcrumbs=["Handbook"],
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "typescript.md"
+            compile_language_markdown(language, docs, output, adapter=TypeScriptAdapter())
+            text = output.read_text(encoding="utf-8")
+            self.assertNotIn("On this page", text)
+            self.assertIn("Useful handbook text.", text)
 
 
 if __name__ == "__main__":

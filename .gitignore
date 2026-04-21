@@ -61,9 +61,10 @@ Thumbs.db
 
 # Keep source-controlled project inputs/configs
 # (intentionally not ignored)
-# - top_50_programming_languages_with_official_docs.txt
-# - doc_path_overrides.json
-# - requirements.txt
+# - source-documents/renamed-link-source.md
+# - source-documents/doc_path_overrides.json
+# - source-documents/requirements.txt
 # - README.md
 # - doc_ingest/
-# - documentation_downloader.py
+# - DevDocsDownloader.py
+# - scripts/setup.py

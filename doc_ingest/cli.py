@@ -21,10 +21,10 @@ app = typer.Typer(
         "Run [bold]without arguments[/bold] to launch the interactive setup wizard.\n"
         "Use the [bold]run[/bold] sub-command for scripted or automated invocations.\n\n"
         "Examples:\n"
-        "  python documentation_downloader.py\n"
-        "  python documentation_downloader.py run --language python --mode important\n"
-        "  python documentation_downloader.py validate --language rust\n"
-        "  python documentation_downloader.py init"
+        "  python DevDocsDownloader.py\n"
+        "  python DevDocsDownloader.py run --language python --mode important\n"
+        "  python DevDocsDownloader.py validate --language rust\n"
+        "  python DevDocsDownloader.py init"
     ),
     invoke_without_command=True,
     no_args_is_help=False,
@@ -112,7 +112,7 @@ def _execute_run(
             with progress_tracker.live():
                 summary = await pipeline.run(
                     language_name=language,
-                    force_refresh=force_refresh and not resume,
+                    force_refresh=force_refresh,
                     dry_run=dry_run,
                     validate_only=validate_only,
                     language_concurrency=language_concurrency,
@@ -125,12 +125,14 @@ def _execute_run(
         table = Table(title="Documentation Ingestion Summary")
         table.add_column("Language")
         table.add_column("Processed")
+        table.add_column("Quality")
         table.add_column("Output")
         table.add_column("Score")
         for report in summary.reports:
             table.add_row(
                 report.language,
                 str(report.pages_processed),
+                str(report.validation.quality_score if report.validation else "N/A"),
                 str(report.output_path or "N/A"),
                 str(report.validation.score if report.validation else "N/A"),
             )
@@ -237,9 +239,9 @@ def run(
     - Logs:             logs/run.log
 
     Examples:
-      python documentation_downloader.py run --language python
-      python documentation_downloader.py run --mode important --language-concurrency 3 --page-concurrency 8
-      python documentation_downloader.py run --mode full --page-concurrency 16 --max-pages 1200 --per-host-delay 0.05
+            python DevDocsDownloader.py run --language python
+            python DevDocsDownloader.py run --mode important --language-concurrency 3 --page-concurrency 8
+            python DevDocsDownloader.py run --mode full --page-concurrency 16 --max-pages 1200 --per-host-delay 0.05
     """
     selected_levels = sum(1 for flag in [silent, info, debug, verbose] if flag)
     if selected_levels > 1:

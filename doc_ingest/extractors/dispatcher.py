@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from ..adapters import SiteAdapter
 from ..models import ExtractedDocument, FetchResult
 from .html import extract_html
 from .html_docling import extract_html_docling
@@ -26,10 +27,10 @@ def detect_asset_type(fetch_result: FetchResult) -> str:
     return "unknown"
 
 
-def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterable[str] | None = None) -> ExtractedDocument:
+def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterable[str] | None = None, adapter: SiteAdapter | None = None) -> ExtractedDocument:
     asset_type = detect_asset_type(fetch_result)
     if asset_type == "html":
-        return _extract_html_with_scoring(fetch_result, preferred_extractors=preferred_extractors or [])
+        return _extract_html_with_scoring(fetch_result, preferred_extractors=preferred_extractors or [], adapter=adapter)
     if asset_type == "markdown":
         document = extract_markdown(fetch_result)
         document.extraction = score_extraction(document, "markdown_passthrough")
@@ -51,12 +52,12 @@ def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterabl
     return document
 
 
-def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractors: Iterable[str]) -> ExtractedDocument:
+def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractors: Iterable[str], adapter: SiteAdapter | None) -> ExtractedDocument:
     candidates: list[tuple[str, ExtractedDocument]] = []
     extractor_map = {
-        "html_docling": extract_html_docling,
-        "html_readability": extract_html,
-        "html_bs4": extract_html,
+        "html_docling": lambda result: extract_html_docling(result, adapter=adapter),
+        "html_readability": lambda result: extract_html(result, adapter=adapter),
+        "html_bs4": lambda result: extract_html(result, adapter=adapter),
     }
     preferred = [name for name in preferred_extractors if name in extractor_map]
     order = preferred + [name for name in ["html_docling", "html_readability"] if name not in preferred]
@@ -71,7 +72,7 @@ def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractor
         candidates.append((extractor_name, document.model_copy(update={"extraction": decision})))
 
     if not candidates:
-        document = extract_html(fetch_result)
+        document = extract_html(fetch_result, adapter=adapter)
         decision = score_extraction(document, "html_readability")
         document.extraction = decision
         document.metadata["extractor"] = decision.extractor

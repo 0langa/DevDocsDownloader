@@ -8,12 +8,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-VENV_DIR = ROOT / ".venv"
+REPO_ROOT = ROOT.parent
+VENV_DIR = REPO_ROOT / ".venv"
 
 
 def run_command(command: list[str], cwd: Path | None = None) -> None:
     print(f"[setup] Running: {' '.join(command)}")
-    subprocess.run(command, cwd=cwd or ROOT, check=True)
+    subprocess.run(command, cwd=cwd or REPO_ROOT, check=True)
 
 
 def get_venv_python() -> Path:
@@ -27,12 +28,14 @@ def ensure_directories() -> None:
         "output",
         "output/markdown",
         "output/reports",
+        "output/diagnostics",
         "cache",
+        "cache/discovered_links",
         "logs",
         "state",
         "tmp",
     ]:
-        path = ROOT / relative
+        path = REPO_ROOT / relative
         path.mkdir(parents=True, exist_ok=True)
         print(f"[setup] Ensured directory: {path}")
 
@@ -49,7 +52,7 @@ def ensure_venv() -> Path:
 
 def install_requirements(python_path: Path) -> None:
     run_command([str(python_path), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
-    run_command([str(python_path), "-m", "pip", "install", "-r", "requirements.txt"])
+    run_command([str(python_path), "-m", "pip", "install", "-r", str(REPO_ROOT / "source-documents" / "requirements.txt")])
 
 
 def install_playwright_browser(python_path: Path) -> None:
@@ -57,14 +60,14 @@ def install_playwright_browser(python_path: Path) -> None:
 
 
 def main() -> None:
-    os.chdir(ROOT)
+    os.chdir(REPO_ROOT)
     ensure_directories()
     python_path = ensure_venv()
     install_requirements(python_path)
     install_playwright_browser(python_path)
     print("[setup] Setup complete.")
     print(f"[setup] Use interpreter: {python_path}")
-    print(f"[setup] Example run: {python_path} documentation_downloader.py run --mode important")
+    print(f"[setup] Example run: {python_path} DevDocsDownloader.py run --mode important")
     print("[setup] Fresh clone ready: requirements installed, directories created, Playwright Chromium installed.")
 
 

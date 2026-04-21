@@ -20,7 +20,9 @@ class UrlAndDiscoveryTests(unittest.TestCase):
     def test_discovery_helper_filters_irrelevant_urls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "top_50_programming_languages_with_official_docs.txt").write_text("", encoding="utf-8")
+            source_documents = root / "source-documents"
+            source_documents.mkdir(parents=True, exist_ok=True)
+            (source_documents / "renamed-link-source.md").write_text("", encoding="utf-8")
             config = load_config(root)
             language = LanguageEntry(name="Python", source_url="https://docs.python.org/3/", slug="python")
             plan = PlannedSource(

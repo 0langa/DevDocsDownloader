@@ -23,7 +23,7 @@ class PathsConfig(BaseModel):
         output_dir = root / "output"
         return cls(
             root=root,
-            input_file=root / "top_50_programming_languages_with_official_docs.txt",
+            input_file=root / "source-documents" / "renamed-link-source.md",
             output_dir=output_dir,
             markdown_dir=output_dir / "markdown",
             cache_dir=root / "cache",

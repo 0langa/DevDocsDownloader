@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
+from ..adapters import SiteAdapter
 from ..models import ExtractedDocument, FetchResult
 from ..utils.text import normalize_whitespace, stable_hash
 from ..utils.urls import resolve_url
@@ -69,31 +70,31 @@ def _get_converter() -> _DoclingConverter:
 # Selectors for navigation chrome we want to ignore during *link* extraction.
 # (Docling handles content stripping on its own side.)
 # ---------------------------------------------------------------------------
-_LINK_STRIP_SELECTORS = [
+DEFAULT_LINK_STRIP_SELECTORS = [
     "nav", "header", "footer", "aside",
     ".sidebar", ".toc", ".breadcrumbs", ".breadcrumb",
     ".cookie", ".consent", ".advertisement", ".feedback",
 ]
 
 
-def extract_html_docling(fetch_result: FetchResult) -> ExtractedDocument:
+def extract_html_docling(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> ExtractedDocument:
     """Convert an HTML page to Markdown via Docling and return an ExtractedDocument.
 
     Falls back transparently to the plain BS4+markdownify extractor if Docling
     raises an unexpected error, so a single broken page never kills a crawl.
     """
     try:
-        return _docling_convert(fetch_result)
+        return _docling_convert(fetch_result, adapter=adapter)
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning(
             "Docling conversion failed for %s (%s); falling back to BS4 extractor",
             fetch_result.final_url, exc,
         )
         from .html import extract_html  # local import to avoid circular deps at module load
-        return extract_html(fetch_result)
+        return extract_html(fetch_result, adapter=adapter)
 
 
-def _docling_convert(fetch_result: FetchResult) -> ExtractedDocument:
+def _docling_convert(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> ExtractedDocument:
     html_bytes = fetch_result.content
     html_str = html_bytes.decode("utf-8", errors="ignore")
 
@@ -116,12 +117,12 @@ def _docling_convert(fetch_result: FetchResult) -> ExtractedDocument:
 
     # Strip navigation chrome before collecting links so we only follow
     # content-area anchors, not sidebar / header / footer noise.
-    for sel in _LINK_STRIP_SELECTORS:
+    for sel in (adapter.discovery_strip_candidates() if adapter is not None else DEFAULT_LINK_STRIP_SELECTORS):
         for el in soup.select(sel):
             el.decompose()
 
     main = None
-    for sel in ["main", "article", "[role='main']", ".main-content", ".content", "body"]:
+    for sel in (adapter.content_root_candidates() if adapter is not None else ["main", "article", "[role='main']", ".main-content", ".content", "body"]):
         main = soup.select_one(sel)
         if main:
             break
@@ -135,7 +136,12 @@ def _docling_convert(fetch_result: FetchResult) -> ExtractedDocument:
             links.append(resolve_url(fetch_result.final_url, href))
 
     headings = [node.get_text(" ", strip=True) for node in main.select("h1, h2, h3, h4")]
-    breadcrumbs = [node.get_text(" ", strip=True) for node in soup.select(".breadcrumb a, .breadcrumbs a, nav[aria-label='breadcrumb'] a") if node.get_text(" ", strip=True)]
+    breadcrumbs = []
+    for selector in (adapter.breadcrumb_candidates() if adapter is not None else [".breadcrumb a", ".breadcrumbs a", "nav[aria-label='breadcrumb'] a"]):
+        for node in soup.select(selector):
+            label = node.get_text(" ", strip=True)
+            if label and label not in breadcrumbs:
+                breadcrumbs.append(label)
 
     return ExtractedDocument(
         url=fetch_result.url,
