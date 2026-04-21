@@ -78,7 +78,11 @@ DEFAULT_LINK_STRIP_SELECTORS = [
 ]
 
 
-_docling_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="docling")
+import os as _os
+_docling_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(4, _os.cpu_count() or 4),
+    thread_name_prefix="docling",
+)
 
 
 def extract_html_docling(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None, timeout_seconds: float = 25.0) -> ExtractedDocument:
@@ -104,30 +108,18 @@ def extract_html_docling(fetch_result: FetchResult, *, adapter: SiteAdapter | No
     return extract_html(fetch_result, adapter=adapter)
 
 
+_NOISE_SELECTORS = ["script", "style", "noscript", "template", "[aria-hidden='true']"]
+
+
 def _docling_convert(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> ExtractedDocument:
-    html_bytes = fetch_result.content
-    html_str = html_bytes.decode("utf-8", errors="ignore")
+    html_str = fetch_result.content.decode("utf-8", errors="ignore")
 
-    # ---- Docling conversion ------------------------------------------------
-    from docling.datamodel.document import DocumentStream  # noqa: PLC0415
-
-    converter = _get_converter()
-    stream = DocumentStream(
-        name=f"{fetch_result.final_url}.html",
-        stream=io.BytesIO(html_bytes),
-    )
-    result = converter.convert(stream)
-    markdown: str = result.document.export_to_markdown()
-    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
-    markdown = normalize_whitespace(markdown)
-
-    # ---- Metadata via BS4 (title + links — Docling doesn't expose hrefs) ---
+    # ---- Single BS4 parse — used for both metadata and Docling input prep ---
     soup = BeautifulSoup(html_str, "lxml")
     title = soup.title.get_text(strip=True) if soup.title else fetch_result.final_url
 
-    # Strip navigation chrome before collecting links so we only follow
-    # content-area anchors, not sidebar / header / footer noise.
-    for sel in (adapter.discovery_strip_candidates() if adapter is not None else DEFAULT_LINK_STRIP_SELECTORS):
+    strip_selectors = adapter.discovery_strip_candidates() if adapter is not None else DEFAULT_LINK_STRIP_SELECTORS
+    for sel in strip_selectors:
         for el in soup.select(sel):
             el.decompose()
 
@@ -139,12 +131,11 @@ def _docling_convert(fetch_result: FetchResult, *, adapter: SiteAdapter | None =
     if main is None:
         main = soup
 
-    links: list[str] = []
-    for anchor in main.select("a[href]"):
-        href = anchor.get("href")
-        if href:
-            links.append(resolve_url(fetch_result.final_url, href))
-
+    links: list[str] = [
+        resolve_url(fetch_result.final_url, anchor["href"])
+        for anchor in main.select("a[href]")
+        if anchor.get("href")
+    ]
     headings = [node.get_text(" ", strip=True) for node in main.select("h1, h2, h3, h4")]
     breadcrumbs = []
     for selector in (adapter.breadcrumb_candidates() if adapter is not None else [".breadcrumb a", ".breadcrumbs a", "nav[aria-label='breadcrumb'] a"]):
@@ -152,6 +143,22 @@ def _docling_convert(fetch_result: FetchResult, *, adapter: SiteAdapter | None =
             label = node.get_text(" ", strip=True)
             if label and label not in breadcrumbs:
                 breadcrumbs.append(label)
+
+    # Strip script/style/noise before feeding to Docling — less input, faster parse
+    for sel in _NOISE_SELECTORS:
+        for el in soup.select(sel):
+            el.decompose()
+    clean_html = str(soup).encode("utf-8")
+
+    # ---- Docling conversion on the pre-stripped HTML -----------------------
+    from docling.datamodel.document import DocumentStream  # noqa: PLC0415
+
+    converter = _get_converter()
+    stream = DocumentStream(name=f"{fetch_result.final_url}.html", stream=io.BytesIO(clean_html))
+    result = converter.convert(stream)
+    markdown: str = result.document.export_to_markdown()
+    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
+    markdown = normalize_whitespace(markdown)
 
     return ExtractedDocument(
         url=fetch_result.url,
