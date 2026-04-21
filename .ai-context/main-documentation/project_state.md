@@ -28,6 +28,7 @@
 
 - Current level: beta / usable, with active hardening.
 - Core pipeline exists and is test-backed.
+- 18/18 tests pass on both Windows and Linux after fresh clone + pip install.
 - No recent repo evidence of a fresh end-to-end smoke crawl after the latest pipeline and wizard changes.
 
 ## Known Limitations
