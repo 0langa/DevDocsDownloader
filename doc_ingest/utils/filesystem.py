@@ -9,6 +9,7 @@ except ImportError:  # pragma: no cover
     orjson = None
 
 import json
+import os
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -26,19 +27,28 @@ def write_json(path: Path, data: Any) -> None:
     else:
         payload_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
     temp_path = path.with_name(f"{path.name}.tmp")
-    temp_path.write_bytes(payload_bytes)
+    with temp_path.open("wb") as handle:
+        handle.write(payload_bytes)
+        handle.flush()
+        os.fsync(handle.fileno())
     temp_path.replace(path)
 
 
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f"{path.name}.tmp")
-    temp_path.write_bytes(text.encode("utf-8"))
+    with temp_path.open("wb") as handle:
+        handle.write(text.encode("utf-8"))
+        handle.flush()
+        os.fsync(handle.fileno())
     temp_path.replace(path)
 
 
 def write_bytes(path: Path, payload_bytes: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f"{path.name}.tmp")
-    temp_path.write_bytes(payload_bytes)
+    with temp_path.open("wb") as handle:
+        handle.write(payload_bytes)
+        handle.flush()
+        os.fsync(handle.fileno())
     temp_path.replace(path)
