@@ -16,6 +16,7 @@ ML models are downloaded or loaded — it is a pure rule-based parser.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import logging
 import re
@@ -77,21 +78,30 @@ DEFAULT_LINK_STRIP_SELECTORS = [
 ]
 
 
-def extract_html_docling(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> ExtractedDocument:
+_docling_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="docling")
+
+
+def extract_html_docling(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None, timeout_seconds: float = 25.0) -> ExtractedDocument:
     """Convert an HTML page to Markdown via Docling and return an ExtractedDocument.
 
     Falls back transparently to the plain BS4+markdownify extractor if Docling
-    raises an unexpected error, so a single broken page never kills a crawl.
+    raises an unexpected error or exceeds timeout_seconds.
     """
+    future = _docling_executor.submit(_docling_convert, fetch_result, adapter=adapter)
     try:
-        return _docling_convert(fetch_result, adapter=adapter)
+        return future.result(timeout=timeout_seconds)
+    except concurrent.futures.TimeoutError:
+        LOGGER.warning(
+            "Docling timed out after %.0fs for %s; falling back to BS4 extractor",
+            timeout_seconds, fetch_result.final_url,
+        )
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning(
             "Docling conversion failed for %s (%s); falling back to BS4 extractor",
             fetch_result.final_url, exc,
         )
-        from .html import extract_html  # local import to avoid circular deps at module load
-        return extract_html(fetch_result, adapter=adapter)
+    from .html import extract_html  # local import to avoid circular deps at module load
+    return extract_html(fetch_result, adapter=adapter)
 
 
 def _docling_convert(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> ExtractedDocument:

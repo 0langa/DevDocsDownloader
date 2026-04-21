@@ -378,7 +378,7 @@ class DocumentationPipeline:
             fetch_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
             asset_type = detect_asset_type(fetch_result)
 
-        document = await asyncio.to_thread(extract_document, fetch_result, preferred_extractors=plan.preferred_extractors, adapter=adapter)
+        document = await asyncio.to_thread(extract_document, fetch_result, preferred_extractors=plan.preferred_extractors, adapter=adapter, docling_timeout_seconds=self.config.crawl.docling_timeout_seconds)
         if adapter.should_retry_with_browser(
             asset_type=asset_type,
             fetch_method=fetch_result.method,
@@ -387,7 +387,7 @@ class DocumentationPipeline:
         ) and self.config.crawl.browser_enabled:
             try:
                 browser_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
-                browser_document = await asyncio.to_thread(extract_document, browser_result, preferred_extractors=plan.preferred_extractors, adapter=adapter)
+                browser_document = await asyncio.to_thread(extract_document, browser_result, preferred_extractors=plan.preferred_extractors, adapter=adapter, docling_timeout_seconds=self.config.crawl.docling_timeout_seconds)
                 if browser_document.extraction and document.extraction and browser_document.extraction.score > document.extraction.score:
                     document = browser_document
             except Exception:
