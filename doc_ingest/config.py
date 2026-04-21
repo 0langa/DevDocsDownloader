@@ -65,6 +65,7 @@ class CrawlConfig(BaseModel):
     user_agent: str = "DocIngestBot/1.0 (+local documentation ingestion)"
     browser_enabled: bool = True
     browser_timeout_seconds: float = 45.0
+    docling_timeout_seconds: float = 25.0
     duplicate_similarity_threshold: float = 0.96
     tiny_output_char_threshold: int = 2000
     max_retries_per_page: int = 3

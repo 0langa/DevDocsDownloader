@@ -27,10 +27,10 @@ def detect_asset_type(fetch_result: FetchResult) -> str:
     return "unknown"
 
 
-def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterable[str] | None = None, adapter: SiteAdapter | None = None) -> ExtractedDocument:
+def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterable[str] | None = None, adapter: SiteAdapter | None = None, docling_timeout_seconds: float = 25.0) -> ExtractedDocument:
     asset_type = detect_asset_type(fetch_result)
     if asset_type == "html":
-        return _extract_html_with_scoring(fetch_result, preferred_extractors=preferred_extractors or [], adapter=adapter)
+        return _extract_html_with_scoring(fetch_result, preferred_extractors=preferred_extractors or [], adapter=adapter, docling_timeout_seconds=docling_timeout_seconds)
     if asset_type == "markdown":
         document = extract_markdown(fetch_result)
         document.extraction = score_extraction(document, "markdown_passthrough")
@@ -52,10 +52,10 @@ def extract_document(fetch_result: FetchResult, *, preferred_extractors: Iterabl
     return document
 
 
-def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractors: Iterable[str], adapter: SiteAdapter | None) -> ExtractedDocument:
+def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractors: Iterable[str], adapter: SiteAdapter | None, docling_timeout_seconds: float = 25.0) -> ExtractedDocument:
     candidates: list[tuple[str, ExtractedDocument]] = []
     extractor_map = {
-        "html_docling": lambda result: extract_html_docling(result, adapter=adapter),
+        "html_docling": lambda result: extract_html_docling(result, adapter=adapter, timeout_seconds=docling_timeout_seconds),
         "html_readability": lambda result: extract_html(result, adapter=adapter),
         "html_bs4": lambda result: extract_html(result, adapter=adapter),
     }
