@@ -16,7 +16,7 @@ from .extractors.html import extract_html
 from .fetchers.browser import BrowserFetcher
 from .fetchers.http import HttpFetcher
 from .mergers.compiler import compile_language_markdown
-from .models import CrawlMode, CrawlState, ExtractedDocument, LanguageEntry, LanguageRunReport, PageState, PlannedSource, RunSummary, UrlRecord
+from .models import CrawlMode, CrawlState, ExtractedDocument, FetchResult, LanguageEntry, LanguageRunReport, PageState, PlannedSource, RunSummary, UrlRecord
 from .normalizers.markdown import normalize_document
 from .parser import parse_language_file
 from .planner.planner import CrawlPlanner
@@ -139,7 +139,7 @@ class DocumentationPipeline:
         documents: dict[str, ExtractedDocument] = self._load_cached_documents(language.slug, state)
         processed_hashes = {document.content_hash for document in documents.values()}
         helper = DiscoveryHelper(self.config, adapter, plan)
-        queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=max(0, self.config.crawl.max_queue_size_per_language))
+        queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=max(1, self.config.crawl.max_queue_size_per_language))
         queued_urls: set[str] = set()
         dirty = False
         pending_changes = 0
@@ -170,12 +170,16 @@ class DocumentationPipeline:
             normalized = canonicalize_url_for_content(record.normalized_url)
             if normalized in queued_urls:
                 return
-            if normalized not in state.pages and len(state.pages) >= self.config.crawl.max_pages_per_language:
+            max_pages = await self.adaptive_controller.get_max_pages()
+            max_discovered = await self.adaptive_controller.get_max_discovered()
+            if normalized not in state.pages and len(state.pages) >= max_pages:
                 return
             page = state.pages.get(normalized)
-            if page is not None and page.status in {"processed", "failed", "skipped"}:
+            if page is not None and page.extraction_status == "complete":
                 return
-            if len(state.pages) >= self.config.crawl.max_discovered_urls_per_language:
+            if page is not None and page.status in {"processed", "failed", "skipped"} and page.extraction_status in {"none", "complete", "failed"}:
+                return
+            if len(state.pages) >= max_discovered:
                 return
             if not helper.should_visit(normalized):
                 return
@@ -191,6 +195,7 @@ class DocumentationPipeline:
                     depth=record.depth,
                     discovered_from=record.discovered_from,
                     status="pending",
+                    extraction_status="pending",
                 ),
             )
             await queue.put(record.model_copy(update={"normalized_url": normalized}))
@@ -242,6 +247,7 @@ class DocumentationPipeline:
 
                 if document.word_count < 10:
                     page.status = "skipped"
+                    page.extraction_status = "complete"
                     page.warning_codes.append("low-content")
                     report.pages_skipped += 1
                     dirty = True
@@ -261,12 +267,14 @@ class DocumentationPipeline:
 
                 if document.content_hash in processed_hashes:
                     page.status = "skipped"
+                    page.extraction_status = "complete"
                     page.duplicate_of = next((url for url, d in documents.items() if d.content_hash == document.content_hash), None)
                     page.warning_codes.append("duplicate-content")
                     report.pages_deduplicated += 1
                     report.pages_skipped += 1
                 else:
                     page.status = "processed"
+                    page.extraction_status = "complete"
                     page.content_hash = document.content_hash
                     documents[normalized] = document
                     processed_hashes.add(document.content_hash)
@@ -282,6 +290,7 @@ class DocumentationPipeline:
                 LOGGER.exception("Extraction failed for %s", record.url)
                 if page.status not in {"processed", "skipped"}:
                     page.status = "failed"
+                    page.extraction_status = "failed"
                     report.pages_failed += 1
                     dirty = True
                     pending_changes += 1
@@ -307,7 +316,7 @@ class DocumentationPipeline:
                         ),
                     )
                     if page.status in {"processed", "failed", "skipped"}:
-                        return
+                        continue
                     page.attempts += 1
                     report.pages_queued = max(report.pages_queued, len(state.pages))
 
@@ -325,12 +334,13 @@ class DocumentationPipeline:
                             await progress_tracker.on_request_failure(plan.language.slug)
                         LOGGER.exception("Failed fetching %s", record.url)
                         page.status = "failed"
+                        page.extraction_status = "failed"
                         page.last_error = str(exc)
                         report.pages_failed += 1
                         report.failures.append(f"{record.url}: {exc}")
                         dirty = True
                         pending_changes += 1
-                        return
+                        continue
 
                     report.pages_fetched += 1
 
@@ -343,6 +353,7 @@ class DocumentationPipeline:
 
                     # Docling extraction runs in background — doesn't block this worker
                     task = asyncio.create_task(_full_extract_and_store(record, fetch_result, normalized, page))
+                    page.extraction_status = "running"
                     pending_extractions.append(task)
                     await persist_state()
                 finally:
@@ -353,7 +364,7 @@ class DocumentationPipeline:
         sitemap_urls = await helper.load_sitemap_urls()
         initial_urls.extend(helper.make_record(url, depth=1, discovered_from="sitemap") for url in sitemap_urls)
         for page in state.pages.values():
-            if page.status in {"pending", "discovered"}:
+            if page.extraction_status != "complete" and page.status in {"pending", "discovered", "failed"}:
                 initial_urls.append(
                     helper.make_record(
                         page.normalized_url,
@@ -366,13 +377,15 @@ class DocumentationPipeline:
             await enqueue(record)
 
         report.pages_discovered = len(state.pages)
-        workers = [asyncio.create_task(discovery_worker()) for _ in range(max(1, self.config.crawl.max_concurrency))]
+        worker_count = max(1, await self.adaptive_controller.get_page_concurrency())
+        workers = [asyncio.create_task(discovery_worker()) for _ in range(worker_count)]
 
         async def _tune_loop() -> None:
             while True:
                 await asyncio.sleep(5.0)
-                queue_fill_ratio = queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language or max(1, queue.qsize()))
-                await self.adaptive_controller.tune(queue_fill_ratio=queue_fill_ratio, limit_hit=len(state.pages) >= self.config.crawl.max_discovered_urls_per_language)
+                queue_fill_ratio = queue.qsize() / max(1, self.config.crawl.smart_queue_soft_cap)
+                max_discovered = await self.adaptive_controller.get_max_discovered()
+                await self.adaptive_controller.tune(queue_fill_ratio=queue_fill_ratio, limit_hit=len(state.pages) >= max_discovered)
 
         tune_task = asyncio.create_task(_tune_loop())
         try:
