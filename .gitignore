@@ -55,6 +55,12 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Claude Code local state
+.claude/
+
+# Raw chat/log archives in ai-context
+.ai-context/other-documentation/*.jsonl
+
 # Git merge / patch leftovers
 *.orig
 *.rej
