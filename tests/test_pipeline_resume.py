@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 from doc_ingest.config import load_config
 from doc_ingest.models import FetchResult
 from doc_ingest.pipeline import DocumentationPipeline
+from doc_ingest.state import CrawlStateStore
 
 
 class _FakeHttpFetcher:
@@ -41,11 +43,49 @@ class _FakeBrowserFetcher:
 
 
 class PipelineResumeTests(unittest.TestCase):
+    def test_state_store_migrates_legacy_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "python.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "processed": {
+                            "https://docs.python.org/3/tutorial": {
+                                "title": "Tutorial",
+                                "hash": "abc123",
+                                "asset_type": "html",
+                            }
+                        },
+                        "failed": {
+                            "https://docs.python.org/3/broken": "HTTP 500",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = CrawlStateStore(
+                state_path,
+                language="Python",
+                slug="python",
+                source_url="https://docs.python.org/3/",
+            )
+
+            state = store.load()
+
+            self.assertEqual(state.language, "Python")
+            self.assertIn("https://docs.python.org/3/tutorial", state.pages)
+            self.assertEqual(state.pages["https://docs.python.org/3/tutorial"].status, "processed")
+            self.assertEqual(state.pages["https://docs.python.org/3/tutorial"].content_hash, "abc123")
+            self.assertIn("https://docs.python.org/3/broken", state.pages)
+            self.assertEqual(state.pages["https://docs.python.org/3/broken"].status, "failed")
+
     def test_pipeline_writes_resumable_state_and_output(self) -> None:
         async def run_case() -> None:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                (root / "top_50_programming_languages_with_official_docs.txt").write_text(
+                source_documents = root / "source-documents"
+                source_documents.mkdir(parents=True, exist_ok=True)
+                (source_documents / "renamed-link-source.md").write_text(
                     "Python - https://docs.python.org/3/\n",
                     encoding="utf-8",
                 )
@@ -76,10 +116,60 @@ class PipelineResumeTests(unittest.TestCase):
                 report = summary.reports[0]
                 self.assertEqual(report.pages_processed, 2)
                 self.assertTrue(report.output_path and report.output_path.exists())
+                self.assertIsNotNone(report.validation)
+                self.assertGreater(report.validation.quality_score, 0.4)
                 state_path = config.paths.state_dir / "python.json"
                 self.assertTrue(state_path.exists())
                 state_text = state_path.read_text(encoding="utf-8")
                 self.assertIn('"compiled": true', state_text.lower())
+
+        asyncio.run(run_case())
+
+    def test_pipeline_respects_max_pages_limit(self) -> None:
+        async def run_case() -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source_documents = root / "source-documents"
+                source_documents.mkdir(parents=True, exist_ok=True)
+                (source_documents / "renamed-link-source.md").write_text(
+                    "Python - https://docs.python.org/3/\n",
+                    encoding="utf-8",
+                )
+                config = load_config(root)
+                config.crawl.browser_enabled = False
+                config.crawl.max_concurrency = 1
+                config.crawl.max_pages_per_language = 1
+                pages = {
+                    "https://docs.python.org/3": b"""
+                    <html><head><title>Python</title></head><body><main>
+                    <h1>Python</h1><p>Intro text for python docs with enough useful prose to survive quality checks and normalization.</p>
+                    <a href=\"https://docs.python.org/3/tutorial\">Tutorial</a>
+                    </main></body></html>
+                    """,
+                    "https://docs.python.org/3/tutorial": b"""
+                    <html><head><title>Tutorial</title></head><body><main>
+                    <h1>Tutorial</h1><p>Tutorial body with enough text to be processed if discovered.</p>
+                    </main></body></html>
+                    """,
+                }
+                pipeline = DocumentationPipeline(config)
+                pipeline.http_fetcher = _FakeHttpFetcher(pages)
+                pipeline.browser_fetcher = _FakeBrowserFetcher()
+                try:
+                    summary = await pipeline.run(language_name="python", force_refresh=True)
+                finally:
+                    await pipeline.close()
+
+                report = summary.reports[0]
+                self.assertEqual(report.pages_processed, 1)
+                state_path = config.paths.state_dir / "python.json"
+                state = CrawlStateStore(
+                    state_path,
+                    language="Python",
+                    slug="python",
+                    source_url="https://docs.python.org/3/",
+                ).load()
+                self.assertEqual(len(state.pages), 1)
 
         asyncio.run(run_case())
 

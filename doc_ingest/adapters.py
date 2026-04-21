@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from .config import AppConfig
 from .models import LanguageEntry, PlannedSource
+from .utils.text import slugify
 from .utils.urls import normalize_url
 
 
@@ -21,6 +22,12 @@ class SiteAdapter:
     boilerplate_patterns: list[str] = field(default_factory=list)
     ordering_keywords: list[str] = field(default_factory=list)
     nav_label_selectors: list[str] = field(default_factory=list)
+    link_strip_selectors: list[str] = field(default_factory=list)
+    breadcrumb_selectors: list[str] = field(default_factory=lambda: [".breadcrumb a", ".breadcrumbs a", "nav[aria-label='breadcrumb'] a"])
+    section_aliases: dict[str, str] = field(default_factory=dict)
+    ignored_heading_titles: list[str] = field(default_factory=list)
+    similarity_threshold: float = 0.96
+    browser_retry_word_count: int = 50
     include_changelog: bool = False
 
     def augment_plan(self, plan: PlannedSource) -> PlannedSource:
@@ -55,12 +62,77 @@ class SiteAdapter:
             cleaned = re.sub(pattern, "", cleaned)
         return cleaned
 
-    def group_name(self, url: str, title: str, breadcrumbs: list[str]) -> str:
-        if breadcrumbs:
-            return breadcrumbs[0]
+    def content_root_candidates(self) -> list[str]:
+        return self.content_selectors or ["main", "article", "[role='main']", ".main-content", ".content", "body"]
+
+    def discovery_strip_candidates(self) -> list[str]:
+        return self.link_strip_selectors or [
+            "nav",
+            "header",
+            "footer",
+            "aside",
+            ".sidebar",
+            ".toc",
+            ".breadcrumbs",
+            ".breadcrumb",
+            ".cookie",
+            ".consent",
+            ".advertisement",
+            ".feedback",
+        ]
+
+    def breadcrumb_candidates(self) -> list[str]:
+        return self.breadcrumb_selectors
+
+    def should_retry_with_browser(self, *, asset_type: str, fetch_method: str, word_count: int, extraction_score: float | None) -> bool:
+        if asset_type != "html" or fetch_method == "browser":
+            return False
+        if word_count < self.browser_retry_word_count:
+            return True
+        return (extraction_score or 0.0) < 0.28
+
+    def canonical_section_title(self, title: str) -> str:
+        cleaned = re.sub(r"\s+", " ", title).strip(" -:\t\n")
+        if not cleaned:
+            return "Content"
+        return self.section_aliases.get(cleaned.lower(), cleaned)
+
+    def should_ignore_heading(self, title: str) -> bool:
+        normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]+", " ", title.lower())).strip()
+        return normalized in {value.lower() for value in self.ignored_heading_titles}
+
+    def section_path(self, url: str, title: str, breadcrumbs: list[str], heading: str | None = None) -> tuple[str, str]:
+        cleaned_crumbs = [self.canonical_section_title(crumb) for crumb in breadcrumbs if crumb.strip()]
+        fragment = self.canonical_section_title(heading or title)
+        if cleaned_crumbs:
+            top = cleaned_crumbs[0]
+            subsection = cleaned_crumbs[1] if len(cleaned_crumbs) > 1 else fragment
+            if subsection.lower() == top.lower():
+                subsection = fragment
+            return top, subsection
+
         parsed = urlparse(url)
-        parts = [part.replace("-", " ").replace("_", " ").title() for part in parsed.path.split("/") if part]
-        return parts[1] if len(parts) > 1 else (title.strip() or "Content")
+        parts = [part for part in parsed.path.split("/") if part]
+        ignored = {"docs", "documentation", "index", "latest", "stable", "en", "reference"}
+        normalized_parts = [self.canonical_section_title(part.replace("-", " ").replace("_", " ")) for part in parts if part.lower() not in ignored and not part.isdigit()]
+        top = normalized_parts[0] if normalized_parts else self.canonical_section_title(title)
+        subsection = fragment
+        if subsection.lower() == top.lower() and len(normalized_parts) > 1:
+            subsection = normalized_parts[-1]
+        return top, subsection
+
+    def dedupe_similarity_threshold(self) -> float:
+        return self.similarity_threshold
+
+    def subsection_priority(self, section: str, subsection: str) -> tuple[int, str]:
+        text = f"{section} {subsection}".lower()
+        for index, keyword in enumerate(self.ordering_keywords, start=1):
+            if keyword in text:
+                return index, slugify(subsection)
+        return 999, slugify(subsection)
+
+    def group_name(self, url: str, title: str, breadcrumbs: list[str]) -> str:
+        return self.section_path(url, title, breadcrumbs)[0]
 
 
 class PythonDocsAdapter(SiteAdapter):
@@ -72,6 +144,8 @@ class PythonDocsAdapter(SiteAdapter):
             ignored_url_patterns=["/genindex", "/search", "/py-modindex"],
             boilerplate_patterns=[r"(?im)^next topic\s*$", r"(?im)^previous topic\s*$", r"(?im)^this page\s*$"],
             ordering_keywords=["tutorial", "using", "reference", "library", "c-api", "extending", "faq"],
+            section_aliases={"library reference": "Library", "language reference": "Reference", "python setup and usage": "Using Python"},
+            ignored_heading_titles=["navigation", "next topic", "previous topic", "this page"],
         )
 
 
@@ -84,6 +158,7 @@ class MicrosoftLearnAdapter(SiteAdapter):
             ignored_url_patterns=["/previous-versions/", "/contributors/", "/search"],
             boilerplate_patterns=[r"(?im)^in this article\s*$", r"(?im)^related content\s*$", r"(?im)^additional resources\s*$"],
             ordering_keywords=["overview", "quickstart", "tutorial", "how-to", "concept", "reference"],
+            link_strip_selectors=["#ms--additional-resources", "#right-container", ".buttons", "nav", "header", "footer", ".contributors-holder"],
         )
 
 
@@ -96,6 +171,7 @@ class PHPManualAdapter(SiteAdapter):
             ignored_url_patterns=["/manual/en/indexes", "/manual/en/faq", "/manual/en/about"],
             boilerplate_patterns=[r"(?im)^user contributed notes\s*$", r"(?im)^found a problem\?\s*$"],
             ordering_keywords=["install", "language", "security", "features", "reference", "book"],
+            similarity_threshold=0.94,
         )
 
 
@@ -108,11 +184,20 @@ class TypeScriptAdapter(SiteAdapter):
             ignored_url_patterns=["/play", "/download", "/community"],
             boilerplate_patterns=[r"(?im)^on this page\s*$", r"(?im)^give feedback\s*$"],
             ordering_keywords=["introduction", "basic", "handbook", "reference", "release notes"],
+            section_aliases={"type manipulation": "Type Manipulation", "declaration files": "Declaration Files"},
+            ignored_heading_titles=[
+                "community",
+                "customize",
+                "is this page helpful",
+                "next steps",
+                "on this page",
+                "popular documentation pages",
+            ],
         )
 
 
 def _load_override_map() -> dict[str, dict]:
-    path = Path(__file__).resolve().parent.parent / "doc_path_overrides.json"
+    path = Path(__file__).resolve().parent.parent / "source-documents" / "doc_path_overrides.json"
     if not path.exists():
         return {}
     try:

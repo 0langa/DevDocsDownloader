@@ -4,7 +4,7 @@ Production-oriented Python pipeline for ingesting official programming language 
 
 ## Features
 
-- Parses `top_50_programming_languages_with_official_docs.txt`
+- Parses `source-documents/renamed-link-source.md`
 - Plans crawl strategy per source with site adapters and override-aware boundaries
 - Supports asynchronous concurrent fetching, extraction scoring, retries, caching, resumability, and browser fallback
 - Supports parallel language processing and per-language crawl budget limits for faster large runs
@@ -19,7 +19,15 @@ Production-oriented Python pipeline for ingesting official programming language 
 
 ## Project structure
 
-- `documentation_downloader.py` – entry point
+- `DevDocsDownloader.py` – runtime entry point kept at repo root
+- `scripts/` – repository helper scripts
+- `scripts/setup.py` – environment/bootstrap helper
+- `scripts/analyze_doc_paths.py` – override/discovery analysis helper
+- `scripts/build_skip_manifest.py` – skip-manifest helper
+- `source-documents/` – source link list, requirements, and crawl override data
+- `source-documents/renamed-link-source.md` – language source list consumed by the downloader
+- `source-documents/requirements.txt` – Python dependency list
+- `source-documents/doc_path_overrides.json` – path override data for planner/adapters
 - `doc_ingest/` – application package
 - `output/markdown/` – compiled Markdown manuals
 - `output/reports/` – run reports
@@ -35,14 +43,14 @@ Production-oriented Python pipeline for ingesting official programming language 
 
 Run:
 
-`python setup.py`
+`python scripts/setup.py`
 
 This will:
 
 - create required folders
 - create `.venv` if missing
 - upgrade pip tooling
-- install `requirements.txt`
+- install `source-documents/requirements.txt`
 - install Playwright Chromium
 
 ### Manual setup
@@ -50,7 +58,7 @@ This will:
 1. Create a virtual environment.
 2. Install dependencies:
 
-   `pip install -r requirements.txt`
+   `pip install -r source-documents/requirements.txt`
 
 3. Install Playwright browser runtime:
 
@@ -60,47 +68,47 @@ This will:
 
 Run all languages:
 
-`python documentation_downloader.py run`
+`python DevDocsDownloader.py run`
 
 Important/core docs only:
 
-`python documentation_downloader.py run --mode important`
+`python DevDocsDownloader.py run --mode important`
 
 Full documentation crawl:
 
-`python documentation_downloader.py run --mode full`
+`python DevDocsDownloader.py run --mode full`
 
 Resume from existing crawl state:
 
-`python documentation_downloader.py run --language python --resume`
+`python DevDocsDownloader.py run --language python --resume`
 
 Faster run with multiple languages and higher page concurrency:
 
-`python documentation_downloader.py run --language-concurrency 4 --page-concurrency 12 --max-pages 600 --max-discovered 2000 --per-host-delay 0.05`
+`python DevDocsDownloader.py run --language-concurrency 4 --page-concurrency 12 --max-pages 600 --max-discovered 2000 --per-host-delay 0.05`
 
 Use an alternate input file or output directory:
 
-`python documentation_downloader.py run --input-file languages.txt --output-dir compiled_docs`
+`python DevDocsDownloader.py run --input-file source-documents/renamed-link-source.md --output-dir compiled_docs`
 
 Run one language:
 
-`python documentation_downloader.py run --language python`
+`python DevDocsDownloader.py run --language python`
 
 Force refresh state:
 
-`python documentation_downloader.py run --language python --force-refresh`
+`python DevDocsDownloader.py run --language python --force-refresh`
 
 Dry-run planning:
 
-`python documentation_downloader.py run --dry-run`
+`python DevDocsDownloader.py run --dry-run`
 
 Validate outputs only:
 
-`python documentation_downloader.py validate`
+`python DevDocsDownloader.py validate`
 
 Initialize folder structure:
 
-`python documentation_downloader.py init`
+`python DevDocsDownloader.py init`
 
 ## Notes
 

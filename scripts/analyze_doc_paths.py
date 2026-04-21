@@ -1,15 +1,15 @@
 """
 analyze_doc_paths.py
 --------------------
-Fetches every documentation root URL in top_50_programming_languages_with_official_docs.txt,
-analyses the internal link structure, and writes doc_path_overrides.json with per-language
-allowed_path_prefixes and optionally revised start_urls.
+Fetches every documentation root URL in source-documents/renamed-link-source.md,
+analyses the internal link structure, and writes source-documents/doc_path_overrides.json
+with per-language allowed_path_prefixes and optionally revised start_urls.
 
 Run:
-    python analyze_doc_paths.py
+    python scripts/analyze_doc_paths.py
 
 Output:
-    doc_path_overrides.json  (consumed by the crawler's planner at runtime)
+    source-documents/doc_path_overrides.json  (consumed by the crawler's planner at runtime)
 """
 from __future__ import annotations
 
@@ -21,13 +21,17 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import httpx
 from bs4 import BeautifulSoup
 
 # ── configuration ────────────────────────────────────────────────────────────
 
-INPUT_FILE = Path("top_50_programming_languages_with_official_docs.txt")
-OUTPUT_FILE = Path("doc_path_overrides.json")
+INPUT_FILE = ROOT / "source-documents" / "renamed-link-source.md"
+OUTPUT_FILE = ROOT / "source-documents" / "doc_path_overrides.json"
 TIMEOUT = 20.0
 CONCURRENCY = 8
 USER_AGENT = "DocPathAnalyzer/1.0 (+local documentation analysis)"
@@ -48,6 +52,7 @@ DOC_PATH_TOKENS = {
     "getting-started", "quickstart", "api", "help", "kb", "knowledge",
     "chapter", "section", "module", "package", "class", "overview", "intro",
 }
+
 
 def _norm_url(url: str) -> str:
     """Canonical key: strip trailing slash."""
@@ -180,126 +185,108 @@ STATIC_OVERRIDES: dict[str, dict] = {
         "allowed_path_prefixes": ["/standard/74527"],
         "note": "static override – ISO paywall page",
     },
-    # PL/SQL ───────────────────────────────────────────────────────────────
     "https://docs.oracle.com/en/database/oracle/oracle-database/": {
         "name": "PL/SQL",
         "start_urls": ["https://docs.oracle.com/en/database/oracle/oracle-database/"],
         "allowed_path_prefixes": ["/en/database/oracle/oracle-database/"],
         "note": "static override",
     },
-    # ABAP ─────────────────────────────────────────────────────────────────
     "https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/index.htm": {
         "name": "ABAP",
         "start_urls": ["https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/index.htm"],
         "allowed_path_prefixes": ["/doc/abapdocu_latest_index_htm/"],
         "note": "static override",
     },
-    # ML / Standard ML Basis ───────────────────────────────────────────────
     "https://smlfamily.github.io/Basis/": {
         "name": "ML",
         "start_urls": ["https://smlfamily.github.io/Basis/"],
         "allowed_path_prefixes": ["/Basis/"],
         "note": "static override",
     },
-    # Shell / Bash ─────────────────────────────────────────────────────────
     "https://www.gnu.org/software/bash/manual/": {
         "name": "Shell",
         "start_urls": ["https://www.gnu.org/software/bash/manual/"],
         "allowed_path_prefixes": ["/software/bash/manual/"],
         "note": "static override",
     },
-    # Scratch ──────────────────────────────────────────────────────────────
     "https://scratch.mit.edu/help/": {
         "name": "Scratch",
         "start_urls": ["https://scratch.mit.edu/help/"],
         "allowed_path_prefixes": ["/help/"],
         "note": "static override",
     },
-    # Lisp / HyperSpec ─────────────────────────────────────────────────────
     "https://www.lispworks.com/documentation/HyperSpec/Front/": {
         "name": "Lisp",
         "start_urls": ["https://www.lispworks.com/documentation/HyperSpec/Front/"],
         "allowed_path_prefixes": ["/documentation/HyperSpec/"],
         "note": "static override",
     },
-    # Delphi ───────────────────────────────────────────────────────────────
     "https://docwiki.embarcadero.com/RADStudio/en/Delphi": {
         "name": "Delphi/Object Pascal",
         "start_urls": ["https://docwiki.embarcadero.com/RADStudio/en/Delphi"],
         "allowed_path_prefixes": ["/RADStudio/en/"],
         "note": "static override",
     },
-    # Perl ─────────────────────────────────────────────────────────────────
     "https://perldoc.perl.org/": {
         "name": "Perl",
         "start_urls": ["https://perldoc.perl.org/"],
         "allowed_path_prefixes": ["/"],
-        "note": "static override – entire perldoc.perl.org is documentation",
+        "note": "static override - entire perldoc.perl.org is documentation",
     },
-    # Kotlin ───────────────────────────────────────────────────────────────
     "https://kotlinlang.org/docs/home.html": {
         "name": "Kotlin",
         "start_urls": ["https://kotlinlang.org/docs/home.html"],
         "allowed_path_prefixes": ["/docs/", "/api/"],
         "note": "static override",
     },
-    # Groovy ───────────────────────────────────────────────────────────────
     "https://groovy-lang.org/documentation.html": {
         "name": "Groovy",
         "start_urls": ["https://groovy-lang.org/documentation.html"],
         "allowed_path_prefixes": ["/documentation.html", "/single-page-documentation.html", "/apidocs/", "/style-guide.html"],
         "note": "static override",
     },
-    # Elixir ───────────────────────────────────────────────────────────────
     "https://elixir-lang.org/docs.html": {
         "name": "Elixir",
         "start_urls": ["https://elixir-lang.org/docs.html"],
         "allowed_path_prefixes": ["/docs.html", "/learning.html"],
         "note": "static override",
     },
-    # SAS ──────────────────────────────────────────────────────────────────
     "https://documentation.sas.com/": {
         "name": "SAS",
         "start_urls": ["https://documentation.sas.com/doc/en/pgmsascdc/"],
         "allowed_path_prefixes": ["/doc/en/"],
         "note": "static override",
     },
-    # Haskell ──────────────────────────────────────────────────────────────
     "https://www.haskell.org/documentation/": {
         "name": "Haskell",
         "start_urls": ["https://www.haskell.org/documentation/"],
         "allowed_path_prefixes": ["/documentation", "/tutorial"],
         "note": "static override",
     },
-    # GDScript ─────────────────────────────────────────────────────────────
     "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/": {
         "name": "GDScript",
         "start_urls": ["https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/"],
         "allowed_path_prefixes": ["/en/stable/tutorials/scripting/gdscript/", "/en/stable/getting_started/"],
-        "note": "static override – narrowed from full /en/ site",
+        "note": "static override - narrowed from full /en/ site",
     },
-    # Julia ────────────────────────────────────────────────────────────────
     "https://docs.julialang.org/en/v1/": {
         "name": "Julia",
         "start_urls": ["https://docs.julialang.org/en/v1/"],
         "allowed_path_prefixes": ["/en/v1/"],
         "note": "static override",
     },
-    # MicroPython ──────────────────────────────────────────────────────────
     "https://docs.micropython.org/": {
         "name": "MicroPython",
         "start_urls": ["https://docs.micropython.org/en/latest/"],
         "allowed_path_prefixes": ["/en/latest/"],
         "note": "static override",
     },
-    # JavaScript (ECMAScript spec) ─────────────────────────────────────────
     "https://tc39.es/ecma262": {
         "name": "JavaScript",
         "start_urls": ["https://tc39.es/ecma262/"],
         "allowed_path_prefixes": ["/ecma262/"],
-        "note": "static override – tc39 spec only",
+        "note": "static override - tc39 spec only",
     },
-    # R ────────────────────────────────────────────────────────────────────
     "https://cran.r-project.org/manuals.html": {
         "name": "R",
         "start_urls": ["https://cran.r-project.org/manuals.html"],
@@ -310,9 +297,8 @@ STATIC_OVERRIDES: dict[str, dict] = {
 
 # Normalize all keys so lookup via _norm_url() always hits regardless of whether
 # the raw URL in the input file has a trailing slash or not.
-STATIC_OVERRIDES = {_norm_url(k): v for k, v in STATIC_OVERRIDES.items()}
+STATIC_OVERRIDES = {_norm_url(key): value for key, value in STATIC_OVERRIDES.items()}
 
-# ── helpers ───────────────────────────────────────────────────────────────────
 
 def parse_input_file(path: Path) -> list[tuple[str, str]]:
     entries: list[tuple[str, str]] = []
@@ -356,9 +342,9 @@ def extract_internal_links(html: str, base_url: str) -> list[str]:
 
 def score_path(path: str) -> float:
     low = path.lower()
-    parts = set(p for p in low.split("/") if p)
-    neg = sum(1 for t in NEGATIVE_PATH_TOKENS if t in parts or t in low)
-    pos = sum(1 for t in DOC_PATH_TOKENS if t in parts or t in low)
+    parts = set(part for part in low.split("/") if part)
+    neg = sum(1 for token in NEGATIVE_PATH_TOKENS if token in parts or token in low)
+    pos = sum(1 for token in DOC_PATH_TOKENS if token in parts or token in low)
     return pos - neg * 2
 
 
@@ -374,13 +360,11 @@ def derive_path_prefixes(doc_paths: list[str], source_path: str) -> list[str]:
     if not doc_paths:
         return [source_path] if source_path != "/" else []
 
-    # Use source_path stripped to the directory as baseline
     baseline = source_path if source_path.endswith("/") else source_path.rsplit("/", 1)[0] + "/"
 
-    # Score each candidate prefix at depth 1-3 relative to root
     counter: Counter[str] = Counter()
     for path in doc_paths:
-        parts = [p for p in path.split("/") if p]
+        parts = [part for part in path.split("/") if part]
         for depth in (1, 2, 3):
             prefix = "/" + "/".join(parts[:depth]) + ("/" if len(parts) > depth else "")
             if score_path(prefix) >= 0:
@@ -389,23 +373,20 @@ def derive_path_prefixes(doc_paths: list[str], source_path: str) -> list[str]:
     if not counter:
         return [baseline]
 
-    # Keep prefixes accounting for top 80% of doc links
     total = len(doc_paths)
-    threshold = max(3, int(total * 0.05))  # prefix must cover ≥5% of all links
-    candidates = [p for p, count in counter.most_common(20) if count >= threshold]
+    threshold = max(3, int(total * 0.05))
+    candidates = [prefix for prefix, count in counter.most_common(20) if count >= threshold]
 
     if not candidates:
         candidates = [counter.most_common(1)[0][0]]
 
-    # Drop any candidate that is a strict sub-path of another candidate
     def is_subpath(child: str, parent: str) -> bool:
         return child != parent and child.startswith(parent)
 
-    filtered = [c for c in candidates if not any(is_subpath(c, other) for other in candidates)]
+    filtered = [candidate for candidate in candidates if not any(is_subpath(candidate, other) for other in candidates)]
     filtered = sorted(set(filtered))
 
-    # Always include baseline if it's not already covered
-    if baseline and not any(baseline.startswith(p) or p.startswith(baseline) for p in filtered):
+    if baseline and not any(baseline.startswith(prefix) or prefix.startswith(baseline) for prefix in filtered):
         filtered.insert(0, baseline)
 
     return filtered or [baseline]
@@ -417,17 +398,15 @@ async def analyze_one(
     name: str,
     url: str,
 ) -> tuple[str, dict]:
-    # Key is the normalised source URL — unique even when slugs collide (C / C++ / C#)
     url_key = _norm_url(url)
 
-    # Return static override immediately if we have one
     if url_key in STATIC_OVERRIDES:
         result = {
             "name": name,
             "source_url": url,
             **STATIC_OVERRIDES[url_key],
         }
-        print(f"  [{name}] static override — prefixes: {result['allowed_path_prefixes']}")
+        print(f"  [{name}] static override - prefixes: {result['allowed_path_prefixes']}")
         return url_key, result
 
     async with semaphore:
@@ -447,12 +426,12 @@ async def analyze_one(
             }
 
     raw_paths = extract_internal_links(html, final_url)
-    doc_paths = [p for p in raw_paths if score_path(p) > 0]
+    doc_paths = [path for path in raw_paths if score_path(path) > 0]
 
     prefixes = derive_path_prefixes(doc_paths, final_parsed.path)
     start_url = final_url if final_url != url else url
 
-    print(f"  [{name}] {len(raw_paths)} links, {len(doc_paths)} doc-scored → prefixes: {prefixes}")
+    print(f"  [{name}] {len(raw_paths)} links, {len(doc_paths)} doc-scored -> prefixes: {prefixes}")
 
     return url_key, {
         "name": name,
@@ -469,7 +448,7 @@ async def main() -> None:
         print("No entries found in input file.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Analyzing {len(entries)} documentation roots …\n")
+    print(f"Analyzing {len(entries)} documentation roots...\n")
 
     semaphore = asyncio.Semaphore(CONCURRENCY)
     limits = httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)
@@ -491,13 +470,12 @@ async def main() -> None:
     )
     print(f"\nWrote {len(overrides)} entries to {OUTPUT_FILE}")
 
-    # Print a summary of what was found
-    print("\n── Summary ─────────────────────────────────────────────────────────")
-    for _key, data in sorted(overrides.items(), key=lambda kv: kv[1].get("name", kv[0]).lower()):
+    print("\n-- Summary ------------------------------------------------------------")
+    for key, data in sorted(overrides.items(), key=lambda item: item[1].get("name", item[0]).lower()):
         prefixes = data.get("allowed_path_prefixes", [])
         note = data.get("note", "")
-        display_name = data.get("name", _key)
-        prefix_str = ", ".join(prefixes) if prefixes else "(none — full domain)"
+        display_name = data.get("name", key)
+        prefix_str = ", ".join(prefixes) if prefixes else "(none - full domain)"
         print(f"  {display_name:<30} {prefix_str}  [{note}]")
 
 

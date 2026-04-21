@@ -120,7 +120,7 @@ class DocumentationPipeline:
         if validate_only:
             if output_path.exists():
                 report.output_path = output_path
-                report.validation = validate_markdown(language.name, output_path, self.config)
+                report.validation = validate_markdown(language.name, output_path, self.config, state=state_store.load())
             else:
                 report.failures.append("Output markdown file does not exist.")
             return report
@@ -169,6 +169,8 @@ class DocumentationPipeline:
             normalized = canonicalize_url_for_content(record.normalized_url)
             if normalized in queued_urls:
                 return
+            if normalized not in state.pages and len(state.pages) >= self.config.crawl.max_pages_per_language:
+                return
             page = state.pages.get(normalized)
             if page is not None and page.status in {"processed", "failed", "skipped"}:
                 return
@@ -212,7 +214,7 @@ class DocumentationPipeline:
             page.attempts += 1
             report.pages_queued = max(report.pages_queued, len(state.pages))
             try:
-                discovery_doc, extracted_doc = await self._fetch_and_process(record, plan, progress_tracker)
+                discovery_doc, extracted_doc = await self._fetch_and_process(record, plan, adapter, progress_tracker)
             except Exception as exc:
                 LOGGER.exception("Failed fetching %s", record.url)
                 page.status = "failed"
@@ -344,7 +346,7 @@ class DocumentationPipeline:
         state.compiled_at = datetime.now(timezone.utc)
         state.output_path = str(report.output_path)
         await persist_state(force=True)
-        report.validation = validate_markdown(language.name, output_path, self.config)
+        report.validation = validate_markdown(language.name, output_path, self.config, state=state)
         report.suspected_incompleteness = bool(report.validation and report.validation.score < 0.7)
         if progress_tracker is not None:
             await progress_tracker.on_language_complete(language.slug, report)
@@ -354,6 +356,7 @@ class DocumentationPipeline:
         self,
         record: UrlRecord,
         plan: PlannedSource,
+        adapter,
         progress_tracker: CrawlProgressTracker | None,
     ) -> tuple[DiscoveryDocument, ExtractedDocument | None]:
         cache_dir = self.config.paths.cache_dir / plan.language.slug
@@ -375,11 +378,16 @@ class DocumentationPipeline:
             fetch_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
             asset_type = detect_asset_type(fetch_result)
 
-        document = await asyncio.to_thread(extract_document, fetch_result, preferred_extractors=plan.preferred_extractors)
-        if asset_type == "html" and document.word_count < 50 and self.config.crawl.browser_enabled and fetch_result.method != "browser":
+        document = await asyncio.to_thread(extract_document, fetch_result, preferred_extractors=plan.preferred_extractors, adapter=adapter)
+        if adapter.should_retry_with_browser(
+            asset_type=asset_type,
+            fetch_method=fetch_result.method,
+            word_count=document.word_count,
+            extraction_score=document.extraction.score if document.extraction else None,
+        ) and self.config.crawl.browser_enabled:
             try:
                 browser_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
-                browser_document = await asyncio.to_thread(extract_document, browser_result, preferred_extractors=plan.preferred_extractors)
+                browser_document = await asyncio.to_thread(extract_document, browser_result, preferred_extractors=plan.preferred_extractors, adapter=adapter)
                 if browser_document.extraction and document.extraction and browser_document.extraction.score > document.extraction.score:
                     document = browser_document
             except Exception:

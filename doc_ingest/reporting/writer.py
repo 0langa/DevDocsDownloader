@@ -29,8 +29,20 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
                 f"- Deduplicated: {report.pages_deduplicated}",
                 f"- Output: {report.output_path or 'N/A'}",
                 f"- Validation score: {report.validation.score if report.validation else 'N/A'}",
+                f"- Quality score: {report.validation.quality_score if report.validation else 'N/A'}",
             ]
         )
+        if report.validation is not None:
+            lines.extend(
+                [
+                    "- Quality Metrics:",
+                    f"  - Structure: {report.validation.metrics.structure_quality}",
+                    f"  - Duplication Ratio: {report.validation.metrics.duplication_ratio}",
+                    f"  - Noise Ratio: {report.validation.metrics.noise_ratio}",
+                    f"  - Completeness: {report.validation.metrics.completeness}",
+                    f"  - Extraction Confidence: {report.validation.metrics.extraction_confidence}",
+                ]
+            )
         if report.coverage_notes:
             lines.append("- Coverage Notes:")
             lines.extend(f"  - {note}" for note in report.coverage_notes)

@@ -9,12 +9,12 @@
 
 - Name: DevDocsDownloader.
 - Purpose: ingest official programming-language documentation and compile one normalized Markdown manual per language.
-- Entry points: `documentation_downloader.py` for runtime, `setup.py` for environment bootstrap.
+- Entry points: `DevDocsDownloader.py` for runtime, `scripts/setup.py` for environment bootstrap.
 
 ## Implemented Capabilities
 
 - Typer CLI with `run`, `validate`, `init`, and an interactive wizard when launched without a subcommand.
-- Language source parsing from `top_50_programming_languages_with_official_docs.txt`.
+- Language source parsing from `source-documents/renamed-link-source.md`.
 - Crawl planning with site adapters, per-language overrides, crawl modes, allowed/ignored path rules, sitemap seeding, and locale filtering.
 - Async fetch pipeline with HTTP caching, retries, robots checks, per-host delay, browser fallback, and multi-language concurrency.
 - Extraction for HTML, Markdown, PDF, DOCX, and plain text.

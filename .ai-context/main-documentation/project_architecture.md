@@ -7,8 +7,8 @@
 
 ## Runtime Entry Points
 
-- `documentation_downloader.py`: thin launcher; imports `doc_ingest.cli.app` and executes it.
-- `setup.py`: bootstraps local environment, installs requirements, installs Playwright Chromium, and creates runtime folders.
+- `DevDocsDownloader.py`: thin launcher at repo root; imports `doc_ingest.cli.app` and executes it.
+- `scripts/setup.py`: bootstraps local environment, installs requirements from `source-documents/requirements.txt`, installs Playwright Chromium, and creates runtime folders.
 
 ## Core Modules
 
@@ -45,7 +45,7 @@
 
 ## Data Flow
 
-- Input source: `top_50_programming_languages_with_official_docs.txt`.
+- Input source: `source-documents/renamed-link-source.md`.
 - Crawl plan: `LanguageEntry` -> `PlannedSource`.
 - Queue unit: `UrlRecord`.
 - Fetch output: `FetchResult`.
