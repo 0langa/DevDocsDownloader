@@ -17,10 +17,13 @@ class CrawlStateStore:
         merged = self._fallback.model_dump(mode="json")
         normalized_payload = self._normalize_payload(payload)
         merged.update({key: value for key, value in normalized_payload.items() if key != "pages"})
-        merged["pages"] = {
-            key: PageState.model_validate(value)
-            for key, value in normalized_payload.get("pages", {}).items()
-        }
+        pages: dict[str, PageState] = {}
+        for key, value in normalized_payload.get("pages", {}).items():
+            try:
+                pages[key] = PageState.model_validate(value)
+            except Exception:
+                continue
+        merged["pages"] = pages
         return CrawlState.model_validate(merged)
 
     def save(self, state: CrawlState) -> None:
@@ -85,4 +88,3 @@ class CrawlStateStore:
 
         migrated["pages"] = pages
         return migrated
-

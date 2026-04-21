@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 import re
 from pathlib import Path
 
@@ -170,12 +169,26 @@ def _is_duplicate_block(signature: str, seen_signatures: list[str], adapter: Sit
     if signature in seen_signatures:
         return True
     threshold = adapter.dedupe_similarity_threshold() if adapter is not None else 0.96
-    for candidate in seen_signatures:
+    for candidate in seen_signatures[-64:]:
         if len(signature) < 80 or len(candidate) < 80:
             continue
-        if SequenceMatcher(None, signature, candidate).ratio() >= threshold:
+        if _jaccard_4gram(signature, candidate) >= threshold:
             return True
     return False
+
+
+def _jaccard_4gram(left: str, right: str) -> float:
+    def grams(text: str) -> set[str]:
+        if len(text) < 4:
+            return {text}
+        return {text[i : i + 4] for i in range(len(text) - 3)}
+
+    left_grams = grams(left)
+    right_grams = grams(right)
+    denom = len(left_grams | right_grams)
+    if denom == 0:
+        return 0.0
+    return len(left_grams & right_grams) / denom
 
 
 def _build_toc_entries(sections: list[ReconstructedSection], adapter: SiteAdapter | None) -> list[tuple[str, str]]:
@@ -279,4 +292,3 @@ def _normalized_section_signature(markdown: str) -> str:
     text = re.sub(r"(?m)^#{1,6}\s+", "", text)
     text = re.sub(r"\s+", " ", text).strip().lower()
     return text[:5000]
-

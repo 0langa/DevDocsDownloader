@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, FeatureNotFound
 from markdownify import markdownify as html_to_markdown
 
 from ..adapters import SiteAdapter
@@ -62,7 +62,10 @@ def _extract_breadcrumbs(soup: BeautifulSoup, selectors: list[str]) -> list[str]
 
 def extract_html_links(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> HtmlDiscoveryResult:
     html = fetch_result.content.decode("utf-8", errors="ignore")
-    soup = BeautifulSoup(html, "lxml")
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html, "html.parser")
 
     _remove_noise(soup, adapter.discovery_strip_candidates() if adapter is not None else DEFAULT_STRIP_SELECTORS)
     main = _select_main(soup, adapter.content_root_candidates() if adapter is not None else ["main", "article", "[role='main']", ".main-content", ".content", "body"])
@@ -80,7 +83,10 @@ def extract_html_links(fetch_result: FetchResult, *, adapter: SiteAdapter | None
 
 def extract_html(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None) -> ExtractedDocument:
     html = fetch_result.content.decode("utf-8", errors="ignore")
-    soup = BeautifulSoup(html, "lxml")
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html, "html.parser")
 
     _remove_noise(soup, adapter.discovery_strip_candidates() if adapter is not None else DEFAULT_STRIP_SELECTORS)
     main = _select_main(soup, adapter.content_root_candidates() if adapter is not None else ["main", "article", "[role='main']", ".main-content", ".content", "body"])
