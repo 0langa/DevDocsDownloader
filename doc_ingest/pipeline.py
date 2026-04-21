@@ -12,6 +12,7 @@ from .adapters import select_adapter
 from .config import AppConfig
 from .discovery import DiscoveryHelper, RobotsCache
 from .extractors.dispatcher import detect_asset_type, extract_document
+from .extractors.html import extract_html
 from .fetchers.browser import BrowserFetcher
 from .fetchers.http import HttpFetcher
 from .mergers.compiler import compile_language_markdown
@@ -195,79 +196,95 @@ class DocumentationPipeline:
             await queue.put(record.model_copy(update={"normalized_url": normalized}))
             await update_queue_progress()
 
-        async def process_record(record: UrlRecord) -> None:
+        pending_extractions: list[asyncio.Task] = []
+
+        async def _fast_discover(fetch_result: FetchResult) -> DiscoveryDocument:
+            """BS4-only link extraction — fast, no Docling, keeps workers unblocked."""
+            if detect_asset_type(fetch_result) != "html":
+                return DiscoveryDocument(title=fetch_result.final_url, final_url=fetch_result.final_url, links=[], breadcrumbs=[])
+            doc = await asyncio.to_thread(extract_html, fetch_result, adapter=adapter)
+            return DiscoveryDocument(title=doc.title, final_url=doc.final_url, links=doc.links, breadcrumbs=doc.breadcrumbs)
+
+        async def _full_extract_and_store(
+            record: UrlRecord,
+            fetch_result: FetchResult,
+            normalized: str,
+            page: PageState,
+        ) -> None:
             nonlocal dirty, pending_changes
-            normalized = canonicalize_url_for_content(record.normalized_url)
-            page = state.pages.setdefault(
-                normalized,
-                PageState(
-                    normalized_url=normalized,
-                    discovered_url=record.url,
-                    parent_url=record.parent_url,
-                    depth=record.depth,
-                    discovered_from=record.discovered_from,
-                    status="pending",
-                ),
-            )
-            if page.status in {"processed", "failed", "skipped"}:
-                return
-            page.attempts += 1
-            report.pages_queued = max(report.pages_queued, len(state.pages))
             try:
-                discovery_doc, extracted_doc = await self._fetch_and_process(record, plan, adapter, progress_tracker)
-            except Exception as exc:
-                LOGGER.exception("Failed fetching %s", record.url)
-                page.status = "failed"
-                page.last_error = str(exc)
-                report.pages_failed += 1
-                report.failures.append(f"{record.url}: {exc}")
+                document = await asyncio.to_thread(
+                    extract_document,
+                    fetch_result,
+                    preferred_extractors=plan.preferred_extractors,
+                    adapter=adapter,
+                    docling_timeout_seconds=self.config.crawl.docling_timeout_seconds,
+                )
+                if adapter.should_retry_with_browser(
+                    asset_type=detect_asset_type(fetch_result),
+                    fetch_method=fetch_result.method,
+                    word_count=document.word_count,
+                    extraction_score=document.extraction.score if document.extraction else None,
+                ) and self.config.crawl.browser_enabled:
+                    try:
+                        cache_dir = self.config.paths.cache_dir / plan.language.slug
+                        browser_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
+                        browser_doc = await asyncio.to_thread(
+                            extract_document, browser_result,
+                            preferred_extractors=plan.preferred_extractors,
+                            adapter=adapter,
+                            docling_timeout_seconds=self.config.crawl.docling_timeout_seconds,
+                        )
+                        if browser_doc.extraction and document.extraction and browser_doc.extraction.score > document.extraction.score:
+                            document = browser_doc
+                    except Exception:
+                        LOGGER.debug("Browser fallback failed for %s", record.normalized_url, exc_info=True)
+
+                if document.word_count < 10:
+                    page.status = "skipped"
+                    page.warning_codes.append("low-content")
+                    report.pages_skipped += 1
+                    dirty = True
+                    pending_changes += 1
+                    return
+
+                document = normalize_document(document, adapter=adapter)
+                page.asset_type = document.asset_type
+                page.extractor = document.metadata.get("extractor")
+                page.extraction_score = document.extraction.score if document.extraction else None
+                page.extraction_notes = document.extraction.won_because if document.extraction else []
+                page.source_order_hint = document.source_order_hint
+                page.metadata = {"breadcrumbs": document.breadcrumbs, "final_url": document.final_url}
+                for code in self._quality_warning_codes(document):
+                    page.warning_codes.append(code)
+                    report.warnings_by_code[code] = report.warnings_by_code.get(code, 0) + 1
+
+                if document.content_hash in processed_hashes:
+                    page.status = "skipped"
+                    page.duplicate_of = next((url for url, d in documents.items() if d.content_hash == document.content_hash), None)
+                    page.warning_codes.append("duplicate-content")
+                    report.pages_deduplicated += 1
+                    report.pages_skipped += 1
+                else:
+                    page.status = "processed"
+                    page.content_hash = document.content_hash
+                    documents[normalized] = document
+                    processed_hashes.add(document.content_hash)
+                    report.pages_processed = len(documents)
+                    report.assets_processed += 1 if document.asset_type != "html" else 0
+                    report.extractor_choices[page.extractor or "unknown"] = report.extractor_choices.get(page.extractor or "unknown", 0) + 1
+                    await asyncio.to_thread(self._persist_document_cache, language.slug, normalized, document)
+
                 dirty = True
                 pending_changes += 1
-                return
-
-            report.pages_fetched += 1
-            page.title = discovery_doc.title
-
-            for link in self._discover_links(discovery_doc, helper, plan, record.depth):
-                await enqueue(link)
-
-            if extracted_doc is None or extracted_doc.word_count < 10:
-                page.status = "skipped"
-                page.warning_codes.append("low-content")
-                report.pages_skipped += 1
-                dirty = True
-                pending_changes += 1
-                return
-
-            extracted_doc = normalize_document(extracted_doc, adapter=adapter)
-            page.asset_type = extracted_doc.asset_type
-            page.extractor = extracted_doc.metadata.get("extractor")
-            page.extraction_score = extracted_doc.extraction.score if extracted_doc.extraction else None
-            page.extraction_notes = extracted_doc.extraction.won_because if extracted_doc.extraction else []
-            page.source_order_hint = extracted_doc.source_order_hint
-            page.metadata = {"breadcrumbs": extracted_doc.breadcrumbs, "final_url": extracted_doc.final_url}
-            for code in self._quality_warning_codes(extracted_doc):
-                page.warning_codes.append(code)
-                report.warnings_by_code[code] = report.warnings_by_code.get(code, 0) + 1
-
-            if extracted_doc.content_hash in processed_hashes:
-                page.status = "skipped"
-                page.duplicate_of = next((url for url, document in documents.items() if document.content_hash == extracted_doc.content_hash), None)
-                page.warning_codes.append("duplicate-content")
-                report.pages_deduplicated += 1
-                report.pages_skipped += 1
-            else:
-                page.status = "processed"
-                page.content_hash = extracted_doc.content_hash
-                documents[normalized] = extracted_doc
-                processed_hashes.add(extracted_doc.content_hash)
-                report.pages_processed = len(documents)
-                report.assets_processed += 1 if extracted_doc.asset_type != "html" else 0
-                report.extractor_choices[page.extractor or "unknown"] = report.extractor_choices.get(page.extractor or "unknown", 0) + 1
-                await asyncio.to_thread(self._persist_document_cache, language.slug, normalized, extracted_doc)
-
-            dirty = True
-            pending_changes += 1
+                await persist_state()
+            except Exception:
+                LOGGER.exception("Extraction failed for %s", record.url)
+                if page.status not in {"processed", "skipped"}:
+                    page.status = "failed"
+                    report.pages_failed += 1
+                    dirty = True
+                    pending_changes += 1
 
         async def discovery_worker() -> None:
             while True:
@@ -277,7 +294,56 @@ class DocumentationPipeline:
                     queue.task_done()
                     return
                 try:
-                    await process_record(record)
+                    normalized = canonicalize_url_for_content(record.normalized_url)
+                    page = state.pages.setdefault(
+                        normalized,
+                        PageState(
+                            normalized_url=normalized,
+                            discovered_url=record.url,
+                            parent_url=record.parent_url,
+                            depth=record.depth,
+                            discovered_from=record.discovered_from,
+                            status="pending",
+                        ),
+                    )
+                    if page.status in {"processed", "failed", "skipped"}:
+                        return
+                    page.attempts += 1
+                    report.pages_queued = max(report.pages_queued, len(state.pages))
+
+                    cache_dir = self.config.paths.cache_dir / plan.language.slug
+                    try:
+                        fetch_result = await self.http_fetcher.fetch(record.normalized_url, cache_dir)
+                        if progress_tracker is not None:
+                            await progress_tracker.on_fetch_complete(plan.language.slug, fetch_result.status_code, fetch_result.history_status_codes, fetch_result.method)
+                        if fetch_result.status_code >= 400:
+                            raise RuntimeError(f"HTTP {fetch_result.status_code}")
+                        if detect_asset_type(fetch_result) == "unknown" and self.config.crawl.browser_enabled:
+                            fetch_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
+                    except Exception as exc:
+                        if progress_tracker is not None:
+                            await progress_tracker.on_request_failure(plan.language.slug)
+                        LOGGER.exception("Failed fetching %s", record.url)
+                        page.status = "failed"
+                        page.last_error = str(exc)
+                        report.pages_failed += 1
+                        report.failures.append(f"{record.url}: {exc}")
+                        dirty = True
+                        pending_changes += 1
+                        return
+
+                    report.pages_fetched += 1
+
+                    # Fast BS4 discovery — no Docling, worker returns to queue immediately after
+                    discovery_doc = await _fast_discover(fetch_result)
+                    page.title = discovery_doc.title
+
+                    for link in self._discover_links(discovery_doc, helper, plan, record.depth):
+                        await enqueue(link)
+
+                    # Docling extraction runs in background — doesn't block this worker
+                    task = asyncio.create_task(_full_extract_and_store(record, fetch_result, normalized, page))
+                    pending_extractions.append(task)
                     await persist_state()
                 finally:
                     queue.task_done()
@@ -311,6 +377,9 @@ class DocumentationPipeline:
         tune_task = asyncio.create_task(_tune_loop())
         try:
             await queue.join()
+            # Wait for all background Docling extractions that were fired during the crawl
+            if pending_extractions:
+                await asyncio.gather(*pending_extractions, return_exceptions=True)
         finally:
             tune_task.cancel()
             try:
@@ -351,55 +420,6 @@ class DocumentationPipeline:
         if progress_tracker is not None:
             await progress_tracker.on_language_complete(language.slug, report)
         return report
-
-    async def _fetch_and_process(
-        self,
-        record: UrlRecord,
-        plan: PlannedSource,
-        adapter,
-        progress_tracker: CrawlProgressTracker | None,
-    ) -> tuple[DiscoveryDocument, ExtractedDocument | None]:
-        cache_dir = self.config.paths.cache_dir / plan.language.slug
-        try:
-            fetch_result = await self.http_fetcher.fetch(record.normalized_url, cache_dir)
-        except Exception:
-            if progress_tracker is not None:
-                await progress_tracker.on_request_failure(plan.language.slug)
-            raise
-
-        if progress_tracker is not None:
-            await progress_tracker.on_fetch_complete(plan.language.slug, fetch_result.status_code, fetch_result.history_status_codes, fetch_result.method)
-
-        if fetch_result.status_code >= 400:
-            raise RuntimeError(f"HTTP {fetch_result.status_code}")
-
-        asset_type = detect_asset_type(fetch_result)
-        if asset_type == "unknown" and self.config.crawl.browser_enabled:
-            fetch_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
-            asset_type = detect_asset_type(fetch_result)
-
-        document = await asyncio.to_thread(extract_document, fetch_result, preferred_extractors=plan.preferred_extractors, adapter=adapter, docling_timeout_seconds=self.config.crawl.docling_timeout_seconds)
-        if adapter.should_retry_with_browser(
-            asset_type=asset_type,
-            fetch_method=fetch_result.method,
-            word_count=document.word_count,
-            extraction_score=document.extraction.score if document.extraction else None,
-        ) and self.config.crawl.browser_enabled:
-            try:
-                browser_result = await self.browser_fetcher.fetch(record.normalized_url, cache_dir)
-                browser_document = await asyncio.to_thread(extract_document, browser_result, preferred_extractors=plan.preferred_extractors, adapter=adapter, docling_timeout_seconds=self.config.crawl.docling_timeout_seconds)
-                if browser_document.extraction and document.extraction and browser_document.extraction.score > document.extraction.score:
-                    document = browser_document
-            except Exception:
-                LOGGER.debug("Browser fallback failed for %s", record.normalized_url, exc_info=True)
-
-        discovery = DiscoveryDocument(
-            title=document.title,
-            final_url=document.final_url,
-            links=document.links if asset_type == "html" else [],
-            breadcrumbs=document.breadcrumbs,
-        )
-        return discovery, document
 
     def _discover_links(self, document: DiscoveryDocument, helper: DiscoveryHelper, plan: PlannedSource, depth: int) -> list[UrlRecord]:
         if depth >= plan.max_depth:
