@@ -86,7 +86,7 @@ class PipelineResumeTests(unittest.TestCase):
                 source_documents = root / "source-documents"
                 source_documents.mkdir(parents=True, exist_ok=True)
                 (source_documents / "renamed-link-source.md").write_text(
-                    "Python - https://docs.python.org/3/\n",
+                    "- Python - https://docs.python.org/3/\n",
                     encoding="utf-8",
                 )
                 config = load_config(root)
@@ -132,7 +132,7 @@ class PipelineResumeTests(unittest.TestCase):
                 source_documents = root / "source-documents"
                 source_documents.mkdir(parents=True, exist_ok=True)
                 (source_documents / "renamed-link-source.md").write_text(
-                    "Python - https://docs.python.org/3/\n",
+                    "- Python - https://docs.python.org/3/\n",
                     encoding="utf-8",
                 )
                 config = load_config(root)
