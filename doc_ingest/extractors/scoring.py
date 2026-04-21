@@ -36,9 +36,9 @@ def score_extraction(document: ExtractedDocument, extractor_name: str) -> Extrac
         heading_count=heading_count,
         code_block_count=code_block_count,
         table_count=table_count,
-        link_line_ratio=(len(link_lines) / len(non_empty)) if non_empty else 1.0,
-        repeated_line_ratio=(sum(repeated_lines) / len(non_empty)) if non_empty else 1.0,
-        boilerplate_ratio=(boilerplate_hits / len(non_empty)) if non_empty else 1.0,
+        link_line_ratio=(len(link_lines) / len(non_empty)) if non_empty else 0.0,
+        repeated_line_ratio=(sum(repeated_lines) / len(non_empty)) if non_empty else 0.0,
+        boilerplate_ratio=(boilerplate_hits / len(non_empty)) if non_empty else 0.0,
         malformed_ratio=(malformed_chars / max(1, len(document.markdown))),
         blank_line_ratio=(len(lines) - len(non_empty)) / max(1, len(lines)),
     )

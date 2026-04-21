@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 AssetType = Literal["html", "markdown", "pdf", "docx", "text", "binary", "unknown"]
 FetchMethod = Literal["http", "browser", "cache"]
 StatusType = Literal["pending", "discovered", "processed", "failed", "skipped"]
+ExtractionStatus = Literal["none", "pending", "running", "complete", "failed"]
 CrawlMode = Literal["important", "full"]
 
 
@@ -137,6 +138,7 @@ class PageState(BaseModel):
     discovered_from: str | None = None
     title: str | None = None
     status: StatusType = "discovered"
+    extraction_status: ExtractionStatus = "none"
     asset_type: AssetType | None = None
     attempts: int = 0
     last_error: str | None = None
