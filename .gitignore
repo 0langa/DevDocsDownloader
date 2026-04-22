@@ -1,4 +1,4 @@
-# Python bytecode / caches
+# Bytecode, caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -13,29 +13,25 @@ venv/
 env/
 ENV/
 
-# Build / packaging artifacts
+# Build/package/test artifacts
 build/
 dist/
 *.egg-info/
 .eggs/
 pip-wheel-metadata/
-
-# Coverage / test artifacts
 .coverage
 .coverage.*
 htmlcov/
 
-# Runtime logs
+# Logs and runtime state
 logs/
 *.log
-
-# Runtime state, fetched assets, generated outputs
 cache/
 state/
 tmp/
 output/
 
-# Local environment / secrets
+# Local environment/secrets
 .env
 .env.*
 *.env
