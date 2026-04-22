@@ -1,0 +1,178 @@
+{
+  "python": [
+    "Tutorial",
+    "Language Reference",
+    "Built-in Functions",
+    "Built-in Types",
+    "Built-in Exceptions",
+    "Built-in Constants",
+    "Glossary",
+    "typing",
+    "collections",
+    "collections.abc",
+    "itertools",
+    "functools",
+    "os",
+    "os.path",
+    "sys",
+    "pathlib",
+    "re",
+    "json",
+    "datetime",
+    "dataclasses",
+    "enum",
+    "io",
+    "logging",
+    "asyncio",
+    "subprocess",
+    "threading",
+    "multiprocessing"
+  ],
+  "javascript": [
+    "Classes",
+    "Expressions & Operators",
+    "Functions",
+    "Global Objects",
+    "Iteration protocols",
+    "Operators",
+    "Statements",
+    "Statements & declarations"
+  ],
+  "typescript": [
+    "Handbook",
+    "Reference",
+    "Declaration Reference",
+    "JSX",
+    "Modules"
+  ],
+  "rust": [
+    "Book",
+    "Language",
+    "Primitive Types",
+    "Standard Library",
+    "Keywords",
+    "std",
+    "std::collections",
+    "std::iter",
+    "std::option",
+    "std::result",
+    "std::sync",
+    "std::thread"
+  ],
+  "go": [
+    "Built-in",
+    "Statements",
+    "Types",
+    "fmt",
+    "errors",
+    "context",
+    "sync",
+    "io",
+    "os",
+    "net/http",
+    "encoding/json",
+    "strings",
+    "strconv"
+  ],
+  "node": [
+    "Globals",
+    "Modules",
+    "fs",
+    "path",
+    "http",
+    "https",
+    "stream",
+    "events",
+    "os",
+    "process",
+    "util",
+    "buffer",
+    "url",
+    "crypto"
+  ],
+  "cpp": [
+    "Language",
+    "Keywords",
+    "Preprocessor",
+    "Utilities library",
+    "Strings library",
+    "Containers library",
+    "Iterators library",
+    "Algorithms library",
+    "Numerics library",
+    "Input/output library",
+    "Thread support library"
+  ],
+  "c": [
+    "Language",
+    "Keywords",
+    "Preprocessor",
+    "Utilities",
+    "Strings",
+    "Input/output",
+    "Numerics",
+    "Threads",
+    "Algorithms"
+  ],
+  "java": [
+    "Language Specification",
+    "java.lang",
+    "java.util",
+    "java.util.concurrent",
+    "java.io",
+    "java.nio.file",
+    "java.net",
+    "java.time"
+  ],
+  "ruby": [
+    "Language",
+    "Core",
+    "Enumerable",
+    "Array",
+    "Hash",
+    "String",
+    "Kernel"
+  ],
+  "php": [
+    "Language Reference",
+    "Strings",
+    "Arrays",
+    "Classes/Object",
+    "Control Structures",
+    "Functions"
+  ],
+  "bash": [
+    "Builtins",
+    "Shell Syntax",
+    "Shell Expansions",
+    "Redirections",
+    "Control Structures"
+  ],
+  "css": [
+    "At-rules",
+    "Properties",
+    "Selectors",
+    "Types",
+    "Concepts"
+  ],
+  "html": [
+    "Elements",
+    "Attributes",
+    "Global attributes",
+    "Events"
+  ],
+  "postgresql": [
+    "Tutorial",
+    "SQL Commands",
+    "Data Types",
+    "Functions and Operators",
+    "Server Administration"
+  ],
+  "sqlite": [
+    "Language",
+    "Core Functions",
+    "Date And Time Functions",
+    "Aggregate Functions",
+    "Pragma Statements"
+  ]
+}

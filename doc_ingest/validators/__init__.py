@@ -1,1 +1,0 @@
-"""Output validation logic."""
