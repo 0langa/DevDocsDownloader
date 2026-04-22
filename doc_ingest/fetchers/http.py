@@ -47,7 +47,6 @@ class HttpFetcher:
         meta_path = cache_dir / f"{cache_key}.json"
 
         if cache_path.exists() and meta_path.exists():
-<<<<<<< HEAD
             meta, cached_payload = await asyncio.gather(
                 asyncio.to_thread(read_json, meta_path, {}),
                 asyncio.to_thread(cache_path.read_bytes),
@@ -61,28 +60,6 @@ class HttpFetcher:
                 content=cached_payload,
                 history_status_codes=list(meta.get("history_status_codes", [])),
             )
-=======
-            try:
-                meta = read_json(meta_path, {})
-                if not isinstance(meta, dict):
-                    raise ValueError("cache metadata is malformed")
-                final_url = meta.get("final_url")
-                content_type = meta.get("content_type")
-                status_code = meta.get("status_code")
-                if final_url is None or content_type is None or status_code is None:
-                    raise ValueError("cache metadata missing required fields")
-                return FetchResult(
-                    url=normalized,
-                    final_url=final_url,
-                    content_type=content_type,
-                    status_code=int(status_code),
-                    method="cache",
-                    content=cache_path.read_bytes(),
-                    history_status_codes=list(meta.get("history_status_codes", [])),
-                )
-            except Exception:
-                pass
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
 
         host = httpx.URL(normalized).host or "default"
         await self._wait_for_host_slot(host)
@@ -148,8 +125,6 @@ class HttpFetcher:
 
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)
-<<<<<<< HEAD
-=======
 
     def _retry_after_seconds(self, response: httpx.Response) -> float:
         value = response.headers.get("retry-after")
@@ -163,4 +138,3 @@ class HttpFetcher:
                 return max(0.0, dt.timestamp() - time.time())
             except Exception:
                 return 0.0
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506

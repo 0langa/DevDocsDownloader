@@ -27,11 +27,7 @@ from .extractors.dispatcher import detect_asset_type, extract_document
 from .extractors.html import extract_html_links
 from .fetchers.browser import BrowserFetcher
 from .fetchers.http import HttpFetcher
-<<<<<<< HEAD
 from .mergers.compiler import compile_language_markdown, compile_language_markdown_streaming
-=======
-from .mergers.compiler import compile_language_markdown
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
 from .models import CrawlMode, CrawlState, ExtractedDocument, FetchResult, LanguageEntry, LanguageRunReport, PageState, PlannedSource, RunSummary, UrlRecord
 from .normalizers.markdown import normalize_document
 from .parser import parse_language_file
@@ -162,15 +158,11 @@ class DocumentationPipeline:
         state.plan = plan.model_dump(mode="json")
 
         helper = DiscoveryHelper(self.config, adapter, plan)
-<<<<<<< HEAD
         queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=max(0, self.config.crawl.max_queue_size_per_language))
         extraction_workers_max = max(1, min(self.config.crawl.max_concurrency, self.config.crawl.max_extraction_workers))
         extraction_queue: asyncio.Queue[tuple[UrlRecord, FetchResult, str, PageState] | None] = asyncio.Queue(
             maxsize=max(1, self.config.crawl.max_pending_extractions_per_language)
         )
-=======
-        queue: asyncio.Queue[UrlRecord | None] = asyncio.Queue(maxsize=max(1, self.config.crawl.max_queue_size_per_language))
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
         queued_urls: set[str] = set()
         pending_document_cache: dict[str, ExtractedDocument] = {}
         in_memory_documents: OrderedDict[str, ExtractedDocument] = OrderedDict()
@@ -497,12 +489,7 @@ class DocumentationPipeline:
 
                 if document.content_hash in processed_hashes:
                     page.status = "skipped"
-<<<<<<< HEAD
                     page.duplicate_of = hash_to_url.get(document.content_hash)
-=======
-                    page.extraction_status = "complete"
-                    page.duplicate_of = next((url for url, d in documents.items() if d.content_hash == document.content_hash), None)
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
                     page.warning_codes.append("duplicate-content")
                     report.pages_deduplicated += 1
                     report.pages_skipped += 1
@@ -590,10 +577,7 @@ class DocumentationPipeline:
                         report.failures.append(f"{record.url}: {exc}")
                         dirty = True
                         pending_changes += 1
-<<<<<<< HEAD
                         await persist_state()
-=======
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
                         continue
 
                     report.pages_fetched += 1
@@ -610,14 +594,7 @@ class DocumentationPipeline:
                         await enqueue(link)
                     _record_stage("discover", discover_started, success=True)
 
-<<<<<<< HEAD
                     await extraction_queue.put((record, fetch_result, normalized, page))
-=======
-                    # Docling extraction runs in background — doesn't block this worker
-                    task = asyncio.create_task(_full_extract_and_store(record, fetch_result, normalized, page))
-                    page.extraction_status = "running"
-                    pending_extractions.append(task)
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
                     await persist_state()
                 finally:
                     queue.task_done()
@@ -664,20 +641,14 @@ class DocumentationPipeline:
             await enqueue(record)
 
         report.pages_discovered = len(state.pages)
-<<<<<<< HEAD
         workers = [asyncio.create_task(discovery_worker()) for _ in range(max(1, self.config.crawl.max_concurrency))]
         extraction_workers = [asyncio.create_task(extraction_worker(index)) for index in range(extraction_workers_max)]
-=======
-        worker_count = max(1, await self.adaptive_controller.get_page_concurrency())
-        workers = [asyncio.create_task(discovery_worker()) for _ in range(worker_count)]
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
 
         async def _tune_loop() -> None:
             nonlocal cpu_sum, cpu_samples, rss_peak_mb, desired_extraction_workers, scale_events, last_scale_at
             psutil.cpu_percent(interval=None)
             while True:
                 await asyncio.sleep(5.0)
-<<<<<<< HEAD
                 await update_queue_progress(force=True)
                 discovery_fill_ratio = queue.qsize() / max(1, self.config.crawl.max_queue_size_per_language or max(1, queue.qsize()))
                 extraction_fill_ratio = extraction_queue.qsize() / max(1, self.config.crawl.max_pending_extractions_per_language)
@@ -718,11 +689,6 @@ class DocumentationPipeline:
                     desired_extraction_workers -= 1
                     scale_events += 1
                     last_scale_at = now
-=======
-                queue_fill_ratio = queue.qsize() / max(1, self.config.crawl.smart_queue_soft_cap)
-                max_discovered = await self.adaptive_controller.get_max_discovered()
-                await self.adaptive_controller.tune(queue_fill_ratio=queue_fill_ratio, limit_hit=len(state.pages) >= max_discovered)
->>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
 
         tune_task = asyncio.create_task(_tune_loop())
         try:
