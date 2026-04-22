@@ -33,6 +33,7 @@ logs/
 cache/
 state/
 tmp/
+output/
 
 # Local environment / secrets
 .env
