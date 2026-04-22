@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from doc_ingest.config import load_config; c = load_config\\(\\); print\\(f'Root: {c.paths.root}'\\); print\\(f'Input file: {c.paths.input_file}'\\); print\\(f'Input exists: {c.paths.input_file.exists\\(\\)}'\\)\")",
+      "Bash(python -c \"from doc_ingest.cli import app; print\\('Imports successful'\\)\")",
+      "Bash(grep -rn \"return\\\\s*$\\\\|continue\\\\|break\" \"c:/Users/juliu/Documents/AI text stuff/Documentations Coding/doc_ingest/cli.py\" --include=\"*.py\")"
+    ]
+  }
+}
