@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import httpx
-from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from ..config import AppConfig
 from ..models import FetchResult
@@ -46,6 +47,7 @@ class HttpFetcher:
         meta_path = cache_dir / f"{cache_key}.json"
 
         if cache_path.exists() and meta_path.exists():
+<<<<<<< HEAD
             meta, cached_payload = await asyncio.gather(
                 asyncio.to_thread(read_json, meta_path, {}),
                 asyncio.to_thread(cache_path.read_bytes),
@@ -59,18 +61,45 @@ class HttpFetcher:
                 content=cached_payload,
                 history_status_codes=list(meta.get("history_status_codes", [])),
             )
+=======
+            try:
+                meta = read_json(meta_path, {})
+                if not isinstance(meta, dict):
+                    raise ValueError("cache metadata is malformed")
+                final_url = meta.get("final_url")
+                content_type = meta.get("content_type")
+                status_code = meta.get("status_code")
+                if final_url is None or content_type is None or status_code is None:
+                    raise ValueError("cache metadata missing required fields")
+                return FetchResult(
+                    url=normalized,
+                    final_url=final_url,
+                    content_type=content_type,
+                    status_code=int(status_code),
+                    method="cache",
+                    content=cache_path.read_bytes(),
+                    history_status_codes=list(meta.get("history_status_codes", [])),
+                )
+            except Exception:
+                pass
+>>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
 
         host = httpx.URL(normalized).host or "default"
         await self._wait_for_host_slot(host)
 
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self.config.crawl.retries),
-            wait=wait_exponential(multiplier=self.config.crawl.backoff_base_seconds, min=1, max=12),
+            wait=wait_exponential_jitter(initial=self.config.crawl.backoff_base_seconds, max=12, jitter=2),
             retry=retry_if_exception_type((httpx.HTTPError, TimeoutError)),
             reraise=True,
         ):
             with attempt:
                 response = await self._client.get(normalized)
+                if response.status_code in {429, 503}:
+                    retry_after = self._retry_after_seconds(response)
+                    if retry_after > 0:
+                        await asyncio.sleep(retry_after)
+                    raise httpx.HTTPError(f"Retryable status code: {response.status_code}", request=response.request)
                 result = FetchResult(
                     url=normalized,
                     final_url=str(response.url),
@@ -102,9 +131,6 @@ class HttpFetcher:
             delay_seconds = await self.adaptive_controller.get_per_host_delay()
 
         if host not in self._host_state_locks:
-            if len(self._host_state_locks) >= _MAX_HOST_ENTRIES:
-                self._host_state_locks.popitem(last=False)
-                self._host_next_allowed_at.popitem(last=False)
             self._host_state_locks[host] = asyncio.Lock()
         else:
             self._host_state_locks.move_to_end(host)
@@ -122,3 +148,19 @@ class HttpFetcher:
 
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)
+<<<<<<< HEAD
+=======
+
+    def _retry_after_seconds(self, response: httpx.Response) -> float:
+        value = response.headers.get("retry-after")
+        if not value:
+            return 0.0
+        try:
+            return max(0.0, float(int(value)))
+        except ValueError:
+            try:
+                dt = parsedate_to_datetime(value)
+                return max(0.0, dt.timestamp() - time.time())
+            except Exception:
+                return 0.0
+>>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506

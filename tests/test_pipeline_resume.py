@@ -130,6 +130,34 @@ class PipelineResumeTests(unittest.TestCase):
 
         asyncio.run(run_case())
 
+    def test_state_store_skips_invalid_page_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "python.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "language": "Python",
+                        "slug": "python",
+                        "source_url": "https://docs.python.org/3/",
+                        "pages": {
+                            "https://docs.python.org/3/ok": {
+                                "normalized_url": "https://docs.python.org/3/ok",
+                                "discovered_url": "https://docs.python.org/3/ok",
+                                "status": "processed",
+                            },
+                            "https://docs.python.org/3/bad": {
+                                "status": "processed"
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = CrawlStateStore(state_path, language="Python", slug="python", source_url="https://docs.python.org/3/")
+            state = store.load()
+            self.assertIn("https://docs.python.org/3/ok", state.pages)
+            self.assertNotIn("https://docs.python.org/3/bad", state.pages)
+
     def test_pipeline_respects_max_pages_limit(self) -> None:
         async def run_case() -> None:
             with tempfile.TemporaryDirectory() as tmp:

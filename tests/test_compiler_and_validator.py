@@ -68,6 +68,23 @@ class CompilerAndValidatorTests(unittest.TestCase):
             result = validate_markdown("Python", output, config)
             self.assertGreater(result.score, 0.5)
             self.assertGreater(result.metrics.structure_quality, 0.7)
+            self.assertNotIn("weak_structure", [issue.code for issue in result.issues])
+
+    def test_validator_flags_weak_structure_only_when_h3_and_h4_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_documents = root / "source-documents"
+            source_documents.mkdir(parents=True, exist_ok=True)
+            (source_documents / "renamed-link-source.md").write_text("", encoding="utf-8")
+            config = load_config(root)
+            output = root / "output" / "markdown" / "python.md"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                "# Python Documentation\n\n## Metadata\n\n## Table of Contents\n\n## Documentation\n\n### Guide\n\nBody text.\n\n## Appendix\n",
+                encoding="utf-8",
+            )
+            result = validate_markdown("Python", output, config)
+            self.assertNotIn("weak_structure", [issue.code for issue in result.issues])
 
     def test_compiler_deduplicates_near_duplicate_pages_and_builds_appendix(self) -> None:
         language = LanguageEntry(name="Python", source_url="https://docs.python.org/3/", slug="python")

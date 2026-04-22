@@ -21,9 +21,10 @@ import io
 import logging
 import re
 import threading
+import atexit
 from typing import TYPE_CHECKING
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, FeatureNotFound
 
 from ..adapters import SiteAdapter
 from ..models import ExtractedDocument, FetchResult
@@ -83,6 +84,7 @@ _docling_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=max(1, min(4, _os.cpu_count() or 1)),
     thread_name_prefix="docling",
 )
+atexit.register(_docling_executor.shutdown, wait=False, cancel_futures=True)
 
 
 def extract_html_docling(fetch_result: FetchResult, *, adapter: SiteAdapter | None = None, timeout_seconds: float = 25.0) -> ExtractedDocument:
@@ -115,7 +117,10 @@ def _docling_convert(fetch_result: FetchResult, *, adapter: SiteAdapter | None =
     html_str = fetch_result.content.decode("utf-8", errors="ignore")
 
     # ---- Single BS4 parse — used for both metadata and Docling input prep ---
-    soup = BeautifulSoup(html_str, "lxml")
+    try:
+        soup = BeautifulSoup(html_str, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html_str, "html.parser")
     title = soup.title.get_text(strip=True) if soup.title else fetch_result.final_url
 
     strip_selectors = adapter.discovery_strip_candidates() if adapter is not None else DEFAULT_LINK_STRIP_SELECTORS

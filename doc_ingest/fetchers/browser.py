@@ -43,6 +43,7 @@ class BrowserFetcher:
 
     async def fetch(self, url: str, cache_dir: Path) -> FetchResult:
         normalized = normalize_url(url)
+        browser = await self._get_browser()
         cache_key = stable_hash(f"browser:{normalized}")
         cache_path = cache_dir / f"{cache_key}.html"
         if cache_path.exists():
@@ -58,10 +59,12 @@ class BrowserFetcher:
             )
 
         async with self._page_semaphore:
-            browser = await self._get_browser()
             page = await browser.new_page(user_agent=self.config.crawl.user_agent)
             try:
-                await page.goto(normalized, wait_until="networkidle", timeout=int(self.config.crawl.browser_timeout_seconds * 1000))
+                try:
+                    await page.goto(normalized, wait_until="domcontentloaded", timeout=int(self.config.crawl.browser_timeout_seconds * 1000))
+                except Exception:
+                    await page.goto(normalized, wait_until="networkidle", timeout=int(self.config.crawl.browser_timeout_seconds * 1000))
                 content = await page.content()
                 final_url = page.url
             finally:

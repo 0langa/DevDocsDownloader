@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import urllib.robotparser
 from collections import deque
@@ -22,6 +23,7 @@ class RobotsCache:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self._cache: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+<<<<<<< HEAD
         self._client = httpx.AsyncClient(
             timeout=self.config.crawl.request_timeout_seconds,
             headers={"User-Agent": self.config.crawl.user_agent},
@@ -29,6 +31,9 @@ class RobotsCache:
 
     async def close(self) -> None:
         await self._client.aclose()
+=======
+        self._locks: dict[str, asyncio.Lock] = {}
+>>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
 
     async def allowed(self, url: str) -> bool:
         if not self.config.crawl.respect_robots_txt:
@@ -36,6 +41,7 @@ class RobotsCache:
         parsed = urlparse(url)
         root = f"{parsed.scheme}://{parsed.netloc}"
         if root not in self._cache:
+<<<<<<< HEAD
             robots_url = f"{root}/robots.txt"
             try:
                 response = await self._client.get(robots_url)
@@ -47,6 +53,23 @@ class RobotsCache:
                     self._cache[root] = None
             except Exception:
                 self._cache[root] = None
+=======
+            lock = self._locks.setdefault(root, asyncio.Lock())
+            async with lock:
+                if root not in self._cache:
+                    robots_url = f"{root}/robots.txt"
+                    try:
+                        async with httpx.AsyncClient(timeout=self.config.crawl.request_timeout_seconds, headers={"User-Agent": self.config.crawl.user_agent}) as client:
+                            response = await client.get(robots_url)
+                        parser = urllib.robotparser.RobotFileParser()
+                        if response.status_code < 400:
+                            parser.parse(response.text.splitlines())
+                            self._cache[root] = parser
+                        else:
+                            self._cache[root] = None
+                    except Exception:
+                        self._cache[root] = None
+>>>>>>> 687d0a1722f69b8c8aa65dc9d95d1bf8f080b506
         parser = self._cache[root]
         return True if parser is None else bool(parser.can_fetch(self.config.crawl.user_agent, url))
 
