@@ -80,7 +80,7 @@ DEFAULT_LINK_STRIP_SELECTORS = [
 
 import os as _os
 _docling_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=max(4, _os.cpu_count() or 4),
+    max_workers=max(1, min(4, _os.cpu_count() or 1)),
     thread_name_prefix="docling",
 )
 

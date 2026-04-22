@@ -67,13 +67,14 @@ class BrowserFetcher:
             finally:
                 await page.close()
 
-        await asyncio.to_thread(write_bytes, cache_path, content.encode("utf-8"))
+        content_bytes = content.encode("utf-8")
+        await asyncio.to_thread(write_bytes, cache_path, content_bytes)
         return FetchResult(
             url=normalized,
             final_url=final_url,
             content_type="text/html; charset=utf-8",
             status_code=200,
             method="browser",
-            content=content.encode("utf-8"),
+            content=content_bytes,
             history_status_codes=[],
         )

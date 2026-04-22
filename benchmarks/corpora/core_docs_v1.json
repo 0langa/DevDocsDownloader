@@ -1,0 +1,13 @@
+{
+  "name": "core_docs_v1",
+  "languages": [
+    {
+      "name": "Python",
+      "source_url": "https://docs.python.org/3/"
+    },
+    {
+      "name": "TypeScript",
+      "source_url": "https://www.typescriptlang.org/docs/"
+    }
+  ]
+}

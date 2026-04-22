@@ -11,6 +11,10 @@ from .scoring import score_extraction
 from .textual import extract_docx, extract_markdown, extract_text
 
 
+_EARLY_ACCEPT_SCORE = 0.74
+_MIN_EARLY_ACCEPT_WORDS = 120
+
+
 def detect_asset_type(fetch_result: FetchResult) -> str:
     ct = fetch_result.content_type.lower()
     url = fetch_result.final_url.lower()
@@ -60,16 +64,37 @@ def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractor
         "html_bs4": lambda result: extract_html(result, adapter=adapter),
     }
     preferred = [name for name in preferred_extractors if name in extractor_map]
-    order = preferred + [name for name in ["html_docling", "html_readability"] if name not in preferred]
+    if "html_readability" in preferred and "html_docling" in preferred:
+        preferred = ["html_readability", "html_docling", *[name for name in preferred if name not in {"html_readability", "html_docling"}]]
+    fallback_order = ["html_readability", "html_docling"]
+    order = list(dict.fromkeys([*preferred, *fallback_order]))
 
-    for extractor_name in order:
+    for index, extractor_name in enumerate(order):
         extractor = extractor_map[extractor_name]
         try:
             document = extractor(fetch_result)
         except Exception:
             continue
         decision = score_extraction(document, extractor_name)
-        candidates.append((extractor_name, document.model_copy(update={"extraction": decision})))
+        document.extraction = decision
+        candidates.append((extractor_name, document))
+        # Fast-path acceptance avoids running a second full HTML->Markdown conversion.
+        if (
+            index == 0
+            and decision.score >= _EARLY_ACCEPT_SCORE
+            and document.word_count >= _MIN_EARLY_ACCEPT_WORDS
+            and len(document.headings) >= 1
+        ):
+            document.metadata["extractor"] = extractor_name
+            document.extraction.candidates = [
+                {
+                    "extractor": extractor_name,
+                    "score": decision.score,
+                    "word_count": document.word_count,
+                    "heading_count": len(document.headings),
+                }
+            ]
+            return document
 
     if not candidates:
         document = extract_html(fetch_result, adapter=adapter)
@@ -97,4 +122,3 @@ def _extract_html_with_scoring(fetch_result: FetchResult, *, preferred_extractor
     ]
     winner.metadata["extractor"] = winner_name
     return winner
-

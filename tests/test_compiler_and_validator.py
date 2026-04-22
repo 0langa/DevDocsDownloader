@@ -6,7 +6,7 @@ from pathlib import Path
 
 from doc_ingest.adapters import PythonDocsAdapter, TypeScriptAdapter
 from doc_ingest.config import load_config
-from doc_ingest.mergers.compiler import compile_language_markdown
+from doc_ingest.mergers.compiler import compile_language_markdown, compile_language_markdown_streaming
 from doc_ingest.models import CrawlState, ExtractedDocument, LanguageEntry, PageState
 from doc_ingest.validators.markdown_validator import validate_markdown
 
@@ -132,6 +132,37 @@ class CompilerAndValidatorTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
             self.assertNotIn("On this page", text)
             self.assertIn("Useful handbook text.", text)
+
+    def test_compile_streaming_accepts_iterable_documents(self) -> None:
+        language = LanguageEntry(name="Python", source_url="https://docs.python.org/3/", slug="python")
+        docs = [
+            ExtractedDocument(
+                url="https://docs.python.org/3/tutorial",
+                final_url="https://docs.python.org/3/tutorial",
+                title="Tutorial",
+                markdown="## Tutorial\n\nTutorial text",
+                asset_type="html",
+                content_hash="stream-a",
+                word_count=4,
+                breadcrumbs=["Guide"],
+            ),
+            ExtractedDocument(
+                url="https://docs.python.org/3/library",
+                final_url="https://docs.python.org/3/library",
+                title="Library",
+                markdown="## Library\n\nLibrary text",
+                asset_type="html",
+                content_hash="stream-b",
+                word_count=4,
+                breadcrumbs=["Reference"],
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "python-stream.md"
+            compile_language_markdown_streaming(language, (doc for doc in docs), output, adapter=PythonDocsAdapter())
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("### Guide", text)
+            self.assertIn("### Reference", text)
 
 
 if __name__ == "__main__":

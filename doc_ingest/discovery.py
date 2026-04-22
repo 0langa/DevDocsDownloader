@@ -22,6 +22,13 @@ class RobotsCache:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self._cache: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+        self._client = httpx.AsyncClient(
+            timeout=self.config.crawl.request_timeout_seconds,
+            headers={"User-Agent": self.config.crawl.user_agent},
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     async def allowed(self, url: str) -> bool:
         if not self.config.crawl.respect_robots_txt:
@@ -31,8 +38,7 @@ class RobotsCache:
         if root not in self._cache:
             robots_url = f"{root}/robots.txt"
             try:
-                async with httpx.AsyncClient(timeout=self.config.crawl.request_timeout_seconds, headers={"User-Agent": self.config.crawl.user_agent}) as client:
-                    response = await client.get(robots_url)
+                response = await self._client.get(robots_url)
                 parser = urllib.robotparser.RobotFileParser()
                 if response.status_code < 400:
                     parser.parse(response.text.splitlines())
@@ -86,26 +92,29 @@ class DiscoveryHelper:
         candidates = list(dict.fromkeys([*self.plan.sitemap_urls, *self._default_sitemap_candidates()]))
         discovered: list[str] = []
         seen: set[str] = set()
-        for sitemap_url in candidates:
-            try:
-                async with httpx.AsyncClient(timeout=self.config.crawl.request_timeout_seconds, headers={"User-Agent": self.config.crawl.user_agent}) as client:
+        async with httpx.AsyncClient(
+            timeout=self.config.crawl.request_timeout_seconds,
+            headers={"User-Agent": self.config.crawl.user_agent},
+        ) as client:
+            for sitemap_url in candidates:
+                try:
                     response = await client.get(sitemap_url)
-                if response.status_code >= 400:
+                    if response.status_code >= 400:
+                        continue
+                    root = ElementTree.fromstring(response.content)
+                except Exception:
                     continue
-                root = ElementTree.fromstring(response.content)
-            except Exception:
-                continue
-            queue = deque([root])
-            while queue and len(discovered) < self.config.crawl.max_sitemap_urls:
-                node = queue.popleft()
-                tag = node.tag.rsplit("}", 1)[-1]
-                if tag == "loc" and node.text:
-                    candidate = normalize_url(node.text)
-                    if candidate not in seen and self.should_visit(candidate):
-                        seen.add(candidate)
-                        discovered.append(candidate)
-                for child in list(node):
-                    queue.append(child)
+                queue = deque([root])
+                while queue and len(discovered) < self.config.crawl.max_sitemap_urls:
+                    node = queue.popleft()
+                    tag = node.tag.rsplit("}", 1)[-1]
+                    if tag == "loc" and node.text:
+                        candidate = normalize_url(node.text)
+                        if candidate not in seen and self.should_visit(candidate):
+                            seen.add(candidate)
+                            discovered.append(candidate)
+                    for child in list(node):
+                        queue.append(child)
         if discovered:
             LOGGER.info("Loaded %s sitemap URLs for %s", len(discovered), self.plan.language.slug)
         return discovered

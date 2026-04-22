@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from ..adapters import SiteAdapter
@@ -80,7 +81,23 @@ def compile_language_markdown(
     return output_path
 
 
-def _reconstruct_sections(documents: list[ExtractedDocument], adapter: SiteAdapter | None) -> list[ReconstructedSection]:
+def compile_language_markdown_streaming(
+    language: LanguageEntry,
+    documents: Iterable[ExtractedDocument],
+    output_path: Path,
+    *,
+    state: CrawlState | None = None,
+    coverage_notes: list[str] | None = None,
+    adapter: SiteAdapter | None = None,
+) -> Path:
+    sections = _reconstruct_sections(documents, adapter)
+    final_markdown = _enforce_output_schema(language, sections, state=state, coverage_notes=coverage_notes or [], adapter=adapter)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(final_markdown, encoding="utf-8")
+    return output_path
+
+
+def _reconstruct_sections(documents: Iterable[ExtractedDocument], adapter: SiteAdapter | None) -> list[ReconstructedSection]:
     section_map: dict[str, ReconstructedSection] = {}
     order: list[str] = []
     for document in documents:
@@ -279,4 +296,3 @@ def _normalized_section_signature(markdown: str) -> str:
     text = re.sub(r"(?m)^#{1,6}\s+", "", text)
     text = re.sub(r"\s+", " ", text).strip().lower()
     return text[:5000]
-

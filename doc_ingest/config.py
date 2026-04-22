@@ -52,6 +52,7 @@ class PathsConfig(BaseModel):
 
 class CrawlConfig(BaseModel):
     max_concurrency: int = 6
+    max_extraction_workers: int = 4
     language_concurrency: int = 3
     request_timeout_seconds: float = 30.0
     total_timeout_seconds: float = 60.0
@@ -62,6 +63,7 @@ class CrawlConfig(BaseModel):
     max_assets_per_language: int = 300
     max_discovered_urls_per_language: int = 5000
     max_queue_size_per_language: int = 0
+    max_pending_extractions_per_language: int = 64
     user_agent: str = "DocIngestBot/1.0 (+local documentation ingestion)"
     browser_enabled: bool = True
     browser_timeout_seconds: float = 45.0
@@ -71,6 +73,22 @@ class CrawlConfig(BaseModel):
     max_retries_per_page: int = 3
     persist_every_changes: int = 25
     persist_every_seconds: float = 5.0
+    persist_diagnostics_every_seconds: float = 30.0
+    metrics_stage_detail: str = "full"
+    queue_metrics_sampling_ms: int = 100
+    extract_latency_bins_ms: list[int] = Field(default_factory=lambda: [10, 25, 50, 100, 250, 500, 1000, 2000, 5000])
+    extract_latency_sample_size: int = 200000
+    normalized_cache_format: str = "json"
+    max_in_memory_documents: int = 256
+    compile_streaming: bool = True
+    extract_executor: str = "thread"
+    extract_process_workers: int = 0
+    adaptive_extraction_workers: bool = True
+    extract_target_cpu_percent: float = 82.0
+    extract_scale_up_queue_fill_ratio: float = 0.70
+    extract_scale_down_queue_fill_ratio: float = 0.20
+    extract_scale_cooldown_seconds: float = 10.0
+    extract_scale_min_workers: int = 1
     respect_robots_txt: bool = True
     discover_sitemaps: bool = True
     max_sitemap_urls: int = 2000

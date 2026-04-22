@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from doc_ingest.config import load_config
-from doc_ingest.models import FetchResult
+from doc_ingest.models import CrawlState, FetchResult, PageState
 from doc_ingest.pipeline import DocumentationPipeline
 from doc_ingest.state import CrawlStateStore
 
@@ -118,6 +118,11 @@ class PipelineResumeTests(unittest.TestCase):
                 self.assertTrue(report.output_path and report.output_path.exists())
                 self.assertIsNotNone(report.validation)
                 self.assertGreater(report.validation.quality_score, 0.4)
+                self.assertGreater(report.performance.fetch.items_total, 0)
+                self.assertGreater(report.performance.extract.items_total, 0)
+                self.assertGreaterEqual(report.performance.queue_discover.depth_hwm, 1)
+                self.assertGreaterEqual(report.performance.queue_extract.depth_hwm, 0)
+                self.assertGreaterEqual(report.performance.extraction_latency.count, report.performance.extract.items_total)
                 state_path = config.paths.state_dir / "python.json"
                 self.assertTrue(state_path.exists())
                 state_text = state_path.read_text(encoding="utf-8")
@@ -170,6 +175,68 @@ class PipelineResumeTests(unittest.TestCase):
                     source_url="https://docs.python.org/3/",
                 ).load()
                 self.assertEqual(len(state.pages), 1)
+
+        asyncio.run(run_case())
+
+    def test_pipeline_does_not_stall_when_seed_url_is_already_processed(self) -> None:
+        async def run_case() -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source_documents = root / "source-documents"
+                source_documents.mkdir(parents=True, exist_ok=True)
+                (source_documents / "renamed-link-source.md").write_text(
+                    "- Python - https://docs.python.org/3/\n",
+                    encoding="utf-8",
+                )
+                config = load_config(root)
+                config.crawl.browser_enabled = False
+                config.crawl.max_concurrency = 1
+                config.crawl.max_extraction_workers = 1
+                config.crawl.max_pending_extractions_per_language = 4
+                state_store = CrawlStateStore(
+                    config.paths.state_dir / "python.json",
+                    language="Python",
+                    slug="python",
+                    source_url="https://docs.python.org/3/",
+                )
+                state = CrawlState(
+                    language="Python",
+                    slug="python",
+                    source_url="https://docs.python.org/3/",
+                    pages={
+                        "https://docs.python.org/3": PageState(
+                            normalized_url="https://docs.python.org/3",
+                            discovered_url="https://docs.python.org/3",
+                            status="processed",
+                            content_hash="seed-hash",
+                        ),
+                        "https://docs.python.org/3/tutorial": PageState(
+                            normalized_url="https://docs.python.org/3/tutorial",
+                            discovered_url="https://docs.python.org/3/tutorial",
+                            parent_url="https://docs.python.org/3",
+                            depth=1,
+                            status="pending",
+                        ),
+                    },
+                )
+                state_store.save(state)
+
+                pages = {
+                    "https://docs.python.org/3/tutorial": b"""
+                    <html><head><title>Tutorial</title></head><body><main>
+                    <h1>Tutorial</h1><p>Tutorial body with enough useful text to be processed after resume.</p>
+                    </main></body></html>
+                    """,
+                }
+                pipeline = DocumentationPipeline(config)
+                pipeline.http_fetcher = _FakeHttpFetcher(pages)
+                pipeline.browser_fetcher = _FakeBrowserFetcher()
+                try:
+                    summary = await asyncio.wait_for(pipeline.run(language_name="python"), timeout=10.0)
+                finally:
+                    await pipeline.close()
+                report = summary.reports[0]
+                self.assertGreaterEqual(report.pages_processed, 1)
 
         asyncio.run(run_case())
 

@@ -85,6 +85,14 @@ def _execute_run(
     verbosity: str,
     language_concurrency: int | None,
     page_concurrency: int | None,
+    extraction_workers: int | None,
+    max_pending_extractions: int | None,
+    compile_streaming: bool | None,
+    normalized_cache_format: str | None,
+    extract_executor: str | None,
+    extract_process_workers: int | None,
+    adaptive_extraction_workers: bool | None,
+    extract_target_cpu_percent: float | None,
     max_pages: int | None,
     max_discovered: int | None,
     per_host_delay: float | None,
@@ -97,6 +105,22 @@ def _execute_run(
         config.crawl.language_concurrency = max(1, language_concurrency)
     if page_concurrency is not None:
         config.crawl.max_concurrency = max(1, page_concurrency)
+    if extraction_workers is not None:
+        config.crawl.max_extraction_workers = max(1, extraction_workers)
+    if max_pending_extractions is not None:
+        config.crawl.max_pending_extractions_per_language = max(1, max_pending_extractions)
+    if compile_streaming is not None:
+        config.crawl.compile_streaming = bool(compile_streaming)
+    if normalized_cache_format is not None:
+        config.crawl.normalized_cache_format = normalized_cache_format
+    if extract_executor is not None:
+        config.crawl.extract_executor = extract_executor
+    if extract_process_workers is not None:
+        config.crawl.extract_process_workers = max(0, extract_process_workers)
+    if adaptive_extraction_workers is not None:
+        config.crawl.adaptive_extraction_workers = bool(adaptive_extraction_workers)
+    if extract_target_cpu_percent is not None:
+        config.crawl.extract_target_cpu_percent = max(10.0, min(98.0, extract_target_cpu_percent))
     if max_pages is not None:
         config.crawl.max_pages_per_language = max(1, max_pages)
     if max_discovered is not None:
@@ -203,6 +227,14 @@ def _wizard() -> None:
         verbosity="info",
         language_concurrency=lang_concurrency,
         page_concurrency=page_concurrency,
+        extraction_workers=None,
+        max_pending_extractions=None,
+        compile_streaming=None,
+        normalized_cache_format=None,
+        extract_executor=None,
+        extract_process_workers=None,
+        adaptive_extraction_workers=None,
+        extract_target_cpu_percent=None,
         max_pages=max_pages,
         max_discovered=None,
         per_host_delay=per_host_delay,
@@ -225,6 +257,14 @@ def run(
     verbose: bool = typer.Option(False, "--verbose", help="Show the most detailed logs, including library output."),
     language_concurrency: int | None = typer.Option(None, "--language-concurrency", help="Languages to process in parallel."),
     page_concurrency: int | None = typer.Option(None, "--page-concurrency", help="Pages to process concurrently per language."),
+    extraction_workers: int | None = typer.Option(None, "--extraction-workers", help="Concurrent HTML/document transformation workers per language."),
+    max_pending_extractions: int | None = typer.Option(None, "--max-pending-extractions", help="Backpressure cap for queued extraction jobs per language."),
+    compile_streaming: bool | None = typer.Option(None, "--compile-streaming/--no-compile-streaming", help="Stream compile input from cache to reduce peak memory."),
+    normalized_cache_format: str | None = typer.Option(None, "--normalized-cache-format", help="Normalized cache format: json, json_compact, or msgpack."),
+    extract_executor: str | None = typer.Option(None, "--extract-executor", help="Extraction executor mode: thread, process, or auto."),
+    extract_process_workers: int | None = typer.Option(None, "--extract-process-workers", help="Process worker count when --extract-executor=process."),
+    adaptive_extraction_workers: bool | None = typer.Option(None, "--adaptive-extraction-workers/--no-adaptive-extraction-workers", help="Enable adaptive extraction worker scaling."),
+    extract_target_cpu_percent: float | None = typer.Option(None, "--extract-target-cpu-percent", help="Target CPU percentage for adaptive extraction scaling."),
     max_pages: int | None = typer.Option(None, "--max-pages", help="Hard cap on processed pages per language."),
     max_discovered: int | None = typer.Option(None, "--max-discovered", help="Hard cap on discovered URLs per language."),
     per_host_delay: float | None = typer.Option(None, "--per-host-delay", help="Delay between requests to the same host (seconds)."),
@@ -264,6 +304,14 @@ def run(
         verbosity=verbosity,
         language_concurrency=language_concurrency,
         page_concurrency=page_concurrency,
+        extraction_workers=extraction_workers,
+        max_pending_extractions=max_pending_extractions,
+        compile_streaming=compile_streaming,
+        normalized_cache_format=normalized_cache_format,
+        extract_executor=extract_executor,
+        extract_process_workers=extract_process_workers,
+        adaptive_extraction_workers=adaptive_extraction_workers,
+        extract_target_cpu_percent=extract_target_cpu_percent,
         max_pages=max_pages,
         max_discovered=max_discovered,
         per_host_delay=per_host_delay,

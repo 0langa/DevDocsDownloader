@@ -46,14 +46,17 @@ class HttpFetcher:
         meta_path = cache_dir / f"{cache_key}.json"
 
         if cache_path.exists() and meta_path.exists():
-            meta = read_json(meta_path, {})
+            meta, cached_payload = await asyncio.gather(
+                asyncio.to_thread(read_json, meta_path, {}),
+                asyncio.to_thread(cache_path.read_bytes),
+            )
             return FetchResult(
                 url=normalized,
                 final_url=meta["final_url"],
                 content_type=meta["content_type"],
                 status_code=meta["status_code"],
                 method="cache",
-                content=cache_path.read_bytes(),
+                content=cached_payload,
                 history_status_codes=list(meta.get("history_status_codes", [])),
             )
 
@@ -78,16 +81,18 @@ class HttpFetcher:
                     history_status_codes=[item.status_code for item in response.history],
                 )
                 if response.is_success:
-                    cache_dir.mkdir(parents=True, exist_ok=True)
-                    write_bytes(cache_path, response.content)
-                    write_json(
-                        meta_path,
-                        {
-                            "final_url": result.final_url,
-                            "content_type": result.content_type,
-                            "status_code": result.status_code,
-                            "history_status_codes": result.history_status_codes,
-                        },
+                    await asyncio.gather(
+                        asyncio.to_thread(write_bytes, cache_path, response.content),
+                        asyncio.to_thread(
+                            write_json,
+                            meta_path,
+                            {
+                                "final_url": result.final_url,
+                                "content_type": result.content_type,
+                                "status_code": result.status_code,
+                                "history_status_codes": result.history_status_codes,
+                            },
+                        ),
                     )
                 return result
 

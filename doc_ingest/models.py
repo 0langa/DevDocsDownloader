@@ -129,6 +129,68 @@ class ValidationResult(BaseModel):
     issues: list[ValidationIssue] = Field(default_factory=list)
 
 
+class StageMetrics(BaseModel):
+    duration_ms_total: float = 0.0
+    items_total: int = 0
+    failures_total: int = 0
+    throughput_items_per_sec: float = 0.0
+
+
+class QueueMetrics(BaseModel):
+    depth_current: int = 0
+    depth_avg: float = 0.0
+    depth_hwm: int = 0
+
+
+class ExtractionLatencyMetrics(BaseModel):
+    count: int = 0
+    p50_ms: float = 0.0
+    p90_ms: float = 0.0
+    p95_ms: float = 0.0
+    p99_ms: float = 0.0
+    histogram: dict[str, int] = Field(default_factory=dict)
+
+
+class CacheMetrics(BaseModel):
+    fetch_hits: int = 0
+    fetch_misses: int = 0
+    fetch_hit_rate: float = 0.0
+    normalized_hits: int = 0
+    normalized_misses: int = 0
+    normalized_hit_rate: float = 0.0
+    normalized_serialize_ms_total: float = 0.0
+    normalized_deserialize_ms_total: float = 0.0
+    normalized_bytes_written: int = 0
+
+
+class WorkerMetrics(BaseModel):
+    discover_workers: int = 0
+    extraction_workers_current: int = 0
+    extraction_workers_max: int = 0
+    extraction_scale_events_total: int = 0
+    extraction_busy_seconds: float = 0.0
+    extraction_idle_seconds: float = 0.0
+    extraction_busy_ratio: float = 0.0
+
+
+class SystemMetrics(BaseModel):
+    cpu_utilization_avg_pct: float = 0.0
+    resident_memory_peak_mb: float = 0.0
+
+
+class PerformanceMetrics(BaseModel):
+    fetch: StageMetrics = Field(default_factory=StageMetrics)
+    discover: StageMetrics = Field(default_factory=StageMetrics)
+    extract: StageMetrics = Field(default_factory=StageMetrics)
+    persist: StageMetrics = Field(default_factory=StageMetrics)
+    queue_discover: QueueMetrics = Field(default_factory=QueueMetrics)
+    queue_extract: QueueMetrics = Field(default_factory=QueueMetrics)
+    extraction_latency: ExtractionLatencyMetrics = Field(default_factory=ExtractionLatencyMetrics)
+    cache: CacheMetrics = Field(default_factory=CacheMetrics)
+    workers: WorkerMetrics = Field(default_factory=WorkerMetrics)
+    system: SystemMetrics = Field(default_factory=SystemMetrics)
+
+
 class PageState(BaseModel):
     normalized_url: str
     discovered_url: str
@@ -187,6 +249,7 @@ class LanguageRunReport(BaseModel):
     failures: list[str] = Field(default_factory=list)
     suspected_incompleteness: bool = False
     validation: ValidationResult | None = None
+    performance: PerformanceMetrics = Field(default_factory=PerformanceMetrics)
 
 
 class RunSummary(BaseModel):
