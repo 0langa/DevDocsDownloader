@@ -13,6 +13,21 @@ Thumbs.db
 .vscode/
 .idea/
 
+
+        .venv/
+        cache/
+        doc_ingest/__pycache__/
+        doc_ingest/reporting/__pycache__/
+        doc_ingest/sources/__pycache__/
+        doc_ingest/utils/__pycache__/1~        .venv/
+        cache/
+        doc_ingest/__pycache__/
+        doc_ingest/reporting/__pycache__/
+        doc_ingest/sources/__pycache__/
+        doc_ingest/utils/__pycache__/
+
+
+
 # Keep source-controlled project inputs/configs
 # (intentionally not ignored)
 # - source-documents/renamed-link-source.md
