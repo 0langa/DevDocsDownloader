@@ -1,32 +1,33 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+*/.venv/
+*/venv/
+*/env/
+*/ENV/
+**/venv.*/
+**/venv.*/
 
+# Python cache / build artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
 
-# Local environment/secrets
-.env
-.env.*
-*.env
-*.local
-.python-version
-
-
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-
-        .venv/
-        cache/
-        doc_ingest/__pycache__/
-        doc_ingest/reporting/__pycache__/
-        doc_ingest/sources/__pycache__/
-        doc_ingest/utils/__pycache__/1~        .venv/
-        cache/
-        doc_ingest/__pycache__/
-        doc_ingest/reporting/__pycache__/
-        doc_ingest/sources/__pycache__/
-        doc_ingest/utils/__pycache__/
-
-
+# Generated docs/output that should not be local/dev-tracked
+output/cache/
+output/reports/
+/output/
 
 # Keep source-controlled project inputs/configs
 # (intentionally not ignored)
