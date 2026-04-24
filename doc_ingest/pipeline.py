@@ -42,18 +42,26 @@ class DocumentationPipeline:
         force_refresh: bool = False,
         progress_tracker: CrawlProgressTracker | None = None,
         validate_only: bool = False,
+        language_concurrency: int | None = None,
     ) -> RunSummary:
         summary = RunSummary()
-        for name in language_names:
-            partial = await self.run(
-                language_name=name,
-                mode=mode,
-                source_name=source_name,
-                force_refresh=force_refresh,
-                progress_tracker=progress_tracker,
-                validate_only=validate_only,
-                _write_reports=False,
-            )
+        concurrency = max(1, language_concurrency or self.config.language_concurrency)
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _run_one(name: str) -> RunSummary:
+            async with semaphore:
+                return await self.run(
+                    language_name=name,
+                    mode=mode,
+                    source_name=source_name,
+                    force_refresh=force_refresh,
+                    progress_tracker=progress_tracker,
+                    validate_only=validate_only,
+                    _write_reports=False,
+                )
+
+        partials = await asyncio.gather(*(_run_one(name) for name in language_names))
+        for partial in partials:
             summary.reports.extend(partial.reports)
         write_reports(summary, self.config.paths.reports_dir)
         return summary

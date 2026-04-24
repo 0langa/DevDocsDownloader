@@ -33,6 +33,36 @@ def test_run_many_propagates_force_refresh(monkeypatch, tmp_path: Path) -> None:
     assert seen == [True, True]
 
 
+def test_run_many_uses_explicit_language_concurrency(monkeypatch, tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    config.language_concurrency = 1
+    pipeline = DocumentationPipeline(config)
+
+    current = 0
+    peak = 0
+
+    async def fake_run(self, **kwargs):
+        nonlocal current, peak
+        current += 1
+        peak = max(peak, current)
+        await asyncio.sleep(0.01)
+        current -= 1
+        from doc_ingest.models import RunSummary
+
+        return RunSummary()
+
+    monkeypatch.setattr(DocumentationPipeline, "run", fake_run)
+
+    asyncio.run(
+        pipeline.run_many(
+            language_names=["python", "rust", "go"],
+            language_concurrency=2,
+        )
+    )
+
+    assert peak == 2
+
+
 def test_devdocs_reloads_invalid_cached_json(tmp_path: Path) -> None:
     source = DevDocsSource(cache_dir=tmp_path, core_topics_path=tmp_path / "missing.json")
     dataset_dir = tmp_path / "devdocs" / "python~3.14"

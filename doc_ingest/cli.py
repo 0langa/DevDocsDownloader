@@ -220,6 +220,7 @@ def bulk(
     mode: CrawlMode = typer.Option("important", "--mode", help="'important' for core topics, 'full' for everything."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt for --bulk all."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs first."),
+    language_concurrency: int = typer.Option(3, "--language-concurrency", min=1, help="Languages to process in parallel during bulk runs."),
     silent: bool = typer.Option(False, "--silent"),
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
@@ -241,6 +242,7 @@ def bulk(
 
     target_key = target.strip().lower()
     config = load_config()
+    config.language_concurrency = max(1, language_concurrency)
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
 
     async def _runner() -> None:
@@ -286,7 +288,9 @@ def bulk(
                 summary = await pipeline.run_many(
                     language_names=language_names,
                     mode=mode,
+                    force_refresh=force_refresh,
                     progress_tracker=tracker,
+                    language_concurrency=language_concurrency,
                 )
         finally:
             await pipeline.close()
