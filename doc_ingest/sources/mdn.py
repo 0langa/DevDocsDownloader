@@ -94,7 +94,7 @@ class MdnContentSource:
     async def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]:
         _display, area = AREAS[language.slug]
         root = await self._ensure_content()
-        top = next(root.iterdir(), None)
+        top = next((path for path in root.iterdir() if path.is_dir()), None)
         if top is None:
             raise RuntimeError("MDN content archive extraction produced no files")
         area_root = top / "files" / "en-us" / area
