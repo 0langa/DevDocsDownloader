@@ -91,8 +91,11 @@ class DashFeedSource:
             tar_path = Path(handle.name)
 
         try:
-            with tarfile.open(tar_path, "r:gz") as archive:
-                archive.extractall(target_dir)
+            try:
+                with tarfile.open(tar_path, "r:gz") as archive:
+                    archive.extractall(target_dir)
+            except tarfile.TarError as exc:
+                raise RuntimeError(f"Dash feed for {slug} is not a valid gzip/tar archive") from exc
         finally:
             tar_path.unlink(missing_ok=True)
 

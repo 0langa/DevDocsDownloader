@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import tarfile
@@ -51,7 +52,7 @@ class MdnContentSource:
             for slug, (display, area) in AREAS.items()
         ]
         self.catalog_path.write_text(
-            __import__("json").dumps({"entries": entries}, indent=2),
+            json.dumps({"entries": entries}, indent=2),
             encoding="utf-8",
         )
         return [
@@ -69,8 +70,11 @@ class MdnContentSource:
 
     async def _ensure_content(self) -> Path:
         marker = self.extracted_root / ".ready"
-        if marker.exists():
+        if marker.exists() and self._has_expected_tree(self.extracted_root):
             return self.extracted_root
+        if marker.exists() and not self._has_expected_tree(self.extracted_root):
+            LOGGER.warning("MDN ready marker exists but extracted tree is incomplete; rebuilding cache")
+            marker.unlink(missing_ok=True)
 
         self.archive_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.archive_path.exists():
@@ -88,13 +92,30 @@ class MdnContentSource:
         self.extracted_root.mkdir(parents=True, exist_ok=True)
         LOGGER.info("Extracting MDN content archive")
         await asyncio.to_thread(_extract_tarball, self.archive_path, self.extracted_root)
+        if not self._has_expected_tree(self.extracted_root):
+            raise RuntimeError("MDN content archive extracted without required documentation tree")
         marker.write_text("ok", encoding="utf-8")
         return self.extracted_root
+
+    def _has_expected_tree(self, root: Path) -> bool:
+        top = self._find_content_root(root)
+        if top is None:
+            return False
+        return any((top / "files" / "en-us" / area).exists() for _display, area in AREAS.values())
+
+    def _find_content_root(self, root: Path) -> Path | None:
+        direct = root / "files" / "en-us"
+        if direct.exists():
+            return root
+        for candidate in sorted(root.iterdir()):
+            if candidate.is_dir() and (candidate / "files" / "en-us").exists():
+                return candidate
+        return None
 
     async def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]:
         _display, area = AREAS[language.slug]
         root = await self._ensure_content()
-        top = next((path for path in root.iterdir() if path.is_dir()), None)
+        top = self._find_content_root(root)
         if top is None:
             raise RuntimeError("MDN content archive extraction produced no files")
         area_root = top / "files" / "en-us" / area
@@ -131,8 +152,13 @@ def _extract_tarball(archive: Path, dest: Path) -> None:
     with tarfile.open(archive, "r:gz") as tar:
         for member in tar:
             name = member.name
-            if not any(f"/files/en-us/{area}" in name for area in {a[1] for a in AREAS.values()}):
-                if not (name.endswith("/files/en-us") or name.count("/") <= 3):
+            normalized = name.rstrip("/")
+            if not any(f"/files/en-us/{area}" in normalized for area in {a[1] for a in AREAS.values()}):
+                if not (
+                    normalized.endswith("/files")
+                    or normalized.endswith("/files/en-us")
+                    or normalized.count("/") <= 3
+                ):
                     continue
             tar.extract(member, dest)
 

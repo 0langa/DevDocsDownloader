@@ -49,7 +49,7 @@ class DocumentationPipeline:
                 language_name=name,
                 mode=mode,
                 source_name=source_name,
-                force_refresh=False,
+                force_refresh=force_refresh,
                 progress_tracker=progress_tracker,
                 validate_only=validate_only,
                 _write_reports=False,

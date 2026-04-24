@@ -83,20 +83,44 @@ class DevDocsSource:
         db_path = dataset_dir / "db.json"
 
         async with self._client() as client:
-            if not index_path.exists():
-                LOGGER.info("Downloading DevDocs index for %s", slug)
-                resp = await client.get(f"{DOCUMENTS_BASE}/{slug}/index.json")
-                resp.raise_for_status()
-                index_path.write_bytes(resp.content)
-            if not db_path.exists():
-                LOGGER.info("Downloading DevDocs db for %s", slug)
-                resp = await client.get(f"{DOCUMENTS_BASE}/{slug}/db.json")
-                resp.raise_for_status()
-                db_path.write_bytes(resp.content)
+            await self._ensure_json_dataset(client, slug, index_path, "index.json")
+            await self._ensure_json_dataset(client, slug, db_path, "db.json")
 
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-        db = json.loads(db_path.read_text(encoding="utf-8"))
+        index = self._load_json_cache(index_path, slug=slug, label="index")
+        db = self._load_json_cache(db_path, slug=slug, label="db")
         return index, db
+
+    async def _ensure_json_dataset(
+        self,
+        client: httpx.AsyncClient,
+        slug: str,
+        path: Path,
+        filename: str,
+    ) -> None:
+        if path.exists() and self._is_valid_json_file(path):
+            return
+        if path.exists():
+            LOGGER.warning("Refreshing corrupt DevDocs %s cache for %s", filename, slug)
+        LOGGER.info("Downloading DevDocs %s for %s", filename.replace('.json', ''), slug)
+        resp = await client.get(f"{DOCUMENTS_BASE}/{slug}/{filename}")
+        resp.raise_for_status()
+        path.write_bytes(resp.content)
+
+    def _is_valid_json_file(self, path: Path) -> bool:
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+            return True
+        except Exception:
+            return False
+
+    def _load_json_cache(self, path: Path, *, slug: str, label: str) -> dict:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"DevDocs {label} cache is invalid for {slug}: {path}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"DevDocs {label} cache has unexpected format for {slug}: {path}")
+        return payload
 
     async def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]:
         index, db = await self._download_dataset(language.slug)
