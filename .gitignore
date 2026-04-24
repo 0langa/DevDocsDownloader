@@ -24,10 +24,17 @@ build/
 dist/
 *.egg-info/
 
-# Generated docs/output that should not be local/dev-tracked
-output/cache/
-output/reports/
-/output/
+# Generated runtime artifacts
+cache/
+logs/
+output/
+state/
+tmp/
+tmp_languages.txt
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
 
 # Keep source-controlled project inputs/configs
 # (intentionally not ignored)
