@@ -1,63 +1,33 @@
-# Bytecode, caches
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+*/.venv/
+*/venv/
+*/env/
+*/ENV/
+**/venv.*/
+**/venv.*/
+
+# Python cache / build artifacts
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.pyre/
-
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Build/package/test artifacts
+.coverage
+htmlcov/
 build/
 dist/
 *.egg-info/
-.eggs/
-pip-wheel-metadata/
-.coverage
-.coverage.*
-htmlcov/
 
-# Logs and runtime state
-logs/
-*.log
-cache/
-state/
-tmp/
-# Local environment/secrets
-.env
-.env.*
-*.env
-*.local
-.python-version
-
-# Playwright / browser leftovers
-playwright-report/
-test-results/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# OS / editor noise
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# Claude Code local state
-.claude/
-
-# Raw chat/log archives in ai-context
-.ai-context/other-documentation/*.jsonl
-
-# Git merge / patch leftovers
-*.orig
-*.rej
+# Generated docs/output that should not be local/dev-tracked
+output/cache/
+output/reports/
+/output/
 
 # Keep source-controlled project inputs/configs
 # (intentionally not ignored)
