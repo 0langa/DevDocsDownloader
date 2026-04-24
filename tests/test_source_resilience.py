@@ -6,11 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from doc_ingest.compiler import LanguageOutputBuilder
 from doc_ingest.config import load_config
 from doc_ingest.pipeline import DocumentationPipeline
 from doc_ingest.sources.dash import DashFeedSource
 from doc_ingest.sources.devdocs import DevDocsSource
 from doc_ingest.sources.mdn import MdnContentSource
+from doc_ingest.sources.base import Document
+from doc_ingest.utils.text import slugify
 
 
 def test_run_many_propagates_force_refresh(monkeypatch, tmp_path: Path) -> None:
@@ -93,3 +96,51 @@ def test_dash_invalid_archive_raises_runtime_error(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="not a valid gzip/tar archive"):
         asyncio.run(source._download_docset("Raku"))
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("std::vector", "std-vector"),
+        ("file.name", "file-name"),
+        ("CON", "con-item"),
+        ("aux", "aux-item"),
+    ],
+)
+def test_slugify_returns_windows_safe_names(value: str, expected: str) -> None:
+    assert slugify(value) == expected
+
+
+def test_language_output_builder_writes_windows_safe_paths(tmp_path: Path) -> None:
+    builder = LanguageOutputBuilder(
+        language_display="C++",
+        language_slug=slugify("C++"),
+        source="devdocs",
+        source_slug="cpp",
+        source_url="https://example.invalid/cpp",
+        mode="important",
+        output_root=tmp_path,
+    )
+
+    builder.add(
+        Document(
+            topic="std::filesystem",
+            slug="std::filesystem::path",
+            title="std::filesystem::path",
+            markdown="Path docs",
+        )
+    )
+    builder.add(
+        Document(
+            topic="CON",
+            slug="aux",
+            title="AUX",
+            markdown="Reserved name docs",
+        )
+    )
+
+    result = builder.finalize()
+
+    assert result.total_documents == 2
+    assert (tmp_path / "c" / "std-filesystem" / "std-filesystem-path.md").exists()
+    assert (tmp_path / "c" / "con-item" / "aux-item.md").exists()

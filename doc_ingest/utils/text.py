@@ -5,10 +5,20 @@ import re
 import unicodedata
 
 
+_WINDOWS_RESERVED_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
 def slugify(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     normalized = re.sub(r"[^a-zA-Z0-9]+", "-", normalized).strip("-")
-    return normalized.lower() or "document"
+    slug = normalized.lower() or "document"
+    if slug in _WINDOWS_RESERVED_NAMES:
+        slug = f"{slug}-item"
+    return slug
 
 
 def normalize_whitespace(text: str) -> str:
