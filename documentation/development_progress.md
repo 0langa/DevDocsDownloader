@@ -2,13 +2,13 @@
 
 ## Current state summary
 
-The repository has a solid first working implementation of a curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path is coherent for that scope. The main weakness is repository drift: benchmark/setup/support artifacts from an earlier crawler-oriented design remain in-tree and no longer match the current code.
+The repository has a solid first working implementation of a curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path is coherent for that scope. The main remaining repository drift is dependency/setup residue and historical crawler-oriented utilities that are not part of the active runtime.
 
 In short:
 
-- **Working core:** source resolution, ingestion, compilation, validation, reporting
+- **Working core:** source resolution, ingestion, active run checkpoints, compilation, validation, reporting
 - **Partially complete areas:** lifecycle cleanup, validation depth, test coverage, dependency hygiene
-- **Broken/stale areas:** benchmark harness and skip-manifest script relative to the current package API
+- **Recently stabilized areas:** benchmark harness and state manifest script now target the current package API
 
 ## What works today
 
@@ -73,6 +73,9 @@ In short:
 - Validation-only command can assess an existing bundle
 - JSON and Markdown run summaries are generated
 - Per-language run state is persisted
+- Active checkpoints are persisted under `state/checkpoints/` during runs and removed after successful completion
+- Source diagnostics are persisted with discovered, emitted, and skipped document counts
+- Topic include/exclude filters are available through the CLI and are recorded in diagnostics
 
 ### Tests
 
@@ -109,6 +112,10 @@ It does **not** currently verify:
 
 This is not a functional bug by itself, but it shows the lifecycle interface is ahead of the implementation.
 
+### Resume and checkpoint depth
+
+The pipeline now records per-language active checkpoints with phase, emitted document count, document inventory position, last document metadata, and failure records. This makes failed run boundaries inspectable. It does not yet skip already emitted source documents on retry because the source adapter contract does not support seeking into a stream.
+
 ### Concurrency and throughput controls
 
 - language-level concurrency exists through `run_many()` and `AppConfig.language_concurrency`
@@ -125,13 +132,11 @@ This is not a functional bug by itself, but it shows the lifecycle interface is 
 
 These are not promised by the current code, but they are the most obvious gaps for a production-grade ingestion tool.
 
-### Missing operational features
+### Remaining operational gaps
 
-- no retry/backoff wrapper around HTTP fetches
-- no resumable partial language download flow beyond final state persistence
+- no adapter-level seek/resume from an active checkpoint position
 - no cache expiry strategy
-- no structured diagnostics around per-document failures inside a successful language run
-- no user-configurable include/exclude topic controls
+- no per-document structured warning stream beyond aggregate skip diagnostics
 - no pluggable source system beyond editing Python code
 
 ### Missing output features
@@ -151,33 +156,15 @@ These are not promised by the current code, but they are the most obvious gaps f
 
 ## Known bugs, mismatches, and fragile areas
 
-### 1. Historical scripts do not match the current application
+### 1. Historical crawler hints remain outside the active application
 
 ### `scripts/benchmark_pipeline.py`
 
-This file is currently out of sync with the runtime code.
-
-It assumes unsupported CLI flags and unsupported report fields, including:
-
-- `--input-file`
-- `--page-concurrency`
-- `--extraction-workers`
-- `--max-pending-extractions`
-- `--normalized-cache-format`
-- `--compile-streaming`
-- report fields such as `pages_processed` and `performance`
-
-Current status: **not runnable without refactoring**.
+This file now benchmarks the active CLI by running corpus languages through `DevDocsDownloader.py run` and measuring document throughput, duration, and output size across cold and warm cache trials.
 
 ### `scripts/build_skip_manifest.py`
 
-This file imports and references code that does not exist in the active package:
-
-- `doc_ingest.parser`
-- `config.paths.input_file`
-- `config.paths.crawl_cache_dir`
-
-Current status: **broken against current codebase**.
+This file now writes `cache/state_manifest.json` from current `LanguageRunState` files. It no longer attempts to build URL-level skip manifests because the active source-adapter pipeline does not persist crawler URL state.
 
 ### 2. Repository hints still reference the old architecture
 
@@ -215,7 +202,7 @@ This reduces duplicates, but it may also lose fine-grained documentation section
 
 ## Performance observations from code inspection
 
-These observations come from code inspection, not from verified benchmark output, because the included benchmark harness is stale.
+These observations come from code inspection; the benchmark harness now supports measuring the active CLI, but benchmark data has not been checked into this documentation.
 
 ### Likely efficient paths
 
@@ -248,34 +235,29 @@ These observations come from code inspection, not from verified benchmark output
 | Compiler | Working | Core output generation complete |
 | Validator | Basic | Structural only |
 | Reporting | Working | Summary artifacts generated |
-| State store | Working | Simple persistence layer |
+| State store | Working | Stable final state plus active checkpoint persistence |
 | Progress UI | Working | Presentation layer only |
 | Tests | Partial | Good focused regressions, limited integration coverage |
 | Benchmarks | Stale | Not compatible with current CLI |
-| Legacy support scripts | Mixed/Broken | Some standalone, some stale |
+| Support scripts | Mixed | Benchmark and state manifest target active runtime; path analyzer remains historical |
 
 ## Priority improvements
 
 ### Highest priority
 
-1. **Resolve stale repository surface area**
-	- either remove or modernize `scripts/benchmark_pipeline.py`
-	- either remove or modernize `scripts/build_skip_manifest.py`
-	- clean up stale local command hints if they are meant to be shared
-
-2. **Reconcile dependency manifests**
+1. **Reconcile dependency manifests**
 	- align `pyproject.toml`, `requirements.txt`, and `source-documents/requirements.txt`
 	- remove unused dependencies or document why they remain
 
-3. **Deepen validation**
+2. **Deepen validation**
 	- validate link structure, duplicate sections, and heading integrity
 	- add checks that compare compiled document count to source inventory
 
 ### Medium priority
 
 4. **Improve source robustness**
-	- add retry/backoff behavior for HTTP downloads
 	- add more explicit source-level error reporting
+	- extend diagnostics from aggregate skip counts to per-document warning records
 
 5. **Expand test coverage**
 	- fixture-based integration tests

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +7,7 @@ from typing import AsyncIterator
 
 from .models import TopicStats
 from .sources.base import Document
-from .utils.filesystem import write_text
+from .utils.filesystem import write_json, write_text
 from .utils.text import slugify
 
 
@@ -52,7 +51,8 @@ class LanguageOutputBuilder:
             self._topic_order.append(topic)
             self._used_slugs[topic] = set()
 
-        slug = _unique_slug(document.slug or slugify(document.title), self._used_slugs[topic])
+        slug_base = slugify(document.slug or document.title)
+        slug = _unique_slug(slug_base, self._used_slugs[topic])
         self._used_slugs[topic].add(slug)
         document.slug = slug
 
@@ -123,7 +123,7 @@ class LanguageOutputBuilder:
             "topics": [{"topic": s.topic, "document_count": s.document_count} for s in topic_stats],
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
-        (self.language_dir / "_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        write_json(self.language_dir / "_meta.json", meta)
 
         return CompiledOutput(
             total_documents=self.total_documents,

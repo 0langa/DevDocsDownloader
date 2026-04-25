@@ -18,11 +18,13 @@ _MDN_PREFERRED = {"html", "css", "http", "web-apis", "webassembly"}
 class SourceRegistry:
     def __init__(self, *, cache_dir: Path, package_root: Path | None = None) -> None:
         self.cache_dir = cache_dir
-        core_topics_path = (package_root or Path(__file__).parent) / "devdocs_core.json"
+        source_root = package_root or Path(__file__).parent
+        core_topics_path = source_root / "devdocs_core.json"
+        dash_seed_path = source_root / "dash_seed.json"
         self.sources: list[DocumentationSource] = [
             DevDocsSource(cache_dir=cache_dir, core_topics_path=core_topics_path),
             MdnContentSource(cache_dir=cache_dir),
-            DashFeedSource(cache_dir=cache_dir),
+            DashFeedSource(cache_dir=cache_dir, catalog_seed=dash_seed_path),
         ]
 
     def get(self, name: str) -> DocumentationSource | None:

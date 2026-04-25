@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal, Protocol
 
+from ..models import SourceRunDiagnostics
+
 CrawlMode = Literal["important", "full"]
 
 
@@ -33,4 +35,9 @@ class DocumentationSource(Protocol):
 
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]: ...
 
-    def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]: ...
+    def fetch(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[Document]: ...

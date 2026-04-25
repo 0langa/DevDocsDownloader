@@ -8,11 +8,21 @@ from pydantic import BaseModel, Field
 
 
 CrawlMode = Literal["important", "full"]
+CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "completed", "failed"]
 
 
 class TopicStats(BaseModel):
     topic: str
     document_count: int = 0
+
+
+class SourceRunDiagnostics(BaseModel):
+    discovered: int = 0
+    emitted: int = 0
+    skipped: dict[str, int] = Field(default_factory=dict)
+
+    def skip(self, reason: str, count: int = 1) -> None:
+        self.skipped[reason] = self.skipped.get(reason, 0) + count
 
 
 class ValidationIssue(BaseModel):
@@ -40,10 +50,45 @@ class LanguageRunState(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     topics: list[TopicStats] = Field(default_factory=list)
     total_documents: int = 0
+    source_diagnostics: SourceRunDiagnostics | None = None
     output_path: str | None = None
     completed: bool = False
     warnings: list[str] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
+
+
+class DocumentCheckpoint(BaseModel):
+    topic: str
+    slug: str
+    title: str
+    source_url: str = ""
+    order_hint: int = 0
+
+
+class CheckpointFailure(BaseModel):
+    phase: CheckpointPhase
+    error_type: str
+    message: str
+    document_inventory_position: int | None = None
+    emitted_document_count: int = 0
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class LanguageRunCheckpoint(BaseModel):
+    language: str
+    slug: str
+    source: str
+    source_slug: str
+    source_url: str = ""
+    mode: CrawlMode = "important"
+    phase: CheckpointPhase = "initialized"
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    document_inventory_position: int | None = None
+    emitted_document_count: int = 0
+    output_path: str | None = None
+    last_document: DocumentCheckpoint | None = None
+    failures: list[CheckpointFailure] = Field(default_factory=list)
 
 
 class LanguageRunReport(BaseModel):
@@ -55,6 +100,7 @@ class LanguageRunReport(BaseModel):
     mode: CrawlMode = "important"
     output_path: Path | None = None
     total_documents: int = 0
+    source_diagnostics: SourceRunDiagnostics | None = None
     topics: list[TopicStats] = Field(default_factory=list)
     validation: ValidationResult | None = None
     warnings: list[str] = Field(default_factory=list)

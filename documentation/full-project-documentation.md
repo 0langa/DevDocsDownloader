@@ -54,6 +54,7 @@ Generated directories:
 - `cache/`
 - `logs/`
 - `state/`
+- `state/checkpoints/`
 - `tmp/`
 
 The config object also stores `language_concurrency`, which currently defaults to `3`.
@@ -121,6 +122,12 @@ Defined in `doc_ingest/models.py`.
 
 - topic label plus document count
 
+### `SourceRunDiagnostics`
+
+- discovered source inventory count
+- source-emitted document count before pipeline topic filters
+- skipped reason-count map for source-level and pipeline-level filtering
+
 ### `ValidationIssue`
 
 - severity level, code, and message
@@ -132,6 +139,12 @@ Defined in `doc_ingest/models.py`.
 ### `LanguageRunState`
 
 - persisted state snapshot for one language run
+- includes final source diagnostics when available
+
+### `LanguageRunCheckpoint`
+
+- active checkpoint for one in-progress or failed language run
+- records source slug, mode, phase, emitted document count, last document metadata, document inventory position, output path, and failure records
 
 ### `LanguageRunReport`
 
@@ -406,6 +419,19 @@ Behavior:
 - `load()` returns a default if the file is missing or invalid
 - `save()` updates `updated_at`, ensures parent directories exist, and writes atomically
 
+`RunCheckpointStore` reads and writes active checkpoint files under `state/checkpoints/`.
+
+Behavior:
+
+- a checkpoint is created when a non-validation language run starts
+- phase is updated before fetching, during per-document compilation, before validation, and on failure
+- each emitted document increments `emitted_document_count` and records `Document.order_hint` as `document_inventory_position`
+- failures are recorded with phase, error type, message, emitted document count, and document position
+- successful runs save the stable `LanguageRunState` and remove the active checkpoint
+- failed runs leave the checkpoint on disk for inspection before retrying
+
+Source diagnostics are saved in final language state and reports. Adapters record source-level inventory and skip reasons, while the pipeline records topic include/exclude skips after documents are normalized.
+
 ## 8.2 Report generation
 
 `write_reports()` writes two summary artifacts:
@@ -423,6 +449,7 @@ Each report includes:
 - document count
 - duration
 - validation score and issues
+- source diagnostics
 - topic counts
 - failures
 
@@ -446,6 +473,7 @@ Examples:
 On failure:
 
 - the exception type and message are added to `report.failures`
+- the active checkpoint is marked `failed` and records the failure phase plus last emitted document boundary
 - progress is marked complete/failure if a tracker exists
 - duration is recorded
 - processing returns a failed `LanguageRunReport` instead of crashing the whole CLI process
@@ -459,9 +487,14 @@ In `validate_only` mode:
 
 ## 9.4 Retry logic
 
-There is **no explicit retry or backoff logic** in the current active pipeline, despite `tenacity` being declared in dependency files.
+HTTP downloads use bounded retry helpers in `doc_ingest/utils/http.py`.
 
-That means transient upstream failures currently surface directly as run failures.
+Current behavior:
+
+- retries transient network, timeout, and remote protocol failures
+- retries selected transient HTTP statuses such as 408, 429, 500, 502, 503, and 504
+- writes streamed downloads through temporary files before replacing the final cache artifact
+- does not retry non-retryable HTTP statuses such as 404
 
 ## 10. Storage and filesystem behavior
 
@@ -558,9 +591,9 @@ The compiler stores all fetched `Document` objects for a language in memory unti
 - one large write for the consolidated file
 - potentially large cache footprints for MDN and Dash
 
-## 12.4 Benchmark uncertainty
+## 12.4 Benchmarking
 
-The repository includes `scripts/benchmark_pipeline.py`, but it targets an older CLI/config surface and cannot currently be trusted as a valid benchmark harness for the present codebase.
+The repository includes `scripts/benchmark_pipeline.py` for the active source-adapter CLI. It runs corpus languages through `DevDocsDownloader.py run` and reports document throughput, duration, and output size for cold and warm cache trials.
 
 ## 13. Extension points
 
@@ -609,11 +642,10 @@ Several files indicate the repository once supported or planned a crawler that a
 
 Evidence includes:
 
-- `scripts/build_skip_manifest.py`
-- `scripts/benchmark_pipeline.py`
 - `.claude/settings.local.json`
+- `scripts/analyze_doc_paths.py`
 
-These files should be treated as historical residue unless they are intentionally revived.
+The benchmark and state-manifest scripts have been updated for the active runtime. The remaining crawler-oriented references should be treated as historical residue unless they are intentionally revived.
 
 ## 14.2 Dependency uncertainty
 
@@ -632,7 +664,7 @@ Other declared packages may be leftovers or future-facing, but that intent is no
 
 - `DocumentationPipeline.close()` suggests future pooled-resource ownership
 - support scripts suggest unimplemented config fields
-- benchmark corpus assets remain even though the benchmark runner is stale
+- benchmark corpus assets are small live-run inputs for the current benchmark runner
 
 These are not runtime blockers for the active ingestion path, but they matter for maintainability.
 
@@ -641,7 +673,7 @@ These are not runtime blockers for the active ingestion path, but they matter fo
 For a new engineer extending the current codebase, the safest sequence is:
 
 1. treat `doc_ingest/` as the canonical runtime system
-2. verify whether a support script is stale before relying on it
+2. verify whether historical support scripts apply to the active adapter pipeline before relying on them
 3. keep new work aligned with the adapter-based ingestion architecture unless the project is intentionally pivoting back to crawling
 4. add tests around any new source adapter or compiler behavior
 5. reconcile stale repository artifacts early if broader maintenance is planned

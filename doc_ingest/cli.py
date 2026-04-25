@@ -59,6 +59,8 @@ def _execute_run(
     validate_only: bool,
     verbosity: str,
     output_dir: Path | None,
+    include_topics: list[str] | None = None,
+    exclude_topics: list[str] | None = None,
 ) -> None:
     config = load_config(output_dir=output_dir)
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
@@ -75,6 +77,8 @@ def _execute_run(
                     force_refresh=force_refresh,
                     progress_tracker=tracker,
                     validate_only=validate_only,
+                    include_topics=include_topics,
+                    exclude_topics=exclude_topics,
                 )
         finally:
             await pipeline.close()
@@ -160,6 +164,8 @@ def run(
     source: Optional[str] = typer.Option(None, "--source", help="Force a specific source: devdocs, mdn, or dash."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs before resolving."),
     validate_only: bool = typer.Option(False, "--validate-only", help="Validate an existing output without downloading."),
+    include_topic: Optional[list[str]] = typer.Option(None, "--include-topic", help="Only include documents whose normalized topic matches this value. Repeat for multiple topics."),
+    exclude_topic: Optional[list[str]] = typer.Option(None, "--exclude-topic", help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics."),
     silent: bool = typer.Option(False, "--silent"),
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
@@ -188,6 +194,8 @@ def run(
         validate_only=validate_only,
         verbosity=verbosity,
         output_dir=output_dir,
+        include_topics=include_topic,
+        exclude_topics=exclude_topic,
     )
 
 
@@ -221,6 +229,8 @@ def bulk(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt for --bulk all."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs first."),
     language_concurrency: int = typer.Option(3, "--language-concurrency", min=1, help="Languages to process in parallel during bulk runs."),
+    include_topic: Optional[list[str]] = typer.Option(None, "--include-topic", help="Only include documents whose normalized topic matches this value. Repeat for multiple topics."),
+    exclude_topic: Optional[list[str]] = typer.Option(None, "--exclude-topic", help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics."),
     silent: bool = typer.Option(False, "--silent"),
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
@@ -291,6 +301,8 @@ def bulk(
                     force_refresh=force_refresh,
                     progress_tracker=tracker,
                     language_concurrency=language_concurrency,
+                    include_topics=include_topic,
+                    exclude_topics=exclude_topic,
                 )
         finally:
             await pipeline.close()
@@ -324,6 +336,50 @@ def bulk(
 def list_presets() -> None:
     for name, langs in sorted(PRESETS.items()):
         console.print(f"[bold cyan]{name}[/bold cyan]: {', '.join(langs)}")
+
+
+@app.command("audit-presets", help="Check whether preset languages resolve against configured sources.")
+def audit_presets(
+    preset: Optional[str] = typer.Argument(None, help="Preset name to audit. Omit to audit every preset."),
+    source: Optional[str] = typer.Option(None, "--source", help="Force resolution against a specific source."),
+    force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-fetch catalogs before auditing."),
+) -> None:
+    config = load_config()
+    preset_names = [preset.strip().lower()] if preset else sorted(PRESETS.keys())
+    unknown = [name for name in preset_names if name not in PRESETS]
+    if unknown:
+        console.print(f"[red]Unknown preset '{unknown[0]}'.[/red]")
+        console.print(f"Available presets: {', '.join(sorted(PRESETS.keys()))}")
+        raise typer.Exit(code=1)
+
+    async def _runner() -> None:
+        registry = SourceRegistry(cache_dir=config.paths.cache_dir)
+        table = Table(title="Preset Coverage Audit")
+        table.add_column("Preset", style="bold cyan")
+        table.add_column("Language")
+        table.add_column("Status")
+        table.add_column("Source")
+        table.add_column("Slug")
+
+        resolved_count = 0
+        missing_count = 0
+        for preset_name in preset_names:
+            for language in PRESETS[preset_name]:
+                match = await registry.resolve(language, source_name=source, force_refresh=force_refresh)
+                if match is None:
+                    missing_count += 1
+                    table.add_row(preset_name, language, "[red]missing[/red]", "", "")
+                    continue
+                resolved_count += 1
+                matched_source, catalog = match
+                table.add_row(preset_name, language, "[green]resolved[/green]", matched_source.name, catalog.slug)
+
+        console.print(table)
+        console.print(f"[dim]Resolved: {resolved_count}  Missing: {missing_count}[/dim]")
+        if missing_count:
+            raise typer.Exit(code=2)
+
+    asyncio.run(_runner())
 
 
 @app.command("list-languages", help="List every language available across all configured sources.")
@@ -373,15 +429,19 @@ def refresh_catalogs() -> None:
 @app.command(help="Validate an existing compiled output without downloading.")
 def validate(
     language: str = typer.Argument(..., help="Language name."),
+    source: Optional[str] = typer.Option(None, "--source", help="Resolve against a specific source only if local metadata is unavailable."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Alternate output directory root."),
 ) -> None:
     _execute_run(
         language=language,
         mode="important",
-        source=None,
+        source=source,
         force_refresh=False,
         validate_only=True,
         verbosity="info",
-        output_dir=None,
+        output_dir=output_dir,
+        include_topics=None,
+        exclude_topics=None,
     )
 
 

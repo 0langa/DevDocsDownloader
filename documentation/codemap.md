@@ -28,6 +28,7 @@ DevDocsDownloader/
 │   │   ├── __init__.py
 │   │   ├── base.py
 │   │   ├── dash.py
+│   │   ├── dash_seed.json
 │   │   ├── devdocs.py
 │   │   ├── devdocs_core.json
 │   │   ├── mdn.py
@@ -98,6 +99,7 @@ DevDocsDownloader/
 - `run()` — single-language ingestion command
 - `bulk()` — preset/all language ingestion command
 - `list_presets()`
+- `audit_presets()`
 - `list_languages()`
 - `refresh_catalogs()`
 - `validate()`
@@ -138,9 +140,13 @@ DevDocsDownloader/
 
 - `CrawlMode`
 - `TopicStats`
+- `SourceRunDiagnostics`
 - `ValidationIssue`
 - `ValidationResult`
 - `LanguageRunState`
+- `DocumentCheckpoint`
+- `CheckpointFailure`
+- `LanguageRunCheckpoint`
 - `LanguageRunReport`
 - `RunSummary`
 
@@ -171,6 +177,7 @@ DevDocsDownloader/
 - `SourceRegistry.resolve()`
 - `compile_from_stream()`
 - `validate_output()`
+- `RunCheckpointStore.save()`
 - `RunStateStore.save()`
 - `write_reports()`
 
@@ -217,13 +224,20 @@ DevDocsDownloader/
 
 **Purpose**
 
-- Read/write persistence for per-language run state JSON files
+- Read/write persistence for per-language run state and active checkpoint JSON files
 
 **Key symbols**
 
 - `RunStateStore`
 	- `load()`
 	- `save()`
+- `RunCheckpointStore`
+	- `load()`
+	- `save()`
+	- `update_phase()`
+	- `record_document()`
+	- `record_failure()`
+	- `delete()`
 
 ### `doc_ingest/validator.py`
 
@@ -371,6 +385,10 @@ DevDocsDownloader/
 
 - Static mapping of DevDocs slugs/families to “important mode” topic names
 
+### `doc_ingest/sources/dash_seed.json`
+
+- Maintained seed catalog for Dash/Kapeli docsets loaded by `SourceRegistry`
+
 ## Utilities package
 
 ### `doc_ingest/utils/__init__.py`
@@ -462,25 +480,26 @@ These scripts matter mostly because they show repository history; they are not e
 
 **Purpose**
 
-- Benchmark ingestion throughput across cold/warm cache modes
+- Benchmark current source-adapter CLI throughput across cold/warm cache modes
 
 **Status relative to active app**
 
-- Stale against the current CLI
-- Calls unsupported flags such as `--input-file`, `--page-concurrency`, and `--compile-streaming`
-- Expects report fields like `pages_processed` and `performance` that current reports do not generate
+- Compatible with the current CLI
+- Runs configured corpus languages through `DevDocsDownloader.py run`
+- Reports document count, document throughput, duration, and output size
 
 ### `scripts/build_skip_manifest.py`
 
 **Purpose**
 
-- Build a manifest of processed/failed/discovered URLs from crawler state files
+- Build a manifest of current per-language run state and active checkpoints
 
 **Status relative to active app**
 
-- Stale against the current config/package layout
-- Imports `doc_ingest.parser`, which does not exist
-- Uses `config.paths.input_file` and `crawl_cache_dir`, which do not exist
+- Compatible with the current source-adapter state model
+- Writes `cache/state_manifest.json`
+- Includes `state/checkpoints/*.json` when failed or active runs leave checkpoint files
+- Does not produce URL-level crawler skip data because the active pipeline does not persist URL crawl state
 
 ### `scripts/setup.py`
 
@@ -576,14 +595,14 @@ doc_ingest.cli.validate()
 - `cache/**`
 - `logs/**`
 - `state/**`
+- `state/checkpoints/**`
 - `tmp/**`
 - `output/markdown/**`
 - `output/reports/**`
 
-## Files that appear stale or mismatched
+## Files that appear historical or partially mismatched
 
-- `scripts/benchmark_pipeline.py`
-- `scripts/build_skip_manifest.py`
+- `scripts/analyze_doc_paths.py`
 - local `.claude/settings.local.json` command allowlist entries referencing missing config paths and modules
 
 Treat these files carefully during maintenance because they describe behavior the current runtime package does not implement.

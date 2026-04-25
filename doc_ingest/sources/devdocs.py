@@ -9,7 +9,10 @@ from typing import AsyncIterator
 import httpx
 from markdownify import markdownify as html_to_md
 
+from ..models import SourceRunDiagnostics
 from .base import CrawlMode, Document, LanguageCatalog
+from ..utils.filesystem import write_bytes, write_json
+from ..utils.http import request_with_retries
 
 LOGGER = logging.getLogger("doc_ingest.sources.devdocs")
 
@@ -53,12 +56,11 @@ class DevDocsSource:
                 LOGGER.debug("Re-fetching devdocs catalog due to cache read failure", exc_info=True)
 
         async with self._client() as client:
-            response = await client.get(DOCS_INDEX_URL)
+            response = await request_with_retries(client, "GET", DOCS_INDEX_URL)
             response.raise_for_status()
             entries = response.json()
 
-        self.catalog_path.parent.mkdir(parents=True, exist_ok=True)
-        self.catalog_path.write_text(json.dumps({"entries": entries}, indent=2), encoding="utf-8")
+        write_json(self.catalog_path, {"entries": entries})
         return [self._catalog_from_entry(entry) for entry in entries]
 
     def _catalog_from_entry(self, entry: dict) -> LanguageCatalog:
@@ -102,9 +104,9 @@ class DevDocsSource:
         if path.exists():
             LOGGER.warning("Refreshing corrupt DevDocs %s cache for %s", filename, slug)
         LOGGER.info("Downloading DevDocs %s for %s", filename.replace('.json', ''), slug)
-        resp = await client.get(f"{DOCUMENTS_BASE}/{slug}/{filename}")
+        resp = await request_with_retries(client, "GET", f"{DOCUMENTS_BASE}/{slug}/{filename}")
         resp.raise_for_status()
-        path.write_bytes(resp.content)
+        write_bytes(path, resp.content)
 
     def _is_valid_json_file(self, path: Path) -> bool:
         try:
@@ -122,32 +124,49 @@ class DevDocsSource:
             raise RuntimeError(f"DevDocs {label} cache has unexpected format for {slug}: {path}")
         return payload
 
-    async def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]:
+    async def fetch(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[Document]:
         index, db = await self._download_dataset(language.slug)
 
         entries = index.get("entries", [])
+        if diagnostics is not None:
+            diagnostics.discovered += len(entries)
         core_topics = {topic.lower() for topic in language.core_topics}
 
         seen_doc_keys: set[str] = set()
         for order, entry in enumerate(entries):
             entry_type = entry.get("type") or "Documentation"
             if mode == "important" and core_topics and entry_type.lower() not in core_topics:
+                if diagnostics is not None:
+                    diagnostics.skip("filtered_mode")
                 continue
 
             raw_path = entry.get("path") or ""
             doc_key = raw_path.split("#", 1)[0]
             if not doc_key or doc_key in seen_doc_keys:
+                if diagnostics is not None:
+                    diagnostics.skip("duplicate_or_empty_path")
                 continue
             seen_doc_keys.add(doc_key)
 
             html = db.get(doc_key)
             if not html:
+                if diagnostics is not None:
+                    diagnostics.skip("missing_content")
                 continue
 
             markdown = await asyncio.to_thread(_convert_html, html)
             if not markdown.strip():
+                if diagnostics is not None:
+                    diagnostics.skip("empty_markdown")
                 continue
 
+            if diagnostics is not None:
+                diagnostics.emitted += 1
             yield Document(
                 topic=entry_type,
                 slug=_slug(doc_key),

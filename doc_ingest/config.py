@@ -12,6 +12,7 @@ class PathsConfig(BaseModel):
     cache_dir: Path
     logs_dir: Path
     state_dir: Path
+    checkpoints_dir: Path
     tmp_dir: Path
     reports_dir: Path
 
@@ -25,6 +26,7 @@ class PathsConfig(BaseModel):
             cache_dir=root / "cache",
             logs_dir=root / "logs",
             state_dir=root / "state",
+            checkpoints_dir=root / "state" / "checkpoints",
             tmp_dir=root / "tmp",
             reports_dir=output_dir / "reports",
         )
@@ -36,6 +38,7 @@ class PathsConfig(BaseModel):
             self.cache_dir,
             self.logs_dir,
             self.state_dir,
+            self.checkpoints_dir,
             self.tmp_dir,
             self.reports_dir,
         ]:

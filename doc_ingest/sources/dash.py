@@ -13,7 +13,11 @@ from typing import AsyncIterator
 import httpx
 from markdownify import markdownify as html_to_md
 
+from ..models import SourceRunDiagnostics
 from .base import CrawlMode, Document, LanguageCatalog
+from ..utils.archive import safe_extract_tar
+from ..utils.filesystem import write_json
+from ..utils.http import request_with_retries
 
 LOGGER = logging.getLogger("doc_ingest.sources.dash")
 
@@ -58,8 +62,7 @@ class DashFeedSource:
         else:
             entries = _DEFAULT_DASH_SEED
 
-        self.catalog_path.parent.mkdir(parents=True, exist_ok=True)
-        self.catalog_path.write_text(json.dumps({"entries": entries}, indent=2), encoding="utf-8")
+        write_json(self.catalog_path, {"entries": entries})
         return [self._catalog_from_entry(entry) for entry in entries]
 
     def _catalog_from_entry(self, entry: dict) -> LanguageCatalog:
@@ -82,7 +85,7 @@ class DashFeedSource:
         tarball_url = f"{FEED_BASE}/{slug}.tgz"
         LOGGER.info("Downloading Dash docset %s", tarball_url)
         async with self._client() as client:
-            resp = await client.get(tarball_url)
+            resp = await request_with_retries(client, "GET", tarball_url)
             resp.raise_for_status()
             tar_bytes = resp.content
 
@@ -93,7 +96,7 @@ class DashFeedSource:
         try:
             try:
                 with tarfile.open(tar_path, "r:gz") as archive:
-                    archive.extractall(target_dir)
+                    safe_extract_tar(archive, target_dir)
             except tarfile.TarError as exc:
                 raise RuntimeError(f"Dash feed for {slug} is not a valid gzip/tar archive") from exc
         finally:
@@ -104,7 +107,12 @@ class DashFeedSource:
             raise RuntimeError(f"No .docset found after extracting {slug}")
         return matches[0]
 
-    async def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]:
+    async def fetch(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[Document]:
         docset_path = await self._download_docset(language.slug)
         dsidx = docset_path / "Contents" / "Resources" / "docSet.dsidx"
         docs_root = docset_path / "Contents" / "Resources" / "Documents"
@@ -119,29 +127,43 @@ class DashFeedSource:
             rows = connection.execute("SELECT name, type, path FROM searchIndex ORDER BY type, name").fetchall()
         finally:
             connection.close()
+        if diagnostics is not None:
+            diagnostics.discovered += len(rows)
 
         seen_paths: set[str] = set()
         for order, (name, entry_type, path) in enumerate(rows):
             if not path or not entry_type:
+                if diagnostics is not None:
+                    diagnostics.skip("missing_path_or_type")
                 continue
             entry_type = str(entry_type)
             if mode == "important" and entry_type.lower() not in core:
+                if diagnostics is not None:
+                    diagnostics.skip("filtered_mode")
                 continue
 
             doc_key = path.split("#", 1)[0]
             if doc_key in seen_paths:
+                if diagnostics is not None:
+                    diagnostics.skip("duplicate_path")
                 continue
             seen_paths.add(doc_key)
 
             html_file = docs_root / doc_key
             if not html_file.exists():
+                if diagnostics is not None:
+                    diagnostics.skip("missing_file")
                 continue
 
             html = await asyncio.to_thread(html_file.read_text, "utf-8", "ignore")
             markdown = await asyncio.to_thread(_convert_html, html)
             if not markdown.strip():
+                if diagnostics is not None:
+                    diagnostics.skip("empty_markdown")
                 continue
 
+            if diagnostics is not None:
+                diagnostics.emitted += 1
             yield Document(
                 topic=entry_type,
                 slug=_slug(doc_key),

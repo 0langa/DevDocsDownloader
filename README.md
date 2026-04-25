@@ -21,6 +21,7 @@ The runtime path is usable today for those three source families. The repository
 	- metadata JSON for each compiled language bundle
 - Validates the compiled output with a simple structural scoring pass
 - Produces JSON and Markdown run summaries in `output/reports/`
+- Writes active per-language checkpoints under `state/checkpoints/` during runs and removes them after successful completion
 
 ## Current feature set
 
@@ -35,7 +36,7 @@ The runtime path is usable today for those three source families. The repository
 	- Downloads the MDN content repository tarball from GitHub and extracts only the relevant `files/en-us/...` trees into cache
 	- Reads frontmatter from `index.md` files and filters by `page-type` in `important` mode
 - **Dash / Kapeli**
-	- Uses a bundled seed catalog because Dash does not expose a clean JSON catalog in this codebase
+	- Uses `doc_ingest/sources/dash_seed.json` because Dash does not expose a clean JSON catalog in this codebase
 	- Downloads `.tgz` docsets, extracts them, reads the SQLite `docSet.dsidx` index, and converts HTML files from the embedded `Documents/` tree
 
 ### Output layout
@@ -58,6 +59,7 @@ Typical generated files:
 - `run` for single-language ingestion
 - `bulk` for preset or all-language runs
 - `list-presets`
+- `audit-presets`
 - `list-languages`
 - `refresh-catalogs`
 - `validate`
@@ -120,6 +122,8 @@ python DevDocsDownloader.py --help
 python DevDocsDownloader.py run python
 python DevDocsDownloader.py run javascript --source mdn --mode full
 python DevDocsDownloader.py run swift --source dash
+python DevDocsDownloader.py run python --include-topic asyncio --include-topic typing
+python DevDocsDownloader.py run swift --exclude-topic Guide
 ```
 
 ### Run the interactive wizard
@@ -152,6 +156,8 @@ python DevDocsDownloader.py validate python
 ```bash
 python DevDocsDownloader.py list-languages
 python DevDocsDownloader.py list-presets
+python DevDocsDownloader.py audit-presets
+python DevDocsDownloader.py audit-presets webapp
 ```
 
 ## Execution behavior
@@ -175,6 +181,13 @@ python DevDocsDownloader.py list-presets
 - `full`
 	- Ingests all available entries exposed by the selected source adapter
 
+### Topic filter behavior
+
+- `--include-topic` limits output to documents whose normalized topic exactly matches one of the supplied values
+- `--exclude-topic` removes documents whose normalized topic exactly matches one of the supplied values
+- include filters run before exclude filters
+- filtered documents are counted in source diagnostics as `filtered_topic_include` or `filtered_topic_exclude`
+
 ### Validation behavior
 
 Compiled output is scored by `doc_ingest/validator.py` using simple checks:
@@ -189,6 +202,20 @@ Compiled output is scored by `doc_ingest/validator.py` using simple checks:
 	- `## Documentation`
 
 The validation score is heuristic. It does not verify semantic correctness or source completeness.
+
+### Checkpoint behavior
+
+During an active language run, the pipeline writes `state/checkpoints/<language>.json` with the source slug, mode, current phase, emitted document count, last document metadata, and any failure records. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the last safe document boundary and failure phase can be inspected before retrying.
+
+### Source diagnostics behavior
+
+Each run records source diagnostics in reports and final state:
+
+- `discovered` — source inventory count observed by the adapter
+- `emitted` — documents emitted by the source before pipeline topic filters
+- `skipped` — reason-count map for source-level and pipeline-level skips
+
+Common skip reasons include mode filtering, duplicate paths, missing content, empty converted Markdown, and topic include/exclude filtering.
 
 ## Repository layout
 
@@ -211,6 +238,7 @@ source-documents/           # legacy support requirements and inputs
 - Validation is shallow and does not inspect broken links, duplicated sections, or malformed converted Markdown beyond unbalanced fences
 - `DocumentationPipeline.close()` is effectively a no-op because source adapters open short-lived clients instead of maintaining pooled clients
 - Bulk runs gather all language tasks via `asyncio.gather`, with only semaphore-based concurrency limiting at the pipeline layer
+- Checkpoints expose the last emitted document boundary, but adapters do not yet support seeking directly to that position on retry
 
 ### Source-specific limitations
 
@@ -222,20 +250,16 @@ source-documents/           # legacy support requirements and inputs
 	- Frontmatter parsing is minimal and ignores indented or complex YAML structures
 	- Archive extraction is large and disk-heavy
 - **Dash**
-	- Catalog coverage is limited to the bundled seed list unless the seed is extended
+	- Catalog coverage is limited to `doc_ingest/sources/dash_seed.json` unless the seed is extended
 	- SQLite index structure is assumed to match the expected `searchIndex` schema
 	- HTML conversion may include navigation noise depending on docset quality
 
-### Repository consistency issues
+### Repository consistency notes
 
-- Several scripts reference modules, config fields, and CLI flags that do not exist in the active codebase, including:
-	- `doc_ingest.parser`
-	- `config.paths.input_file`
-	- `config.paths.crawl_cache_dir`
-	- CLI flags such as `--input-file`, `--page-concurrency`, and `--compile-streaming`
+- `scripts/benchmark_pipeline.py` now targets the active source-adapter CLI and reports document throughput for cold and warm cache trials.
+- `scripts/build_skip_manifest.py` now writes a current state and checkpoint manifest from `state/*.json` and `state/checkpoints/*.json`; URL-level crawler skip manifests are not part of the active pipeline.
 - `requirements.txt` contains packages such as `mammoth`, `msgpack`, `pypdf`, `playwright`, `psutil`, and `tenacity` that are not used by the active ingestion path
 - `pyproject.toml` and `requirements.txt` do not match exactly on dependency versions or package set
-- `scripts/benchmark_pipeline.py` targets an older crawler/performance model and is not compatible with the current CLI
 
 ## Testing
 
@@ -256,11 +280,10 @@ The current tests focus on:
 
 The most realistic next steps, based on the current repository state, are:
 
-1. Remove or update the stale crawler-era scripts and config references
-2. Reconcile dependency manifests
-3. Improve Markdown cleanup and validation depth
-4. Add deterministic tests for complete source adapter flows
-5. Decide whether the project should remain a curated source ingester or return to a general crawler architecture
+1. Reconcile dependency manifests
+2. Improve Markdown cleanup and validation depth
+3. Add deterministic tests for complete source adapter flows
+4. Decide whether the project should remain a curated source ingester or return to a general crawler architecture
 
 ## Documentation map
 

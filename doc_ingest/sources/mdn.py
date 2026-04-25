@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import tarfile
@@ -10,7 +9,11 @@ from typing import AsyncIterator
 
 import httpx
 
+from ..models import SourceRunDiagnostics
 from .base import CrawlMode, Document, LanguageCatalog
+from ..utils.archive import safe_extract_tar
+from ..utils.filesystem import write_json, write_text
+from ..utils.http import stream_to_file_with_retries
 
 LOGGER = logging.getLogger("doc_ingest.sources.mdn")
 
@@ -51,10 +54,7 @@ class MdnContentSource:
             {"slug": slug, "display_name": display, "area": area}
             for slug, (display, area) in AREAS.items()
         ]
-        self.catalog_path.write_text(
-            json.dumps({"entries": entries}, indent=2),
-            encoding="utf-8",
-        )
+        write_json(self.catalog_path, {"entries": entries})
         return [
             LanguageCatalog(
                 source=self.name,
@@ -83,18 +83,14 @@ class MdnContentSource:
                 timeout=None, follow_redirects=True,
                 headers={"User-Agent": "Mozilla/5.0 (compatible; DocIngestBot/1.0)"},
             ) as client:
-                async with client.stream("GET", TARBALL_URL) as response:
-                    response.raise_for_status()
-                    with self.archive_path.open("wb") as handle:
-                        async for chunk in response.aiter_bytes(chunk_size=1 << 20):
-                            handle.write(chunk)
+                await stream_to_file_with_retries(client, TARBALL_URL, self.archive_path)
 
         self.extracted_root.mkdir(parents=True, exist_ok=True)
         LOGGER.info("Extracting MDN content archive")
         await asyncio.to_thread(_extract_tarball, self.archive_path, self.extracted_root)
         if not self._has_expected_tree(self.extracted_root):
             raise RuntimeError("MDN content archive extracted without required documentation tree")
-        marker.write_text("ok", encoding="utf-8")
+        write_text(marker, "ok")
         return self.extracted_root
 
     def _has_expected_tree(self, root: Path) -> bool:
@@ -112,7 +108,12 @@ class MdnContentSource:
                 return candidate
         return None
 
-    async def fetch(self, language: LanguageCatalog, mode: CrawlMode) -> AsyncIterator[Document]:
+    async def fetch(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[Document]:
         _display, area = AREAS[language.slug]
         root = await self._ensure_content()
         top = self._find_content_root(root)
@@ -124,12 +125,16 @@ class MdnContentSource:
 
         core = {t.lower() for t in language.core_topics}
         files = sorted(area_root.rglob("index.md"))
+        if diagnostics is not None:
+            diagnostics.discovered += len(files)
 
         for order, md_path in enumerate(files):
             raw = md_path.read_text(encoding="utf-8", errors="ignore")
             meta, body = _parse_frontmatter(raw)
             page_type = (meta.get("page-type") or "").lower()
             if mode == "important" and core and page_type not in core:
+                if diagnostics is not None:
+                    diagnostics.skip("filtered_mode")
                 continue
 
             rel = md_path.relative_to(area_root).parent
@@ -138,6 +143,8 @@ class MdnContentSource:
             title = meta.get("title") or rel.name.replace("_", " ")
             slug_path = "/".join(rel.parts)
 
+            if diagnostics is not None:
+                diagnostics.emitted += 1
             yield Document(
                 topic=topic,
                 slug=_slug(slug_path),
@@ -150,7 +157,7 @@ class MdnContentSource:
 
 def _extract_tarball(archive: Path, dest: Path) -> None:
     with tarfile.open(archive, "r:gz") as tar:
-        for member in tar:
+        def _keep_member(member: tarfile.TarInfo) -> bool:
             name = member.name
             normalized = name.rstrip("/")
             if not any(f"/files/en-us/{area}" in normalized for area in {a[1] for a in AREAS.values()}):
@@ -159,8 +166,10 @@ def _extract_tarball(archive: Path, dest: Path) -> None:
                     or normalized.endswith("/files/en-us")
                     or normalized.count("/") <= 3
                 ):
-                    continue
-            tar.extract(member, dest)
+                    return False
+            return True
+
+        safe_extract_tar(tar, dest, member_filter=_keep_member)
 
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.DOTALL)

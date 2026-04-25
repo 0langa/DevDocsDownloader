@@ -75,6 +75,7 @@ user command
 - `cache/`
 - `logs/`
 - `state/`
+- `state/checkpoints/`
 - `tmp/`
 
 The config surface is intentionally small. There is no environment-variable config layer, no settings file, and no runtime plugin system in the current code.
@@ -247,8 +248,10 @@ This subsystem is intentionally lightweight. It validates output structure, not 
 **Responsibilities:**
 
 - persist per-language run state to `state/<language>.json`
+- persist active per-language checkpoints to `state/checkpoints/<language>.json`
 - write run summary artifacts to `output/reports/`
 - define the Pydantic models used for validation, state, and reporting
+- preserve source diagnostics with discovered, emitted, and skipped document counts
 
 **Persisted state contents:**
 
@@ -258,6 +261,26 @@ This subsystem is intentionally lightweight. It validates output structure, not 
 - topics and document counts
 - output path
 - completion status
+
+**Active checkpoint contents:**
+
+- language and source identifiers
+- mode
+- current phase: initialized, fetching, compiling, validating, completed, or failed
+- last emitted document metadata
+- current document inventory position from `Document.order_hint`
+- emitted document count
+- failure records with phase, error type, message, and document position
+
+Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection before retrying.
+
+**Source diagnostics contents:**
+
+- `discovered`: source inventory count observed by the adapter
+- `emitted`: documents emitted by the source before pipeline topic filters
+- `skipped`: reason-count map for source-level and pipeline-level skips
+
+Pipeline topic filters add `filtered_topic_include` and `filtered_topic_exclude` skip reasons. Source adapters add reasons such as mode filtering, duplicate paths, missing files, missing content, and empty Markdown.
 
 ### 8. Progress and terminal presentation
 
@@ -280,11 +303,14 @@ This is presentation-only and does not affect the core pipeline.
 3. logging is configured to `logs/run.log`
 4. `DocumentationPipeline.run()` resolves the requested language
 5. selected source adapter fetches source documents
-6. `compile_from_stream()` consumes documents and writes output files
-7. `validate_output()` scores the consolidated file
-8. `RunStateStore.save()` persists language state
-9. `write_reports()` writes JSON and Markdown summaries
-10. CLI prints a Rich summary table
+6. `RunCheckpointStore` records active phase and per-document progress
+7. pipeline-level topic include/exclude filters are applied if configured
+8. `compile_from_stream()` consumes documents and writes output files
+9. `validate_output()` scores the consolidated file
+10. `RunStateStore.save()` persists language state and source diagnostics
+11. the active checkpoint is removed after successful state save
+12. `write_reports()` writes JSON and Markdown summaries
+13. CLI prints a Rich summary table
 
 ### Bulk run
 
@@ -418,6 +444,6 @@ The validator is intended as a quick sanity pass, not a correctness proof. It is
 
 ## Architectural uncertainties and incomplete areas
 
-- The repository contains scripts and local settings that refer to a previous crawler architecture with inputs such as `input_file`, crawl caches, and per-page throughput metrics. Those components are not implemented in the active `doc_ingest` package.
+- Some local settings and historical utilities still refer to a previous crawler architecture with inputs such as `input_file`, crawl caches, and per-page throughput metrics. Those components are not implemented in the active `doc_ingest` package.
 - `DocumentationPipeline.close()` does not release any shared adapter resources because no long-lived clients are retained.
 - The codebase mixes a coherent ingestion runtime with historical benchmarking/setup artifacts. Any future cleanup should explicitly choose which architecture is canonical.
