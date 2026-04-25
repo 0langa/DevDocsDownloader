@@ -1,0 +1,103 @@
+# DevDocsDownloader Output Contract
+
+This document defines the stable generated-output contract for downstream tools and tests. Changes to these files are compatibility changes and must be covered by contract tests.
+
+## Directory Layout
+
+For a language with normalized slug `<language>`, generated Markdown is written under:
+
+```text
+output/markdown/<language>/
+  _meta.json
+  index.md
+  <language>.md
+  <topic>/
+    _section.md
+    <document>.md
+```
+
+Runtime state and reports are written separately:
+
+```text
+state/<language>.json
+state/checkpoints/<language>.json
+output/reports/run_summary.json
+output/reports/run_summary.md
+```
+
+All generated file and directory names are slug-normalized and Windows-safe. Duplicate document slugs within the same topic receive numeric suffixes, for example `std-vector.md` and `std-vector-2.md`.
+
+## Markdown Files
+
+### Language Index
+
+`index.md` is a navigation file for the language. It must contain:
+
+- `# <Language> Documentation - Index`
+- a `## Metadata` section with source name, source slug, source URL, mode, generation timestamp, and total document count
+- a `## Consolidated file` section linking to `<language>.md`
+- a `## Topics` section linking to every `<topic>/_section.md` file in emitted topic order
+
+### Consolidated File
+
+`<language>.md` is the primary downstream manual. It must contain:
+
+- `# <Language> Documentation`
+- `## Metadata`
+- `## Table of Contents`
+- `## Documentation`
+- one `### <Topic>` section per emitted topic
+- one `#### <Document title>` section per emitted document
+- source links for documents that provide `source_url`
+
+Input document headings are shifted down by two levels and repeated blank lines are collapsed, so source `#` headings become `###` inside per-document files and consolidated document bodies.
+
+### Topic Sections
+
+Each `<topic>/_section.md` file must contain:
+
+- `# <Topic>`
+- a source summary line
+- `## Contents`
+- one relative link per document in that topic
+
+### Per-Document Files
+
+Each `<topic>/<document>.md` file must contain:
+
+- `# <Document title>`
+- an italic language/topic metadata line
+- an italic source link when `source_url` is available
+- the normalized document Markdown body
+
+## JSON Metadata
+
+`_meta.json` must include:
+
+- `language`
+- `slug`
+- `source`
+- `source_slug`
+- `source_url`
+- `mode`
+- `total_documents`
+- `topics`, as objects with `topic` and `document_count`
+- `generated_at`, as an ISO timestamp
+
+`state/<language>.json` is the stable completed-run summary. It must include language/source identity, mode, topics, total document count, source diagnostics when available, `output_path`, `completed`, warnings, failures, and timestamps.
+
+`state/checkpoints/<language>.json` is only for active or failed runs. Successful runs remove it after the stable state file is saved. Failed checkpoints must retain phase, document inventory position, emitted document count, last document metadata, and structured failure records.
+
+## Reports and Diagnostics
+
+`output/reports/run_summary.json` serializes the run summary model. `output/reports/run_summary.md` is the human-readable equivalent.
+
+When available, `SourceRunDiagnostics` must report:
+
+- `discovered`: source inventory count
+- `emitted`: documents yielded by the source before pipeline filters
+- `skipped`: reason-count map
+
+Standard skip reasons currently include `filtered_mode`, `filtered_topic_include`, `filtered_topic_exclude`, `duplicate_or_empty_path`, `missing_content`, `empty_markdown`, `missing_path_or_type`, `duplicate_path`, and `missing_file`.
+
+Validation results must include `score`, `quality_score`, `issues`, language, and output path. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.

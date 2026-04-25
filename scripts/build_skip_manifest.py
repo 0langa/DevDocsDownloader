@@ -4,14 +4,12 @@ import json
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from doc_ingest.config import load_config
-from doc_ingest.models import LanguageRunCheckpoint
-from doc_ingest.models import LanguageRunState
+from doc_ingest.models import LanguageRunCheckpoint, LanguageRunState
 from doc_ingest.utils.filesystem import read_json, write_json
 
 
@@ -41,12 +39,11 @@ def build_manifest() -> dict[str, dict[str, object]]:
             "mode": state.mode,
             "completed": state.completed,
             "total_documents": state.total_documents,
-            "source_diagnostics": state.source_diagnostics.model_dump(mode="json") if state.source_diagnostics else None,
+            "source_diagnostics": state.source_diagnostics.model_dump(mode="json")
+            if state.source_diagnostics
+            else None,
             "output_path": state.output_path,
-            "topics": [
-                {"topic": topic.topic, "document_count": topic.document_count}
-                for topic in state.topics
-            ],
+            "topics": [{"topic": topic.topic, "document_count": topic.document_count} for topic in state.topics],
             "warnings": state.warnings,
             "failures": state.failures,
             "updated_at": state.updated_at.isoformat(),

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
-
 
 RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 
@@ -28,7 +29,8 @@ async def request_with_retries(
     *,
     retry_config: RetryConfig = DEFAULT_RETRY_CONFIG,
     retryable_status_codes: set[int] = RETRYABLE_STATUS_CODES,
-    **kwargs: object,
+    on_retry: Callable[[], None] | None = None,
+    **kwargs: Any,
 ) -> httpx.Response:
     last_exc: Exception | None = None
     attempts = max(1, retry_config.max_attempts)
@@ -47,6 +49,8 @@ async def request_with_retries(
                 aclose = getattr(response, "aclose", None)
                 if aclose is not None:
                     await aclose()
+                if on_retry is not None:
+                    on_retry()
                 await _sleep_before_retry(attempt, retry_config)
                 continue
             return response
@@ -54,6 +58,8 @@ async def request_with_retries(
             last_exc = exc
             if attempt >= attempts:
                 raise
+            if on_retry is not None:
+                on_retry()
             await _sleep_before_retry(attempt, retry_config)
 
     assert last_exc is not None
@@ -68,6 +74,7 @@ async def stream_to_file_with_retries(
     retry_config: RetryConfig = DEFAULT_RETRY_CONFIG,
     chunk_size: int = 1 << 20,
     retryable_status_codes: set[int] = RETRYABLE_STATUS_CODES,
+    on_retry: Callable[[], None] | None = None,
 ) -> None:
     attempts = max(1, retry_config.max_attempts)
 
@@ -76,6 +83,8 @@ async def stream_to_file_with_retries(
         try:
             async with client.stream("GET", url) as response:
                 if response.status_code in retryable_status_codes and attempt < attempts:
+                    if on_retry is not None:
+                        on_retry()
                     await _sleep_before_retry(attempt, retry_config)
                     continue
                 response.raise_for_status()
@@ -91,11 +100,15 @@ async def stream_to_file_with_retries(
             temp_path.unlink(missing_ok=True)
             if exc.response.status_code not in retryable_status_codes or attempt >= attempts:
                 raise
+            if on_retry is not None:
+                on_retry()
             await _sleep_before_retry(attempt, retry_config)
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
             temp_path.unlink(missing_ok=True)
             if attempt >= attempts:
                 raise
+            if on_retry is not None:
+                on_retry()
             await _sleep_before_retry(attempt, retry_config)
         except Exception:
             temp_path.unlink(missing_ok=True)

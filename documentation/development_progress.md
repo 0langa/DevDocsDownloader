@@ -2,7 +2,7 @@
 
 ## Current state summary
 
-The repository has a solid first working implementation of a curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path is coherent for that scope. The main remaining repository drift is dependency/setup residue and historical crawler-oriented utilities that are not part of the active runtime.
+The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, and dependency/tooling hygiene. Historical crawler-oriented utilities are archived outside the active runtime.
 
 In short:
 
@@ -106,11 +106,11 @@ It does **not** currently verify:
 
 ### Resource lifecycle management
 
-- `DocumentationPipeline.close()` exists but does nothing
-- source adapters create short-lived `httpx.AsyncClient` instances on demand
-- there is no persistent client pool to close or reuse
+- `DocumentationPipeline.close()` releases shared `SourceRuntime` HTTP clients
+- source adapters receive the shared runtime from `SourceRegistry`
+- HTTP clients are pooled by runtime profile and reused across source calls
 
-This is not a functional bug by itself, but it shows the lifecycle interface is ahead of the implementation.
+Remaining lifecycle work is mostly policy-level: per-source rate limits, richer telemetry, and cache ownership boundaries.
 
 ### Resume and checkpoint depth
 
@@ -124,9 +124,10 @@ The pipeline now records per-language active checkpoints with phase, emitted doc
 
 ### Dependency management
 
-- `pyproject.toml` and `requirements.txt` are not fully aligned
-- active runtime imports use only a subset of declared dependencies
-- `source-documents/requirements.txt` is a second dependency manifest with overlapping but different versions and packages
+- `pyproject.toml` is the canonical dependency manifest
+- runtime dependencies are limited to active package imports
+- developer, analysis, conversion, browser, and benchmark packages are split into optional extras
+- `requirements.txt` and `source-documents/requirements.txt` are compatibility shims, not independent manifests
 
 ## Missing features relative to likely next needs
 
@@ -147,16 +148,16 @@ These are not promised by the current code, but they are the most obvious gaps f
 - no per-document validation reports
 - no optional alternate output formats beyond Markdown and metadata JSON
 
-### Missing test coverage
+### Remaining test coverage gaps
 
-- no real integration tests against cached fixtures for complete runs
-- no golden-file tests for compiler output
-- no CLI contract tests for command output and error handling
 - no tests for suggestion quality in source resolution
+- live endpoint probes are opt-in and intentionally do not validate extraction quality
 
 ## Known bugs, mismatches, and fragile areas
 
-### 1. Historical crawler hints remain outside the active application
+### 1. Historical crawler hints are archived outside the active application
+
+The crawler path analyzer now lives under `documentation/archive/analyze_doc_paths.py.txt`. The active application does not consume URL root input files or crawler path override files.
 
 ### `scripts/benchmark_pipeline.py`
 
@@ -166,11 +167,9 @@ This file now benchmarks the active CLI by running corpus languages through `Dev
 
 This file now writes `cache/state_manifest.json` from current `LanguageRunState` files. It no longer attempts to build URL-level skip manifests because the active source-adapter pipeline does not persist crawler URL state.
 
-### 2. Repository hints still reference the old architecture
+### 2. Repository hints now target current commands
 
-Local settings under `.claude/settings.local.json` reference missing config fields and missing modules, which reinforces that the repository previously supported a broader crawler architecture.
-
-Current status: **stale local developer configuration**.
+Local settings under `.claude/settings.local.json` now reference current CLI, test, lint, and type-check commands.
 
 ### 3. MDN frontmatter parsing is intentionally simplistic
 

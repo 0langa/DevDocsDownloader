@@ -5,17 +5,17 @@ import io
 import tarfile
 from pathlib import Path
 
-import pytest
 import httpx
+import pytest
 
+import doc_ingest.pipeline as pipeline_module
 from doc_ingest.compiler import LanguageOutputBuilder
 from doc_ingest.config import load_config
-import doc_ingest.pipeline as pipeline_module
 from doc_ingest.pipeline import DocumentationPipeline
+from doc_ingest.sources.base import Document, LanguageCatalog
 from doc_ingest.sources.dash import DashFeedSource
 from doc_ingest.sources.devdocs import DevDocsSource
 from doc_ingest.sources.mdn import MdnContentSource
-from doc_ingest.sources.base import Document, LanguageCatalog
 from doc_ingest.utils.filesystem import read_json, write_json, write_text
 from doc_ingest.utils.http import RetryConfig, request_with_retries, stream_to_file_with_retries
 from doc_ingest.utils.text import slugify
@@ -72,17 +72,19 @@ def test_validate_only_uses_local_metadata_without_resolving_sources(monkeypatch
     config = load_config(root=tmp_path)
     language_dir = config.paths.markdown_dir / "python"
     output_path = language_dir / "python.md"
-    body = "\n".join([
-        "# Python Documentation",
-        "",
-        "## Metadata",
-        "",
-        "## Table of Contents",
-        "",
-        "## Documentation",
-        "",
-        "x" * 2500,
-    ])
+    body = "\n".join(
+        [
+            "# Python Documentation",
+            "",
+            "## Metadata",
+            "",
+            "## Table of Contents",
+            "",
+            "## Documentation",
+            "",
+            "x" * 2500,
+        ]
+    )
     write_text(output_path, body)
     write_json(
         language_dir / "_meta.json",
@@ -373,7 +375,9 @@ def test_mdn_extract_tarball_keeps_files_root(tmp_path: Path) -> None:
     source_root = tmp_path / "src"
     file_dir = source_root / "content-main" / "files" / "en-us" / "web" / "html"
     file_dir.mkdir(parents=True)
-    (file_dir / "index.md").write_text("---\ntitle: HTML\npage-type: guide\nslug: Web/HTML\n---\nBody", encoding="utf-8")
+    (file_dir / "index.md").write_text(
+        "---\ntitle: HTML\npage-type: guide\nslug: Web/HTML\n---\nBody", encoding="utf-8"
+    )
 
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(source_root / "content-main", arcname="content-main")
@@ -410,17 +414,10 @@ def test_dash_invalid_archive_raises_runtime_error(tmp_path: Path) -> None:
         def raise_for_status(self) -> None:
             return None
 
-    class FakeClient:
-        async def __aenter__(self):
-            return self
+    async def fake_request(*_args, **_kwargs) -> FakeResponse:
+        return FakeResponse()
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, _url: str) -> FakeResponse:
-            return FakeResponse()
-
-    source._client = lambda: FakeClient()  # type: ignore[method-assign]
+    source.runtime.request = fake_request  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="not a valid gzip/tar archive"):
         asyncio.run(source._download_docset("Raku"))
@@ -441,17 +438,10 @@ def test_dash_docset_extract_rejects_path_traversal(tmp_path: Path) -> None:
         def raise_for_status(self) -> None:
             return None
 
-    class FakeClient:
-        async def __aenter__(self):
-            return self
+    async def fake_request(*_args, **_kwargs) -> FakeResponse:
+        return FakeResponse()
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, _url: str) -> FakeResponse:
-            return FakeResponse()
-
-    source._client = lambda: FakeClient()  # type: ignore[method-assign]
+    source.runtime.request = fake_request  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="Unsafe tar member path"):
         asyncio.run(source._download_docset("Raku"))

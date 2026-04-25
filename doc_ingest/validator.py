@@ -15,7 +15,9 @@ def validate_output(
     issues: list[ValidationIssue] = []
 
     if not output_path.exists():
-        issues.append(ValidationIssue(level="error", code="missing_output", message="Consolidated markdown file is missing."))
+        issues.append(
+            ValidationIssue(level="error", code="missing_output", message="Consolidated markdown file is missing.")
+        )
         return ValidationResult(language=language, output_path=output_path, score=0.0, issues=issues)
 
     text = output_path.read_text(encoding="utf-8")
@@ -25,14 +27,20 @@ def validate_output(
         issues.append(ValidationIssue(level="error", code="no_documents", message="No documents were ingested."))
 
     if size < 2000:
-        issues.append(ValidationIssue(level="error", code="tiny_output", message=f"Consolidated output is very small ({size} bytes)."))
+        issues.append(
+            ValidationIssue(
+                level="error", code="tiny_output", message=f"Consolidated output is very small ({size} bytes)."
+            )
+        )
 
     if text.count("```") % 2 != 0:
         issues.append(ValidationIssue(level="warning", code="code_fence", message="Unbalanced code fences detected."))
 
     for section in ("## Metadata", "## Table of Contents", "## Documentation"):
         if section not in text:
-            issues.append(ValidationIssue(level="warning", code="missing_section", message=f"Missing section {section!r}."))
+            issues.append(
+                ValidationIssue(level="warning", code="missing_section", message=f"Missing section {section!r}.")
+            )
 
     if not topics:
         issues.append(ValidationIssue(level="warning", code="no_topics", message="No topics were produced."))

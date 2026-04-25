@@ -4,6 +4,7 @@ import logging
 from difflib import get_close_matches
 from pathlib import Path
 
+from ..runtime import SourceRuntime
 from .base import DocumentationSource, LanguageCatalog
 from .dash import DashFeedSource
 from .devdocs import DevDocsSource
@@ -16,15 +17,18 @@ _MDN_PREFERRED = {"html", "css", "http", "web-apis", "webassembly"}
 
 
 class SourceRegistry:
-    def __init__(self, *, cache_dir: Path, package_root: Path | None = None) -> None:
+    def __init__(
+        self, *, cache_dir: Path, package_root: Path | None = None, runtime: SourceRuntime | None = None
+    ) -> None:
         self.cache_dir = cache_dir
+        self.runtime = runtime or SourceRuntime()
         source_root = package_root or Path(__file__).parent
         core_topics_path = source_root / "devdocs_core.json"
         dash_seed_path = source_root / "dash_seed.json"
         self.sources: list[DocumentationSource] = [
-            DevDocsSource(cache_dir=cache_dir, core_topics_path=core_topics_path),
-            MdnContentSource(cache_dir=cache_dir),
-            DashFeedSource(cache_dir=cache_dir, catalog_seed=dash_seed_path),
+            DevDocsSource(cache_dir=cache_dir, core_topics_path=core_topics_path, runtime=self.runtime),
+            MdnContentSource(cache_dir=cache_dir, runtime=self.runtime),
+            DashFeedSource(cache_dir=cache_dir, catalog_seed=dash_seed_path, runtime=self.runtime),
         ]
 
     def get(self, name: str) -> DocumentationSource | None:
@@ -57,18 +61,25 @@ class SourceRegistry:
             entries = catalogs.get(source_name, [])
             match = _exact_match(entries, needle)
             if match:
-                return self.get(source_name), match
+                source = self.get(source_name)
+                if source is not None:
+                    return source, match
             return None
 
         priority = ["mdn", "devdocs", "dash"] if needle in _MDN_PREFERRED else ["devdocs", "mdn", "dash"]
         for name in priority:
             match = _exact_match(catalogs.get(name, []), needle)
             if match:
-                return self.get(name), match
+                source = self.get(name)
+                if source is not None:
+                    return source, match
         return None
 
     async def resolve_many(
-        self, language_names: list[str], *, force_refresh: bool = False,
+        self,
+        language_names: list[str],
+        *,
+        force_refresh: bool = False,
     ) -> tuple[list[tuple[str, DocumentationSource, LanguageCatalog]], list[str]]:
         """Resolve a list of language names, deduplicating by catalog slug."""
         resolved: list[tuple[str, DocumentationSource, LanguageCatalog]] = []

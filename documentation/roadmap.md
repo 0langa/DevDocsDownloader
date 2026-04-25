@@ -22,70 +22,72 @@ The next priorities shift from basic stability toward contract hardening, determ
 
 ## Phase 3: Contracts, Tests, and Developer Hygiene
 
+Status: Phase 3 is complete. Output contract documentation, golden output contract tests, fixture-based pipeline integration tests, CLI contract tests, dependency reconciliation, modern setup, and lint/type tooling are now implemented. Phase 4 architecture work can start from a cleaner testing and tooling baseline.
+
 ### 1. Define and Test the Stable Output Contract
 
 - **Problem:** Output layout and Markdown structure are still implicit in `compiler.py`. Future renderer or streaming changes could break downstream consumers without obvious test failures.
-- **Proposed Solution:** Document the generated output contract for per-document files, topic sections, language indexes, consolidated files, `_meta.json`, state, checkpoints, and diagnostics. Add golden-file tests around a synthetic language fixture.
+- **Proposed Solution:** Completed with `documentation/output_contract.md`, output-contract fixtures under `tests/fixtures/output_contract/`, and golden tests in `tests/test_output_contract.py`.
 - **Impact:** Creates a stable compatibility target before deeper compiler refactoring.
-- **Complexity:** Medium
+- **Complexity:** Completed
 
 ### 2. Add Fixture-Based End-to-End Integration Tests
 
 - **Problem:** The test suite now covers many risk points, but there is still no deterministic full run that exercises resolution, adapter fetch, compile, validate, state, checkpoints, diagnostics, and reports together.
-- **Proposed Solution:** Add fixture-backed source adapters or monkeypatched registry entries for DevDocs-like, MDN-like, and Dash-like flows. Avoid live network in routine tests.
+- **Proposed Solution:** Completed with in-memory DevDocs-like, MDN-like, and Dash-like integration flows in `tests/test_pipeline_integration.py`; routine tests avoid live network.
 - **Impact:** Prevents regressions across the full ingestion contract without relying on upstream availability.
-- **Complexity:** High
+- **Complexity:** Completed
 
 ### 3. Add CLI Contract Tests
 
 - **Problem:** CLI behavior is still mostly verified manually. Recent additions such as `audit-presets`, topic filters, local validation, and bulk filtering need stable automation coverage.
-- **Proposed Solution:** Use Typer's test runner or subprocess tests for `run --help`, `bulk --help`, `validate --output-dir`, `audit-presets`, invalid presets, topic filter wiring, and report writing.
+- **Proposed Solution:** Completed with Typer `CliRunner` tests in `tests/test_cli_contract.py` covering help output, topic filter wiring, local validation with `--output-dir`, preset auditing, invalid presets, and report creation.
 - **Impact:** Protects scripted usage and keeps user-facing commands predictable.
-- **Complexity:** Medium
+- **Complexity:** Completed
 
 ### 4. Reconcile Dependency Manifests
 
 - **Problem:** `pyproject.toml`, `requirements.txt`, and `source-documents/requirements.txt` still diverge. Some packages are unused by the active runtime or only future-facing.
-- **Proposed Solution:** Make `pyproject.toml` canonical. Split optional extras such as `dev`, `benchmark`, and `conversion-extended`; regenerate or remove duplicate requirements files.
+- **Proposed Solution:** Completed by making `pyproject.toml` canonical, slimming runtime dependencies, moving developer/analysis/conversion/browser/benchmark dependencies to optional extras, and turning duplicate requirements files into compatibility shims.
 - **Impact:** Reduces install cost, stale setup behavior, and dependency confusion.
-- **Complexity:** Medium
+- **Complexity:** Completed
 
 ### 5. Modernize Setup and Tooling
 
 - **Problem:** `scripts/setup.py` still reflects older crawler-era assumptions, including broad dependencies and Playwright installation.
-- **Proposed Solution:** Update setup to install the active package dependencies, create current runtime directories, and print valid examples. Add Ruff formatting/linting and a pragmatic type-checking gate.
+- **Proposed Solution:** Completed by updating setup to install editable project extras, create current runtime directories, make Chromium opt-in, print valid current commands, and adding Ruff and mypy configuration.
 - **Impact:** Improves onboarding and catches simple errors before runtime.
-- **Complexity:** Medium
+- **Complexity:** Completed
 
 ## Phase 4: Architecture and Refactoring
 
 ### 1. Introduce Shared Source Runtime Services
 
-- **Problem:** Adapters still create their own `httpx.AsyncClient` instances and lifecycle ownership is fragmented. `DocumentationPipeline.close()` remains mostly ceremonial.
-- **Proposed Solution:** Add a `SourceRuntime` or `IngestionContext` that owns HTTP clients, retry policy, cache helpers, user agent, and telemetry hooks. Pass it through `SourceRegistry` and close it from the pipeline.
+- **Problem:** Adapters previously created their own `httpx.AsyncClient` instances and lifecycle ownership was fragmented. `DocumentationPipeline.close()` was mostly ceremonial.
+- **Proposed Solution:** Completed with `SourceRuntime`, shared pooled HTTP clients, retry configuration, telemetry counters, registry injection, and pipeline-managed close.
 - **Impact:** Reduces duplicate source logic and enables real pooled-resource lifecycle management.
-- **Complexity:** High
+- **Complexity:** Completed
 
 ### 2. Formalize Adapter Events Beyond `Document`
 
 - **Problem:** `SourceRunDiagnostics` provides aggregate counts, but per-document warnings, source metadata, assets, and recoverable errors still do not have a typed event path.
-- **Proposed Solution:** Introduce a typed event stream with variants such as `document`, `warning`, `skipped`, `source_stats`, and `asset`. Keep compatibility wrappers for current adapters during migration.
+- **Proposed Solution:** Completed with typed adapter events, compatibility wrappers for document streams, and pipeline handling for document, warning, skipped, source stats, and asset events.
 - **Impact:** Enables richer reporting, semantic metadata, and future asset/link handling without overloading `Document`.
-- **Complexity:** High
+- **Complexity:** Completed
 
 ### 3. Separate Compilation Planning, Rendering, and Writing
 
 - **Problem:** `LanguageOutputBuilder.finalize()` still groups, renders, and persists output in one path, making streaming output and precise renderer tests harder.
-- **Proposed Solution:** Split compilation into a planning model, pure render functions, and a persistence layer. Keep atomic writes for state and final artifacts.
+- **Proposed Solution:** Completed with `CompilationPlan`, pure render output, and a writer layer behind the existing `compile_from_stream()` API.
 - **Impact:** Makes compiler behavior easier to test and prepares for low-memory streaming compilation.
-- **Complexity:** Medium
+- **Complexity:** Completed
 
 ### 4. Decide the Fate of Historical Crawler Utilities
 
-- **Problem:** `scripts/analyze_doc_paths.py`, URL utilities, and local `.claude` settings still reference historical crawler workflows that are not part of the active source-adapter runtime.
-- **Proposed Solution:** Either archive crawler-only utilities explicitly or define a separate crawler plugin path with its own tests and config.
+- **Problem:** Historical crawler utilities and local `.claude` settings referenced workflows that are not part of the active source-adapter runtime.
+- **Proposed Solution:** Completed by archiving the crawler-only path analyzer under `documentation/archive/`, documenting `source-documents/` as historical compatibility, and replacing stale `.claude` command allowlist entries.
 - **Impact:** Prevents future architecture drift and keeps maintenance work aligned with the current product.
-- **Complexity:** Medium
+- **Complexity:** Completed
 
 ## Phase 5: Performance and Scalability
 

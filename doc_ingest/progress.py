@@ -78,7 +78,7 @@ class CrawlProgressTracker:
             self._refresh()
 
     def _refresh(self) -> None:
-        totals = sum(l.documents for l in self._languages.values())
+        totals = sum(language.documents for language in self._languages.values())
         status = f"documents: {totals:,}"
         self._progress.update(self._task_id, status=status, advance=0)
         if self._live is not None:

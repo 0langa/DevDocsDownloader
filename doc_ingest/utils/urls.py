@@ -3,8 +3,7 @@ from __future__ import annotations
 import posixpath
 import re
 from collections.abc import Iterable
-from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse, urlencode
-
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 INDEX_PAGE_SUFFIXES = {"/index.html", "/index.htm", "/index.md", "/README.md", "/readme.md"}
 DEFAULT_DROP_QUERY_PARAMS = {
@@ -94,7 +93,15 @@ def normalize_url(
 
 
 def resolve_url(base: str, href: str, **kwargs: object) -> str:
-    return normalize_url(urljoin(base, href), **kwargs)
+    drop_query_params = kwargs.get("drop_query_params")
+    keep_query_params = kwargs.get("keep_query_params")
+    prefer_https = kwargs.get("prefer_https", True)
+    return normalize_url(
+        urljoin(base, href),
+        drop_query_params=drop_query_params if isinstance(drop_query_params, Iterable) else None,
+        keep_query_params=keep_query_params if isinstance(keep_query_params, Iterable) else None,
+        prefer_https=prefer_https if isinstance(prefer_https, bool) else True,
+    )
 
 
 def canonicalize_url_for_content(url: str) -> str:
@@ -120,4 +127,3 @@ def same_domain(url: str, allowed_domains: Iterable[str]) -> bool:
     host = urlparse(url).netloc.lower()
     normalized_domains = {domain.lower() for domain in allowed_domains}
     return host in normalized_domains
-

@@ -8,10 +8,9 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -178,7 +177,7 @@ def run_benchmark(args: argparse.Namespace) -> None:
     if not languages:
         raise RuntimeError(f"No languages found in corpus file: {corpus_path}")
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     benchmark_dir = ROOT / "output" / "reports" / "benchmarks" / stamp
     modes = [args.cache_mode] if args.cache_mode in {"cold", "warm"} else ["cold", "warm"]
     trials: list[TrialResult] = []
@@ -200,7 +199,7 @@ def run_benchmark(args: argparse.Namespace) -> None:
             )
 
     payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "corpus": str(corpus_path),
         "languages": languages,
         "trials_per_mode": args.trials,
@@ -216,8 +215,12 @@ def run_benchmark(args: argparse.Namespace) -> None:
 def compare_benchmark(args: argparse.Namespace) -> None:
     latest = json.loads(Path(args.latest).read_text(encoding="utf-8"))
     baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
-    latest_rate = float(latest.get("summary", {}).get("modes", {}).get(args.mode, {}).get("mean_documents_per_second", 0.0))
-    baseline_rate = float(baseline.get("summary", {}).get("modes", {}).get(args.mode, {}).get("mean_documents_per_second", 0.0))
+    latest_rate = float(
+        latest.get("summary", {}).get("modes", {}).get(args.mode, {}).get("mean_documents_per_second", 0.0)
+    )
+    baseline_rate = float(
+        baseline.get("summary", {}).get("modes", {}).get(args.mode, {}).get("mean_documents_per_second", 0.0)
+    )
     if baseline_rate <= 0:
         raise RuntimeError("Baseline mode rate is zero or missing.")
     delta_pct = ((latest_rate - baseline_rate) / baseline_rate) * 100.0
@@ -242,7 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--latest", required=True)
     compare_parser.add_argument("--baseline", required=True)
     compare_parser.add_argument("--mode", choices=["cold", "warm"], default="cold")
-    compare_parser.add_argument("--fail-on-regression", type=float, default=8.0, help="Fail if throughput regression exceeds this percent.")
+    compare_parser.add_argument(
+        "--fail-on-regression", type=float, default=8.0, help="Fail if throughput regression exceeds this percent."
+    )
     compare_parser.set_defaults(func=compare_benchmark)
     return parser
 

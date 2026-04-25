@@ -1,16 +1,20 @@
 """
 analyze_doc_paths.py
 --------------------
+ARCHIVED: This crawler-oriented utility is preserved for historical reference only.
+It is not part of the active source-adapter runtime or current tooling gates.
+
 Fetches every documentation root URL in source-documents/renamed-link-source.md,
 analyses the internal link structure, and writes source-documents/doc_path_overrides.json
 with per-language allowed_path_prefixes and optionally revised start_urls.
 
-Run:
+Historical run command:
     python scripts/analyze_doc_paths.py
 
 Output:
     source-documents/doc_path_overrides.json  (consumed by the crawler's planner at runtime)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,19 +42,71 @@ USER_AGENT = "DocPathAnalyzer/1.0 (+local documentation analysis)"
 
 # Tokens that make a URL look like junk regardless of domain
 NEGATIVE_PATH_TOKENS = {
-    "blog", "news", "press", "release", "download", "download", "community",
-    "forum", "discuss", "support", "issues", "github", "twitter", "linkedin",
-    "facebook", "careers", "jobs", "pricing", "subscribe", "login", "signup",
-    "account", "search", "tag", "category", "wp-content", "cdn", "static",
-    "assets", "images", "img", "css", "js", "font", "ajax",
+    "blog",
+    "news",
+    "press",
+    "release",
+    "download",
+    "community",
+    "forum",
+    "discuss",
+    "support",
+    "issues",
+    "github",
+    "twitter",
+    "linkedin",
+    "facebook",
+    "careers",
+    "jobs",
+    "pricing",
+    "subscribe",
+    "login",
+    "signup",
+    "account",
+    "search",
+    "tag",
+    "category",
+    "wp-content",
+    "cdn",
+    "static",
+    "assets",
+    "images",
+    "img",
+    "css",
+    "js",
+    "font",
+    "ajax",
 }
 
 # Tokens that strongly suggest a page is documentation
 DOC_PATH_TOKENS = {
-    "doc", "docs", "documentation", "reference", "manual", "guide", "tutorial",
-    "language", "lib", "library", "stdlib", "spec", "book", "learn",
-    "getting-started", "quickstart", "api", "help", "kb", "knowledge",
-    "chapter", "section", "module", "package", "class", "overview", "intro",
+    "doc",
+    "docs",
+    "documentation",
+    "reference",
+    "manual",
+    "guide",
+    "tutorial",
+    "language",
+    "lib",
+    "library",
+    "stdlib",
+    "spec",
+    "book",
+    "learn",
+    "getting-started",
+    "quickstart",
+    "api",
+    "help",
+    "kb",
+    "knowledge",
+    "chapter",
+    "section",
+    "module",
+    "package",
+    "class",
+    "overview",
+    "intro",
 }
 
 
@@ -112,7 +168,9 @@ STATIC_OVERRIDES: dict[str, dict] = {
     # Objective-C ──────────────────────────────────────────────────────────
     "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ProgrammingWithObjectiveC/Introduction/Introduction.html": {
         "name": "Objective-C",
-        "start_urls": ["https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ProgrammingWithObjectiveC/Introduction/Introduction.html"],
+        "start_urls": [
+            "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ProgrammingWithObjectiveC/Introduction/Introduction.html"
+        ],
         "allowed_path_prefixes": ["/library/archive/documentation/Cocoa/", "/library/archive/documentation/General/"],
         "note": "static override",
     },
@@ -150,7 +208,9 @@ STATIC_OVERRIDES: dict[str, dict] = {
     },
     "https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/xpp-language-reference": {
         "name": "X++",
-        "start_urls": ["https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/xpp-language-reference"],
+        "start_urls": [
+            "https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/xpp-language-reference"
+        ],
         "allowed_path_prefixes": ["/en-us/dynamics365/fin-ops-core/dev-itpro/dev-ref/"],
         "note": "static override",
     },
@@ -242,7 +302,12 @@ STATIC_OVERRIDES: dict[str, dict] = {
     "https://groovy-lang.org/documentation.html": {
         "name": "Groovy",
         "start_urls": ["https://groovy-lang.org/documentation.html"],
-        "allowed_path_prefixes": ["/documentation.html", "/single-page-documentation.html", "/apidocs/", "/style-guide.html"],
+        "allowed_path_prefixes": [
+            "/documentation.html",
+            "/single-page-documentation.html",
+            "/apidocs/",
+            "/style-guide.html",
+        ],
         "note": "static override",
     },
     "https://elixir-lang.org/docs.html": {

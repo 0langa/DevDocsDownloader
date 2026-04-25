@@ -53,6 +53,8 @@ Typical generated files:
 - `<topic>/_section.md` — topic index
 - `<topic>/<document>.md` — one Markdown file per source document
 
+The stable generated-output contract is documented in `documentation/output_contract.md`.
+
 ### CLI capabilities
 
 - Interactive wizard when run without a subcommand
@@ -104,9 +106,32 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+`pyproject.toml` is the canonical dependency manifest. The root `requirements.txt` is a compatibility shim for users who expect a requirements file.
+
+For development:
+
+```bash
+python -m pip install -e .[dev]
+```
+
+Optional extras:
+
+- `analysis` — support for archived crawler path-analysis utilities
+- `conversion-extended` — future PDF/DOCX conversion dependencies
+- `browser` — Playwright package only
+- `benchmark` — benchmark helper dependencies
+
 ### Optional helper setup
 
-The repository includes `scripts/setup.py`, which creates a virtual environment, installs dependencies from `source-documents/requirements.txt`, and installs the Chromium browser for Playwright. That script appears to belong to an earlier, broader crawler workflow; it is not required by the active `doc_ingest` pipeline.
+The repository includes `scripts/setup.py`, which creates `.venv`, installs the editable package with the `dev` extra, and creates current runtime directories.
+
+```bash
+python scripts/setup.py
+python scripts/setup.py --extras dev,analysis,benchmark
+python scripts/setup.py --extras dev,browser --with-playwright-browser
+```
+
+Playwright Chromium is not installed by default.
 
 ## Usage
 
@@ -149,6 +174,31 @@ python DevDocsDownloader.py bulk all --mode important --yes
 
 ```bash
 python DevDocsDownloader.py validate python
+```
+
+### Run live endpoint probes
+
+Routine tests do not use the network. To verify that configured upstream source URLs are still reachable without downloading full languages, run the opt-in live probe suite:
+
+```powershell
+$env:DEVDOCS_LIVE_TESTS='1'; python -m pytest -m live -q
+```
+
+Optional controls:
+
+- `DEVDOCS_LIVE_CONCURRENCY` — concurrent live probes, default `5`
+- `DEVDOCS_LIVE_TIMEOUT` — request timeout in seconds, default `20`
+- `DEVDOCS_LIVE_LIMIT` — maximum number of probes, useful while debugging
+
+The live probes check one representative endpoint per configured language/source entry. DevDocs probes each language `index.json`, MDN probes one raw `index.md` for each configured area, and Dash probes each configured `.tgz` feed with a capped ranged request. They validate link health only; they do not compile output or verify extraction quality.
+
+### Developer checks
+
+```bash
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy doc_ingest
 ```
 
 ### List languages and presets
@@ -236,7 +286,7 @@ source-documents/           # legacy support requirements and inputs
 - Output quality depends entirely on upstream source structure and `markdownify`
 - The compiler does not preserve source navigation hierarchy beyond topic grouping
 - Validation is shallow and does not inspect broken links, duplicated sections, or malformed converted Markdown beyond unbalanced fences
-- `DocumentationPipeline.close()` is effectively a no-op because source adapters open short-lived clients instead of maintaining pooled clients
+- `DocumentationPipeline.close()` releases shared source-runtime HTTP clients
 - Bulk runs gather all language tasks via `asyncio.gather`, with only semaphore-based concurrency limiting at the pipeline layer
 - Checkpoints expose the last emitted document boundary, but adapters do not yet support seeking directly to that position on retry
 
@@ -258,8 +308,8 @@ source-documents/           # legacy support requirements and inputs
 
 - `scripts/benchmark_pipeline.py` now targets the active source-adapter CLI and reports document throughput for cold and warm cache trials.
 - `scripts/build_skip_manifest.py` now writes a current state and checkpoint manifest from `state/*.json` and `state/checkpoints/*.json`; URL-level crawler skip manifests are not part of the active pipeline.
-- `requirements.txt` contains packages such as `mammoth`, `msgpack`, `pypdf`, `playwright`, `psutil`, and `tenacity` that are not used by the active ingestion path
-- `pyproject.toml` and `requirements.txt` do not match exactly on dependency versions or package set
+- `pyproject.toml` is the canonical dependency manifest; `requirements.txt` and `source-documents/requirements.txt` are compatibility shims.
+- Extended conversion, browser, analysis, benchmark, and developer packages are optional extras instead of baseline runtime dependencies.
 
 ## Testing
 

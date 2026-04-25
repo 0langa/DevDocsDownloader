@@ -5,14 +5,15 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import cast
 
 from .compiler import compile_from_stream
 from .config import AppConfig
 from .models import (
     CrawlMode,
     DocumentCheckpoint,
-    LanguageRunReport,
     LanguageRunCheckpoint,
+    LanguageRunReport,
     LanguageRunState,
     RunSummary,
     SourceRunDiagnostics,
@@ -20,7 +21,19 @@ from .models import (
 )
 from .progress import CrawlProgressTracker
 from .reporting import write_reports
-from .sources.base import Document, DocumentationSource, LanguageCatalog
+from .runtime import SourceRuntime
+from .sources.base import (
+    AdapterEvent,
+    AssetEvent,
+    Document,
+    DocumentationSource,
+    DocumentEvent,
+    LanguageCatalog,
+    SkippedEvent,
+    SourceStatsEvent,
+    WarningEvent,
+    document_events,
+)
 from .sources.registry import SourceRegistry
 from .state import RunCheckpointStore, RunStateStore
 from .utils.filesystem import read_json
@@ -33,10 +46,11 @@ LOGGER = logging.getLogger("doc_ingest")
 class DocumentationPipeline:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
-        self.registry = SourceRegistry(cache_dir=config.paths.cache_dir)
+        self.runtime = SourceRuntime()
+        self.registry = SourceRegistry(cache_dir=config.paths.cache_dir, runtime=self.runtime)
 
     async def close(self) -> None:
-        return None
+        await self.runtime.close()
 
     async def run_many(
         self,
@@ -98,7 +112,9 @@ class DocumentationPipeline:
                 return summary
 
         resolution = await self.registry.resolve(
-            language_name, source_name=source_name, force_refresh=force_refresh,
+            language_name,
+            source_name=source_name,
+            force_refresh=force_refresh,
         )
         if resolution is None:
             suggestions = await self.registry.suggest(language_name)
@@ -109,7 +125,7 @@ class DocumentationPipeline:
                 source="none",
                 source_slug="",
                 mode=mode,
-            failures=[f"No source provides '{language_name}'. Closest matches: {hint}."],
+                failures=[f"No source provides '{language_name}'. Closest matches: {hint}."],
             )
             summary.reports.append(report)
             if _write_reports:
@@ -150,20 +166,20 @@ class DocumentationPipeline:
             meta = {}
             warnings.append(f"Failed to read local metadata {meta_path}: {type(exc).__name__}: {exc}")
         state_store = RunStateStore(state_path)
+        meta_mode = meta.get("mode")
+        state_mode = cast(CrawlMode, meta_mode) if meta_mode in ("important", "full") else mode
         default_state = LanguageRunState(
             language=str(meta.get("language") or language_name),
             slug=language_slug,
             source=str(meta.get("source") or "local"),
             source_slug=str(meta.get("source_slug") or ""),
             source_url=str(meta.get("source_url") or ""),
-            mode=meta.get("mode") if meta.get("mode") in ("important", "full") else mode,
+            mode=state_mode,
         )
         state = state_store.load(default=default_state)
 
         topics = state.topics or [
-            TopicStats.model_validate(item)
-            for item in meta.get("topics", [])
-            if isinstance(item, dict)
+            TopicStats.model_validate(item) for item in meta.get("topics", []) if isinstance(item, dict)
         ]
         total_documents = state.total_documents or int(meta.get("total_documents") or 0)
         output_path = Path(state.output_path) if state.output_path else consolidated_path
@@ -236,10 +252,14 @@ class DocumentationPipeline:
             if report.output_path is None:
                 report.failures.append("No compiled output found for this language.")
             else:
-                prior = state_store.load(default=LanguageRunState(
-                    language=catalog.display_name, slug=language_slug,
-                    source=source.name, source_slug=catalog.slug,
-                ))
+                prior = state_store.load(
+                    default=LanguageRunState(
+                        language=catalog.display_name,
+                        slug=language_slug,
+                        source=source.name,
+                        source_slug=catalog.slug,
+                    )
+                )
                 report.validation = validate_output(
                     language=catalog.display_name,
                     output_path=consolidated_path,
@@ -287,7 +307,11 @@ class DocumentationPipeline:
         try:
             checkpoint_store.update_phase(checkpoint, "fetching", output_path=str(consolidated_path))
             documents = _filtered_documents(
-                _fetch_documents(source, catalog, mode, diagnostics),
+                _documents_from_events(
+                    _fetch_events(source, catalog, mode, diagnostics),
+                    diagnostics=diagnostics,
+                    warnings=report.warnings,
+                ),
                 diagnostics=diagnostics,
                 include_topics=include_topic_set,
                 exclude_topics=exclude_topic_set,
@@ -330,19 +354,21 @@ class DocumentationPipeline:
                 topics=compiled.topics,
             )
 
-            state_store.save(LanguageRunState(
-                language=catalog.display_name,
-                slug=language_slug,
-                source=source.name,
-                source_slug=catalog.slug,
-                source_url=catalog.homepage,
-                mode=mode,
-                topics=compiled.topics,
-                total_documents=compiled.total_documents,
-                source_diagnostics=diagnostics,
-                output_path=str(compiled.output_path),
-                completed=True,
-            ))
+            state_store.save(
+                LanguageRunState(
+                    language=catalog.display_name,
+                    slug=language_slug,
+                    source=source.name,
+                    source_slug=catalog.slug,
+                    source_url=catalog.homepage,
+                    mode=mode,
+                    topics=compiled.topics,
+                    total_documents=compiled.total_documents,
+                    source_diagnostics=diagnostics,
+                    output_path=str(compiled.output_path),
+                    completed=True,
+                )
+            )
         except Exception as exc:
             LOGGER.exception("Failed to finalize %s from %s", catalog.display_name, source.name)
             report.failures.append(f"{type(exc).__name__}: {exc}")
@@ -371,18 +397,52 @@ def _normalize_topic_filter(values: list[str] | None) -> set[str]:
     return {value.strip().lower() for value in values or [] if value.strip()}
 
 
-async def _fetch_documents(
+async def _fetch_events(
     source: DocumentationSource,
     catalog: LanguageCatalog,
     mode: CrawlMode,
     diagnostics: SourceRunDiagnostics,
-) -> AsyncIterator[Document]:
+) -> AsyncIterator[AdapterEvent]:
+    events = getattr(source, "events", None)
+    if events is not None:
+        try:
+            async for event in events(catalog, mode, diagnostics=diagnostics):
+                yield event
+            return
+        except TypeError:
+            async for event in events(catalog, mode):
+                yield event
+            return
+
     try:
         documents = source.fetch(catalog, mode, diagnostics=diagnostics)
     except TypeError:
         documents = source.fetch(catalog, mode)
-    async for document in documents:
-        yield document
+    async for event in document_events(documents):
+        yield event
+
+
+async def _documents_from_events(
+    events: AsyncIterator[AdapterEvent],
+    *,
+    diagnostics: SourceRunDiagnostics,
+    warnings: list[str],
+) -> AsyncIterator[Document]:
+    async for event in events:
+        if isinstance(event, DocumentEvent):
+            yield event.document
+        elif isinstance(event, WarningEvent):
+            detail = f"{event.code}: {event.message}"
+            if event.source_url:
+                detail = f"{detail} ({event.source_url})"
+            warnings.append(detail)
+        elif isinstance(event, SkippedEvent):
+            diagnostics.skip(event.reason, event.count)
+        elif isinstance(event, SourceStatsEvent):
+            diagnostics.discovered += event.discovered
+            diagnostics.emitted += event.emitted
+        elif isinstance(event, AssetEvent):
+            diagnostics.skip("asset_event", 1)
 
 
 async def _filtered_documents(

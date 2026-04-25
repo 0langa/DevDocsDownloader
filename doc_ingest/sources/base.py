@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Literal, Protocol
+from typing import Literal, Protocol, TypeAlias
 
 from ..models import SourceRunDiagnostics
 
@@ -30,6 +31,46 @@ class Document:
     order_hint: int = 0
 
 
+@dataclass(slots=True)
+class DocumentEvent:
+    document: Document
+
+
+@dataclass(slots=True)
+class WarningEvent:
+    message: str
+    source_url: str = ""
+    code: str = "source_warning"
+
+
+@dataclass(slots=True)
+class SkippedEvent:
+    reason: str
+    count: int = 1
+    source_url: str = ""
+
+
+@dataclass(slots=True)
+class SourceStatsEvent:
+    discovered: int = 0
+    emitted: int = 0
+
+
+@dataclass(slots=True)
+class AssetEvent:
+    path: str
+    source_url: str = ""
+    media_type: str = ""
+
+
+AdapterEvent: TypeAlias = DocumentEvent | WarningEvent | SkippedEvent | SourceStatsEvent | AssetEvent
+
+
+async def document_events(documents: AsyncIterator[Document]) -> AsyncIterator[AdapterEvent]:
+    async for document in documents:
+        yield DocumentEvent(document=document)
+
+
 class DocumentationSource(Protocol):
     name: str
 
@@ -41,3 +82,10 @@ class DocumentationSource(Protocol):
         mode: CrawlMode,
         diagnostics: SourceRunDiagnostics | None = None,
     ) -> AsyncIterator[Document]: ...
+
+    def events(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[AdapterEvent]: ...

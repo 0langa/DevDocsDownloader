@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import CheckpointFailure, CheckpointPhase, DocumentCheckpoint, LanguageRunCheckpoint, LanguageRunState
@@ -21,7 +21,7 @@ class RunStateStore:
             return default
 
     def save(self, state: LanguageRunState) -> None:
-        state.updated_at = datetime.now(timezone.utc)
+        state.updated_at = datetime.now(UTC)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         write_json(self.path, state.model_dump(mode="json"))
 
@@ -40,7 +40,7 @@ class RunCheckpointStore:
             return None
 
     def save(self, checkpoint: LanguageRunCheckpoint) -> None:
-        checkpoint.updated_at = datetime.now(timezone.utc)
+        checkpoint.updated_at = datetime.now(UTC)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         write_json(self.path, checkpoint.model_dump(mode="json"))
 

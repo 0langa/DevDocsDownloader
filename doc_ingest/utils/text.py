@@ -4,9 +4,11 @@ import hashlib
 import re
 import unicodedata
 
-
 _WINDOWS_RESERVED_NAMES = {
-    "con", "prn", "aux", "nul",
+    "con",
+    "prn",
+    "aux",
+    "nul",
     *(f"com{i}" for i in range(1, 10)),
     *(f"lpt{i}" for i in range(1, 10)),
 }

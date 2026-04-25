@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
-
 
 CrawlMode = Literal["important", "full"]
 CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "completed", "failed"]
@@ -46,8 +45,8 @@ class LanguageRunState(BaseModel):
     source_slug: str
     source_url: str = ""
     mode: CrawlMode = "important"
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     topics: list[TopicStats] = Field(default_factory=list)
     total_documents: int = 0
     source_diagnostics: SourceRunDiagnostics | None = None
@@ -71,7 +70,7 @@ class CheckpointFailure(BaseModel):
     message: str
     document_inventory_position: int | None = None
     emitted_document_count: int = 0
-    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class LanguageRunCheckpoint(BaseModel):
@@ -82,8 +81,8 @@ class LanguageRunCheckpoint(BaseModel):
     source_url: str = ""
     mode: CrawlMode = "important"
     phase: CheckpointPhase = "initialized"
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     document_inventory_position: int | None = None
     emitted_document_count: int = 0
     output_path: str | None = None
@@ -109,5 +108,5 @@ class LanguageRunReport(BaseModel):
 
 
 class RunSummary(BaseModel):
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reports: list[LanguageRunReport] = Field(default_factory=list)

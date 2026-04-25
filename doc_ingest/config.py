@@ -17,7 +17,7 @@ class PathsConfig(BaseModel):
     reports_dir: Path
 
     @classmethod
-    def from_root(cls, root: Path) -> "PathsConfig":
+    def from_root(cls, root: Path) -> PathsConfig:
         output_dir = root / "output"
         return cls(
             root=root,

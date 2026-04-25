@@ -515,6 +515,8 @@ Current cache usage:
 
 ## 10.3 Output layout example
 
+The stable generated-output contract for these files, runtime state, checkpoints, diagnostics, and reports is defined in `documentation/output_contract.md`.
+
 Example for Python:
 
 ```text
@@ -564,14 +566,14 @@ Exact topic directories depend on source-emitted topic names and slug normalizat
 
 ### Not supported in the active runtime
 
-Despite dependencies suggesting broader ambitions, the active pipeline does **not** process arbitrary:
+Despite optional extras supporting broader ambitions, the active pipeline does **not** process arbitrary:
 
 - PDF input files
 - DOCX input files
 - user-specified local HTML files
 - free-form URL crawl lists
 
-Packages like `pypdf`, `mammoth`, and `docling` are present in manifests but are not wired into the active code path.
+Packages like `pypdf`, `mammoth`, and `docling` are isolated in the `conversion-extended` extra because they are not wired into the active code path.
 
 ## 12. Performance characteristics
 
@@ -643,13 +645,13 @@ Several files indicate the repository once supported or planned a crawler that a
 Evidence includes:
 
 - `.claude/settings.local.json`
-- `scripts/analyze_doc_paths.py`
+- `documentation/archive/analyze_doc_paths.py.txt`
 
-The benchmark and state-manifest scripts have been updated for the active runtime. The remaining crawler-oriented references should be treated as historical residue unless they are intentionally revived.
+The benchmark and state-manifest scripts have been updated for the active runtime. The crawler path analyzer has been archived and is not part of active tooling gates.
 
-## 14.2 Dependency uncertainty
+## 14.2 Dependency management
 
-Current code inspection verifies imports for:
+`pyproject.toml` is the canonical dependency manifest. Current runtime imports use:
 
 - `httpx`
 - `markdownify`
@@ -658,7 +660,7 @@ Current code inspection verifies imports for:
 - `pydantic`
 - optional `orjson`
 
-Other declared packages may be leftovers or future-facing, but that intent is not verifiable from the active code alone.
+Developer tooling lives in the `dev` extra. Support-script, extended-conversion, browser, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
 
 ## 14.3 Incomplete cleanup boundaries
 

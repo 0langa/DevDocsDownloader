@@ -15,15 +15,17 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
 
     lines = ["# Documentation Ingestion Report", ""]
     for report in summary.reports:
-        lines.extend([
-            f"## {report.language}",
-            f"- Source: {report.source} ({report.source_slug})",
-            f"- Source URL: {report.source_url or 'N/A'}",
-            f"- Mode: {report.mode}",
-            f"- Output: {report.output_path or 'N/A'}",
-            f"- Total documents: {report.total_documents}",
-            f"- Duration (s): {report.duration_seconds:.2f}",
-        ])
+        lines.extend(
+            [
+                f"## {report.language}",
+                f"- Source: {report.source} ({report.source_slug})",
+                f"- Source URL: {report.source_url or 'N/A'}",
+                f"- Mode: {report.mode}",
+                f"- Output: {report.output_path or 'N/A'}",
+                f"- Total documents: {report.total_documents}",
+                f"- Duration (s): {report.duration_seconds:.2f}",
+            ]
+        )
         if report.validation is not None:
             lines.append(f"- Validation score: {report.validation.score}")
             if report.validation.issues:

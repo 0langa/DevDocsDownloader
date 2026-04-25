@@ -223,6 +223,8 @@ Each adapter implements the same external contract but uses a different internal
 - headings inside source documents are shifted down by two levels in consolidated output to fit under `####` sections
 - repeated blank lines are collapsed
 
+The stable compatibility contract for generated Markdown, `_meta.json`, state, checkpoints, diagnostics, and reports is defined in `documentation/output_contract.md`.
+
 ### 6. Validation layer
 
 **File:** `doc_ingest/validator.py`
@@ -408,10 +410,15 @@ doc_ingest.compiler
 - `httpx` — async HTTP downloads
 - `markdownify` — HTML to Markdown conversion
 - `orjson` — optional fast JSON serialization
-- `lxml` / `beautifulsoup4` — not in active runtime path, but used by support scripts
-- `pytest` — test runner
+- `pytest` — test runner in the `dev` extra
+- `ruff` — lint and format check in the `dev` extra
+- `mypy` — pragmatic type-checking gate in the `dev` extra
+- `lxml` / `beautifulsoup4` — support-script dependencies in the `analysis` extra
+- `docling`, `mammoth`, and `pypdf` — future extended conversion dependencies in the `conversion-extended` extra
+- `playwright` — optional browser package in the `browser` extra
+- `psutil` — benchmark support in the `benchmark` extra
 
-Dependencies present in manifests but not used by the active pipeline include `docling`, `playwright`, `psutil`, `tenacity`, `mammoth`, `msgpack`, and `pypdf`.
+`pyproject.toml` is the canonical dependency manifest. The root `requirements.txt` and `source-documents/requirements.txt` files are compatibility shims only.
 
 ## Concurrency model
 
@@ -425,7 +432,7 @@ Dependencies present in manifests but not used by the active pipeline include `d
 ### Concurrency limits
 
 - only language-level concurrency is configurable through `AppConfig.language_concurrency`
-- there is no explicit per-source HTTP rate limiting, retry policy, or backoff logic in the active adapters
+- adapters use the shared bounded HTTP retry helper for retryable network failures, but there is no explicit per-source rate limiting
 
 ## Design decisions and tradeoffs
 
@@ -442,8 +449,9 @@ The code favors deterministic, source-specific data paths over broad site crawli
 
 The validator is intended as a quick sanity pass, not a correctness proof. It is fast and simple, but it cannot detect semantic breakage or source incompleteness.
 
-## Architectural uncertainties and incomplete areas
+## Current architectural boundaries
 
-- Some local settings and historical utilities still refer to a previous crawler architecture with inputs such as `input_file`, crawl caches, and per-page throughput metrics. Those components are not implemented in the active `doc_ingest` package.
-- `DocumentationPipeline.close()` does not release any shared adapter resources because no long-lived clients are retained.
-- The codebase mixes a coherent ingestion runtime with historical benchmarking/setup artifacts. Any future cleanup should explicitly choose which architecture is canonical.
+- `DocumentationPipeline` owns a shared `SourceRuntime` and closes pooled HTTP clients at shutdown.
+- Source adapters expose typed events through a compatibility-first event stream while retaining document-fetch compatibility.
+- Compilation is split into planning, pure rendering, and writing behind the existing public compile API.
+- Historical crawler path-analysis code is archived under `documentation/archive/`; the active product is the curated source-adapter ingester.

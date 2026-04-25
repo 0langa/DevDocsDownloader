@@ -45,7 +45,6 @@ DevDocsDownloader/
 │   ├── development_progress.md
 │   └── full-project-documentation.md
 ├── scripts/
-│   ├── analyze_doc_paths.py
 │   ├── benchmark_pipeline.py
 │   ├── build_skip_manifest.py
 │   └── setup.py
@@ -464,7 +463,7 @@ DevDocsDownloader/
 
 These scripts matter mostly because they show repository history; they are not equally aligned with the active package.
 
-### `scripts/analyze_doc_paths.py`
+### `documentation/archive/analyze_doc_paths.py.txt`
 
 **Purpose**
 
@@ -472,9 +471,9 @@ These scripts matter mostly because they show repository history; they are not e
 
 **Status relative to active app**
 
-- Standalone utility
+- Archived historical utility
 - Does not integrate with the current `doc_ingest` execution path
-- Belongs to an older crawler/planner workflow
+- Belongs to an older crawler/planner workflow and is no longer part of active tooling gates
 
 ### `scripts/benchmark_pipeline.py`
 
@@ -509,15 +508,16 @@ These scripts matter mostly because they show repository history; they are not e
 
 **Status relative to active app**
 
-- Can still be useful for environment setup
-- Installs from `source-documents/requirements.txt`, which includes extra packages not needed by the active pipeline
+- Current local bootstrap helper
+- Creates `.venv`, installs the editable package with the `dev` extra by default, creates runtime directories, and prints current CLI/test/tooling commands
+- Installs Playwright Chromium only when `--with-playwright-browser` is passed
 
 ## Source documents directory
 
 ### `source-documents/requirements.txt`
 
-- Alternative dependency file used by `scripts/setup.py`
-- Includes several packages not used in the active ingestion flow
+- Legacy compatibility shim for support scripts
+- Points to the canonical project metadata through the `analysis` extra instead of duplicating dependency pins
 
 ## Tests
 
@@ -602,7 +602,7 @@ doc_ingest.cli.validate()
 
 ## Files that appear historical or partially mismatched
 
-- `scripts/analyze_doc_paths.py`
+- `documentation/archive/analyze_doc_paths.py.txt`
 - local `.claude/settings.local.json` command allowlist entries referencing missing config paths and modules
 
 Treat these files carefully during maintenance because they describe behavior the current runtime package does not implement.

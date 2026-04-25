@@ -7,17 +7,16 @@ import re
 import sqlite3
 import tarfile
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
-import httpx
 from markdownify import markdownify as html_to_md
 
 from ..models import SourceRunDiagnostics
-from .base import CrawlMode, Document, LanguageCatalog
+from ..runtime import SourceRuntime
 from ..utils.archive import safe_extract_tar
 from ..utils.filesystem import write_json
-from ..utils.http import request_with_retries
+from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
 
 LOGGER = logging.getLogger("doc_ingest.sources.dash")
 
@@ -26,27 +25,40 @@ FEED_BASE = "https://kapeli.com/feeds"
 
 
 CORE_TYPES = {
-    "Class", "Module", "Function", "Method", "Macro", "Guide", "Tutorial",
-    "Reference", "Section", "Package", "Trait", "Struct", "Enum", "Protocol",
-    "Type", "Keyword", "Builtin", "Library", "Namespace", "Interface",
+    "Class",
+    "Module",
+    "Function",
+    "Method",
+    "Macro",
+    "Guide",
+    "Tutorial",
+    "Reference",
+    "Section",
+    "Package",
+    "Trait",
+    "Struct",
+    "Enum",
+    "Protocol",
+    "Type",
+    "Keyword",
+    "Builtin",
+    "Library",
+    "Namespace",
+    "Interface",
 }
 
 
 class DashFeedSource:
     name = "dash"
 
-    def __init__(self, *, cache_dir: Path, catalog_seed: Path | None = None) -> None:
+    def __init__(
+        self, *, cache_dir: Path, catalog_seed: Path | None = None, runtime: SourceRuntime | None = None
+    ) -> None:
         self.cache_dir = cache_dir
         self.catalog_path = cache_dir / "catalogs" / "dash.json"
         self.docsets_dir = cache_dir / "dash"
         self._catalog_seed = catalog_seed
-
-    def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT},
-            timeout=300.0,
-            follow_redirects=True,
-        )
+        self.runtime = runtime or SourceRuntime(user_agent=USER_AGENT)
 
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]:
         if not force_refresh and self.catalog_path.exists():
@@ -84,10 +96,9 @@ class DashFeedSource:
 
         tarball_url = f"{FEED_BASE}/{slug}.tgz"
         LOGGER.info("Downloading Dash docset %s", tarball_url)
-        async with self._client() as client:
-            resp = await request_with_retries(client, "GET", tarball_url)
-            resp.raise_for_status()
-            tar_bytes = resp.content
+        resp = await self.runtime.request("GET", tarball_url, profile="dash")
+        resp.raise_for_status()
+        tar_bytes = resp.content
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".tgz") as handle:
             handle.write(tar_bytes)
@@ -172,6 +183,14 @@ class DashFeedSource:
                 source_url=f"dash://{language.slug}/{doc_key}",
                 order_hint=order,
             )
+
+    def events(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[AdapterEvent]:
+        return document_events(self.fetch(language, mode, diagnostics=diagnostics))
 
 
 def _convert_html(html: str) -> str:

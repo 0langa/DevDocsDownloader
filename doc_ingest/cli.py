@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -117,14 +116,16 @@ def main(ctx: typer.Context) -> None:
 
 def _wizard() -> None:
     console.print()
-    console.print(Panel(
-        "[bold cyan]Documentation Download Wizard[/bold cyan]\n\n"
-        "Pulls official documentation from DevDocs, MDN, or Dash/Kapeli and\n"
-        "compiles it into clean Markdown in [bold]output/markdown/<language>/[/bold].\n\n"
-        "Tip: run [bold]list-languages[/bold] to see every supported language.",
-        border_style="cyan",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            "[bold cyan]Documentation Download Wizard[/bold cyan]\n\n"
+            "Pulls official documentation from DevDocs, MDN, or Dash/Kapeli and\n"
+            "compiles it into clean Markdown in [bold]output/markdown/<language>/[/bold].\n\n"
+            "Tip: run [bold]list-languages[/bold] to see every supported language.",
+            border_style="cyan",
+            expand=False,
+        )
+    )
     console.print()
 
     language = typer.prompt("Language to download").strip()
@@ -133,7 +134,11 @@ def _wizard() -> None:
         raise typer.Exit(code=1)
 
     while True:
-        mode_input = typer.prompt("Mode", default="important", prompt_suffix=" [important/full]: ", show_default=False).strip().lower()
+        mode_input = (
+            typer.prompt("Mode", default="important", prompt_suffix=" [important/full]: ", show_default=False)
+            .strip()
+            .lower()
+        )
         if mode_input in ("important", "full"):
             mode: CrawlMode = mode_input  # type: ignore[assignment]
             break
@@ -161,15 +166,25 @@ def _wizard() -> None:
 def run(
     language: str = typer.Argument(..., help="Language name (e.g. 'python', 'rust', 'javascript')."),
     mode: CrawlMode = typer.Option("important", "--mode", help="'important' for core topics, 'full' for everything."),
-    source: Optional[str] = typer.Option(None, "--source", help="Force a specific source: devdocs, mdn, or dash."),
+    source: str | None = typer.Option(None, "--source", help="Force a specific source: devdocs, mdn, or dash."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs before resolving."),
-    validate_only: bool = typer.Option(False, "--validate-only", help="Validate an existing output without downloading."),
-    include_topic: Optional[list[str]] = typer.Option(None, "--include-topic", help="Only include documents whose normalized topic matches this value. Repeat for multiple topics."),
-    exclude_topic: Optional[list[str]] = typer.Option(None, "--exclude-topic", help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics."),
+    validate_only: bool = typer.Option(
+        False, "--validate-only", help="Validate an existing output without downloading."
+    ),
+    include_topic: list[str] | None = typer.Option(
+        None,
+        "--include-topic",
+        help="Only include documents whose normalized topic matches this value. Repeat for multiple topics.",
+    ),
+    exclude_topic: list[str] | None = typer.Option(
+        None,
+        "--exclude-topic",
+        help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics.",
+    ),
     silent: bool = typer.Option(False, "--silent"),
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
-    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Alternate output directory root."),
+    output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
 ) -> None:
     """Download and compile documentation for a language.
 
@@ -215,11 +230,12 @@ def _estimate_size(catalogs: list) -> tuple[int, int]:
 
 
 def _format_bytes(n: int) -> str:
+    value = float(n)
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} PB"
 
 
 @app.command(help="Download documentation in bulk: a preset or every available language.")
@@ -228,9 +244,19 @@ def bulk(
     mode: CrawlMode = typer.Option("important", "--mode", help="'important' for core topics, 'full' for everything."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt for --bulk all."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs first."),
-    language_concurrency: int = typer.Option(3, "--language-concurrency", min=1, help="Languages to process in parallel during bulk runs."),
-    include_topic: Optional[list[str]] = typer.Option(None, "--include-topic", help="Only include documents whose normalized topic matches this value. Repeat for multiple topics."),
-    exclude_topic: Optional[list[str]] = typer.Option(None, "--exclude-topic", help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics."),
+    language_concurrency: int = typer.Option(
+        3, "--language-concurrency", min=1, help="Languages to process in parallel during bulk runs."
+    ),
+    include_topic: list[str] | None = typer.Option(
+        None,
+        "--include-topic",
+        help="Only include documents whose normalized topic matches this value. Repeat for multiple topics.",
+    ),
+    exclude_topic: list[str] | None = typer.Option(
+        None,
+        "--exclude-topic",
+        help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics.",
+    ),
     silent: bool = typer.Option(False, "--silent"),
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
@@ -264,27 +290,31 @@ def bulk(
             size_bytes, count = _estimate_size(resolved)
             scale = 1.0 if mode == "full" else 0.25
             est = int(size_bytes * scale)
-            console.print(Panel(
-                f"[bold]--bulk all[/bold]\n"
-                f"Languages to download: [bold]{count}[/bold]\n"
-                f"Mode: [bold]{mode}[/bold]\n"
-                f"Estimated download (compressed): [bold]{_format_bytes(est)}[/bold]\n"
-                f"Output tree will live under: [bold]{config.paths.markdown_dir}[/bold]",
-                title="Bulk download warning",
-                border_style="yellow",
-            ))
+            console.print(
+                Panel(
+                    f"[bold]--bulk all[/bold]\n"
+                    f"Languages to download: [bold]{count}[/bold]\n"
+                    f"Mode: [bold]{mode}[/bold]\n"
+                    f"Estimated download (compressed): [bold]{_format_bytes(est)}[/bold]\n"
+                    f"Output tree will live under: [bold]{config.paths.markdown_dir}[/bold]",
+                    title="Bulk download warning",
+                    border_style="yellow",
+                )
+            )
             if not yes and not typer.confirm("Proceed?", default=False):
                 console.print("Aborted.")
                 return
         elif target_key in PRESETS:
             language_names = PRESETS[target_key]
-            console.print(Panel(
-                f"[bold]Preset '{target_key}'[/bold]\n"
-                f"Languages: {', '.join(language_names)}\n"
-                f"Mode: [bold]{mode}[/bold]",
-                title="Bulk preset",
-                border_style="cyan",
-            ))
+            console.print(
+                Panel(
+                    f"[bold]Preset '{target_key}'[/bold]\n"
+                    f"Languages: {', '.join(language_names)}\n"
+                    f"Mode: [bold]{mode}[/bold]",
+                    title="Bulk preset",
+                    border_style="cyan",
+                )
+            )
         else:
             available = ", ".join(sorted(PRESETS.keys()))
             console.print(f"[red]Unknown target '{target}'.[/red]")
@@ -340,8 +370,8 @@ def list_presets() -> None:
 
 @app.command("audit-presets", help="Check whether preset languages resolve against configured sources.")
 def audit_presets(
-    preset: Optional[str] = typer.Argument(None, help="Preset name to audit. Omit to audit every preset."),
-    source: Optional[str] = typer.Option(None, "--source", help="Force resolution against a specific source."),
+    preset: str | None = typer.Argument(None, help="Preset name to audit. Omit to audit every preset."),
+    source: str | None = typer.Option(None, "--source", help="Force resolution against a specific source."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-fetch catalogs before auditing."),
 ) -> None:
     config = load_config()
@@ -384,7 +414,7 @@ def audit_presets(
 
 @app.command("list-languages", help="List every language available across all configured sources.")
 def list_languages(
-    source: Optional[str] = typer.Option(None, "--source", help="Filter by a single source."),
+    source: str | None = typer.Option(None, "--source", help="Filter by a single source."),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-fetch catalogs before listing."),
 ) -> None:
     config = load_config()
@@ -429,8 +459,10 @@ def refresh_catalogs() -> None:
 @app.command(help="Validate an existing compiled output without downloading.")
 def validate(
     language: str = typer.Argument(..., help="Language name."),
-    source: Optional[str] = typer.Option(None, "--source", help="Resolve against a specific source only if local metadata is unavailable."),
-    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Alternate output directory root."),
+    source: str | None = typer.Option(
+        None, "--source", help="Resolve against a specific source only if local metadata is unavailable."
+    ),
+    output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
 ) -> None:
     _execute_run(
         language=language,

@@ -1,29 +1,29 @@
 from __future__ import annotations
 
+import importlib
+import json
+import os
 from pathlib import Path
 from typing import Any
 
 try:
-    import orjson
+    _orjson: Any | None = importlib.import_module("orjson")
 except ImportError:  # pragma: no cover
-    orjson = None
-
-import json
-import os
+    _orjson = None
 
 
 def read_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default
-    if orjson is not None:
-        return orjson.loads(path.read_bytes())
+    if _orjson is not None:
+        return _orjson.loads(path.read_bytes())
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if orjson is not None:
-        payload_bytes = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+    if _orjson is not None:
+        payload_bytes = _orjson.dumps(data, option=_orjson.OPT_INDENT_2)
     else:
         payload_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
     temp_path = path.with_name(f"{path.name}.tmp")

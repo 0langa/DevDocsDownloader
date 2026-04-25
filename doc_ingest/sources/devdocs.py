@@ -3,16 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
-import httpx
 from markdownify import markdownify as html_to_md
 
 from ..models import SourceRunDiagnostics
-from .base import CrawlMode, Document, LanguageCatalog
+from ..runtime import SourceRuntime
 from ..utils.filesystem import write_bytes, write_json
-from ..utils.http import request_with_retries
+from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
 
 LOGGER = logging.getLogger("doc_ingest.sources.devdocs")
 
@@ -24,10 +23,11 @@ DOCUMENTS_BASE = "https://documents.devdocs.io"
 class DevDocsSource:
     name = "devdocs"
 
-    def __init__(self, *, cache_dir: Path, core_topics_path: Path) -> None:
+    def __init__(self, *, cache_dir: Path, core_topics_path: Path, runtime: SourceRuntime | None = None) -> None:
         self.cache_dir = cache_dir
         self.catalog_path = cache_dir / "catalogs" / "devdocs.json"
         self.data_cache = cache_dir / "devdocs"
+        self.runtime = runtime or SourceRuntime(user_agent=USER_AGENT)
         self._core_topics = self._load_core_topics(core_topics_path)
 
     @staticmethod
@@ -40,13 +40,6 @@ class DevDocsSource:
             LOGGER.warning("Failed to parse devdocs core topics file %s", path)
             return {}
 
-    def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json,*/*"},
-            timeout=60.0,
-            follow_redirects=True,
-        )
-
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]:
         if not force_refresh and self.catalog_path.exists():
             try:
@@ -55,10 +48,9 @@ class DevDocsSource:
             except Exception:
                 LOGGER.debug("Re-fetching devdocs catalog due to cache read failure", exc_info=True)
 
-        async with self._client() as client:
-            response = await request_with_retries(client, "GET", DOCS_INDEX_URL)
-            response.raise_for_status()
-            entries = response.json()
+        response = await self.runtime.request("GET", DOCS_INDEX_URL, profile="default")
+        response.raise_for_status()
+        entries = response.json()
 
         write_json(self.catalog_path, {"entries": entries})
         return [self._catalog_from_entry(entry) for entry in entries]
@@ -84,9 +76,8 @@ class DevDocsSource:
         index_path = dataset_dir / "index.json"
         db_path = dataset_dir / "db.json"
 
-        async with self._client() as client:
-            await self._ensure_json_dataset(client, slug, index_path, "index.json")
-            await self._ensure_json_dataset(client, slug, db_path, "db.json")
+        await self._ensure_json_dataset(slug, index_path, "index.json")
+        await self._ensure_json_dataset(slug, db_path, "db.json")
 
         index = self._load_json_cache(index_path, slug=slug, label="index")
         db = self._load_json_cache(db_path, slug=slug, label="db")
@@ -94,7 +85,6 @@ class DevDocsSource:
 
     async def _ensure_json_dataset(
         self,
-        client: httpx.AsyncClient,
         slug: str,
         path: Path,
         filename: str,
@@ -103,8 +93,8 @@ class DevDocsSource:
             return
         if path.exists():
             LOGGER.warning("Refreshing corrupt DevDocs %s cache for %s", filename, slug)
-        LOGGER.info("Downloading DevDocs %s for %s", filename.replace('.json', ''), slug)
-        resp = await request_with_retries(client, "GET", f"{DOCUMENTS_BASE}/{slug}/{filename}")
+        LOGGER.info("Downloading DevDocs %s for %s", filename.replace(".json", ""), slug)
+        resp = await self.runtime.request("GET", f"{DOCUMENTS_BASE}/{slug}/{filename}", profile="default")
         resp.raise_for_status()
         write_bytes(path, resp.content)
 
@@ -175,6 +165,14 @@ class DevDocsSource:
                 source_url=f"https://devdocs.io/{language.slug}/{doc_key}",
                 order_hint=order,
             )
+
+    def events(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[AdapterEvent]:
+        return document_events(self.fetch(language, mode, diagnostics=diagnostics))
 
 
 def _convert_html(html: str) -> str:

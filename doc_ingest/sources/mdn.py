@@ -4,16 +4,14 @@ import asyncio
 import logging
 import re
 import tarfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
-
-import httpx
 
 from ..models import SourceRunDiagnostics
-from .base import CrawlMode, Document, LanguageCatalog
+from ..runtime import SourceRuntime
 from ..utils.archive import safe_extract_tar
 from ..utils.filesystem import write_json, write_text
-from ..utils.http import stream_to_file_with_retries
+from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
 
 LOGGER = logging.getLogger("doc_ingest.sources.mdn")
 
@@ -29,31 +27,42 @@ AREAS = {
 }
 
 CORE_PAGE_TYPES = {
-    "guide", "landing-page",
-    "javascript-class", "javascript-function", "javascript-global-property",
-    "javascript-language-feature", "javascript-operator", "javascript-statement",
-    "css-at-rule", "css-property", "css-selector", "css-type",
-    "html-element", "html-attribute",
-    "web-api-interface", "web-api-static-method", "web-api-instance-method",
-    "http-header", "http-method", "http-status-code",
+    "guide",
+    "landing-page",
+    "javascript-class",
+    "javascript-function",
+    "javascript-global-property",
+    "javascript-language-feature",
+    "javascript-operator",
+    "javascript-statement",
+    "css-at-rule",
+    "css-property",
+    "css-selector",
+    "css-type",
+    "html-element",
+    "html-attribute",
+    "web-api-interface",
+    "web-api-static-method",
+    "web-api-instance-method",
+    "http-header",
+    "http-method",
+    "http-status-code",
 }
 
 
 class MdnContentSource:
     name = "mdn"
 
-    def __init__(self, *, cache_dir: Path) -> None:
+    def __init__(self, *, cache_dir: Path, runtime: SourceRuntime | None = None) -> None:
         self.cache_dir = cache_dir
         self.catalog_path = cache_dir / "catalogs" / "mdn.json"
         self.archive_path = cache_dir / "mdn" / "mdn-content-main.tar.gz"
         self.extracted_root = cache_dir / "mdn" / "content"
+        self.runtime = runtime or SourceRuntime()
 
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]:
         self.catalog_path.parent.mkdir(parents=True, exist_ok=True)
-        entries = [
-            {"slug": slug, "display_name": display, "area": area}
-            for slug, (display, area) in AREAS.items()
-        ]
+        entries = [{"slug": slug, "display_name": display, "area": area} for slug, (display, area) in AREAS.items()]
         write_json(self.catalog_path, {"entries": entries})
         return [
             LanguageCatalog(
@@ -79,11 +88,7 @@ class MdnContentSource:
         self.archive_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.archive_path.exists():
             LOGGER.info("Downloading MDN content archive (may take a while)")
-            async with httpx.AsyncClient(
-                timeout=None, follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; DocIngestBot/1.0)"},
-            ) as client:
-                await stream_to_file_with_retries(client, TARBALL_URL, self.archive_path)
+            await self.runtime.stream_to_file(TARBALL_URL, self.archive_path, profile="download")
 
         self.extracted_root.mkdir(parents=True, exist_ok=True)
         LOGGER.info("Extracting MDN content archive")
@@ -154,17 +159,24 @@ class MdnContentSource:
                 order_hint=order,
             )
 
+    def events(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        diagnostics: SourceRunDiagnostics | None = None,
+    ) -> AsyncIterator[AdapterEvent]:
+        return document_events(self.fetch(language, mode, diagnostics=diagnostics))
+
 
 def _extract_tarball(archive: Path, dest: Path) -> None:
     with tarfile.open(archive, "r:gz") as tar:
+
         def _keep_member(member: tarfile.TarInfo) -> bool:
             name = member.name
             normalized = name.rstrip("/")
             if not any(f"/files/en-us/{area}" in normalized for area in {a[1] for a in AREAS.values()}):
                 if not (
-                    normalized.endswith("/files")
-                    or normalized.endswith("/files/en-us")
-                    or normalized.count("/") <= 3
+                    normalized.endswith("/files") or normalized.endswith("/files/en-us") or normalized.count("/") <= 3
                 ):
                     return False
             return True
