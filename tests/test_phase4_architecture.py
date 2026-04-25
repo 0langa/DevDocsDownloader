@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from doc_ingest.compiler import LanguageOutputBuilder, render_compilation
+from doc_ingest.compiler import LanguageOutputBuilder, render_compilation, write_streamed_compilation
 from doc_ingest.config import load_config
 from doc_ingest.pipeline import DocumentationPipeline
 from doc_ingest.sources.base import (
@@ -112,3 +112,32 @@ def test_compiler_plan_and_renderer_are_deterministic_without_writes(tmp_path: P
     assert tmp_path / "plan-lang" / "index.md" in rendered.files
     assert tmp_path / "plan-lang" / "reference" / "std-vector.md" in rendered.files
     assert not (tmp_path / "plan-lang" / "index.md").exists()
+
+
+def test_compiler_streams_documents_before_finalize_and_writes_from_fragments(tmp_path: Path) -> None:
+    builder = LanguageOutputBuilder(
+        language_display="Stream Lang",
+        language_slug=slugify("Stream Lang"),
+        source="fixture",
+        source_slug="stream-lang",
+        source_url="https://example.invalid/stream",
+        mode="full",
+        output_root=tmp_path,
+    )
+
+    builder.add(Document(topic="Reference", slug="alpha", title="Alpha", markdown=long_markdown("Alpha")))
+    per_doc_path = tmp_path / "stream-lang" / "reference" / "alpha.md"
+    assert per_doc_path.exists()
+    assert (tmp_path / "stream-lang" / "_fragments").exists()
+    assert not (tmp_path / "stream-lang" / "stream-lang.md").exists()
+
+    plan = builder.build_plan()
+    assert plan.topics[0].documents[0].document is not None
+    plan.topics[0].documents[0].document = None
+
+    write_streamed_compilation(plan)
+
+    consolidated = (tmp_path / "stream-lang" / "stream-lang.md").read_text(encoding="utf-8")
+    assert "#### Alpha" in consolidated
+    assert "print('fixture')" in consolidated
+    assert not (tmp_path / "stream-lang" / "_fragments").exists()

@@ -317,11 +317,11 @@ Dash catalog entries come from `_DEFAULT_DASH_SEED` unless an optional seed file
 
 ## 6.1 Builder state
 
-`LanguageOutputBuilder` accumulates documents in memory grouped by topic.
+`LanguageOutputBuilder` writes per-document Markdown files and consolidated document fragments as documents arrive. It keeps lightweight topic/document manifests in memory for final indexes, metadata, and deterministic consolidated ordering.
 
 Internal structures:
 
-- `_topic_docs: dict[str, list[Document]]`
+- `_topic_docs: dict[str, list[CompilationDocument]]`
 - `_topic_order: list[str]`
 - `_used_slugs: dict[str, set[str]]`
 - `total_documents`
@@ -333,6 +333,8 @@ Internal structures:
 - normalizes empty topics to `Reference`
 - creates per-topic buckets lazily
 - ensures slug uniqueness within a topic via `_unique_slug()`
+- writes the per-document Markdown file immediately
+- writes a temporary consolidated fragment for the document body
 - mutates `document.slug` to the chosen unique slug
 - appends the document to the topic bucket
 
@@ -664,8 +666,7 @@ Developer tooling lives in the `dev` extra. Support-script, extended-conversion,
 
 ## 14.3 Incomplete cleanup boundaries
 
-- `DocumentationPipeline.close()` suggests future pooled-resource ownership
-- support scripts suggest unimplemented config fields
+- richer source-runtime policies such as per-source rate limits are not implemented yet
 - benchmark corpus assets are small live-run inputs for the current benchmark runner
 
 These are not runtime blockers for the active ingestion path, but they matter for maintainability.

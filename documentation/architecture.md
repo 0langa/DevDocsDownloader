@@ -204,13 +204,14 @@ Each adapter implements the same external contract but uses a different internal
 **Responsibilities:**
 
 - collect normalized `Document` objects
-- group them by topic
-- make per-topic directories
+- maintain lightweight topic/document manifests
+- make per-topic directories as documents arrive
 - assign unique, filesystem-safe slugs within each topic
-- write per-document Markdown files
+- write per-document Markdown files during ingestion
+- write temporary consolidated fragments during ingestion
 - write topic section indexes
 - write a language index
-- write a single consolidated Markdown file
+- stream a single consolidated Markdown file from fragments
 - write `_meta.json`
 
 **Formatting rules:**

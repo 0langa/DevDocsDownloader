@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator
+import shutil
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 
 from .models import TopicStats
 from .sources.base import Document
-from .utils.filesystem import write_json, write_text
+from .utils.filesystem import write_json, write_text, write_text_parts
 from .utils.text import slugify
 
 
@@ -22,8 +23,13 @@ class CompiledOutput:
 
 @dataclass(slots=True)
 class CompilationDocument:
-    document: Document
+    title: str
+    slug: str
+    source_url: str
+    order_hint: int
     path: Path
+    fragment_path: Path | None = None
+    document: Document | None = None
 
 
 @dataclass(slots=True)
@@ -79,8 +85,10 @@ class LanguageOutputBuilder:
         self.mode = mode
         self.language_dir = output_root / language_slug
         self.language_dir.mkdir(parents=True, exist_ok=True)
+        self.fragments_dir = self.language_dir / "_fragments"
+        self.fragments_dir.mkdir(parents=True, exist_ok=True)
 
-        self._topic_docs: dict[str, list[Document]] = {}
+        self._topic_docs: dict[str, list[CompilationDocument]] = {}
         self._topic_order: list[str] = []
         self._used_slugs: dict[str, set[str]] = {}
         self.total_documents = 0
@@ -97,17 +105,32 @@ class LanguageOutputBuilder:
         self._used_slugs[topic].add(slug)
         document.slug = slug
 
-        self._topic_docs[topic].append(document)
+        topic_slug = slugify(topic)
+        topic_dir = self.language_dir / topic_slug
+        per_doc_path = topic_dir / f"{document.slug}.md"
+        fragment_path = self.fragments_dir / f"{self.total_documents:08d}-{topic_slug}-{document.slug}.md"
+        write_text(per_doc_path, render_document(document, topic=topic, language=self.language_display))
+        write_text(fragment_path, render_consolidated_document_fragment(document))
+        self._topic_docs[topic].append(
+            CompilationDocument(
+                title=document.title,
+                slug=document.slug,
+                source_url=document.source_url,
+                order_hint=document.order_hint,
+                path=per_doc_path,
+                fragment_path=fragment_path,
+                document=document,
+            )
+        )
         self.total_documents += 1
 
     def finalize(self) -> CompiledOutput:
         plan = self.build_plan()
-        rendered = render_compilation(plan)
-        write_rendered_compilation(rendered)
+        write_streamed_compilation(plan)
         return CompiledOutput(
-            total_documents=rendered.total_documents,
-            topics=rendered.topic_stats,
-            output_path=rendered.output_path,
+            total_documents=plan.total_documents,
+            topics=plan.topic_stats,
+            output_path=plan.consolidated_path,
         )
 
     def build_plan(self) -> CompilationPlan:
@@ -120,7 +143,7 @@ class LanguageOutputBuilder:
             documents = self._topic_docs[topic]
             planned_topic = CompilationTopic(name=topic, slug=topic_slug, directory=topic_dir)
             for doc in documents:
-                planned_topic.documents.append(CompilationDocument(document=doc, path=topic_dir / f"{doc.slug}.md"))
+                planned_topic.documents.append(doc)
             planned_topics.append(planned_topic)
             topic_stats.append(TopicStats(topic=topic, document_count=len(documents)))
 
@@ -141,7 +164,21 @@ class LanguageOutputBuilder:
 
 def render_compilation(plan: CompilationPlan) -> RenderedCompilation:
     files: dict[Path, str] = {}
-    topic_docs = {topic.name: [item.document for item in topic.documents] for topic in plan.topics}
+    topic_docs = {
+        topic.name: [
+            item.document
+            or Document(
+                topic=topic.name,
+                slug=item.slug,
+                title=item.title,
+                markdown=item.fragment_path.read_text(encoding="utf-8") if item.fragment_path is not None else "",
+                source_url=item.source_url,
+                order_hint=item.order_hint,
+            )
+            for item in topic.documents
+        ]
+        for topic in plan.topics
+    }
     topic_order = [topic.name for topic in plan.topics]
 
     for topic in plan.topics:
@@ -155,8 +192,9 @@ def render_compilation(plan: CompilationPlan) -> RenderedCompilation:
         ]
         for planned_doc in topic.documents:
             doc = planned_doc.document
-            files[planned_doc.path] = _render_document(doc, topic=topic.name, language=plan.language_display)
-            section_lines.append(f"- [{doc.title}]({doc.slug}.md)")
+            if doc is not None:
+                files[planned_doc.path] = render_document(doc, topic=topic.name, language=plan.language_display)
+            section_lines.append(f"- [{planned_doc.title}]({planned_doc.slug}.md)")
         section_lines.append("")
         files[topic.directory / "_section.md"] = "\n".join(section_lines) + "\n"
 
@@ -196,6 +234,72 @@ def write_rendered_compilation(rendered: RenderedCompilation) -> None:
     for path, content in rendered.files.items():
         write_text(path, content)
     write_json(rendered.meta_path, rendered.meta)
+
+
+def write_streamed_compilation(plan: CompilationPlan) -> None:
+    for topic in plan.topics:
+        section_lines = [
+            f"# {topic.name}",
+            "",
+            f"_{len(topic.documents)} document(s) from {plan.source}_",
+            "",
+            "## Contents",
+            "",
+        ]
+        for planned_doc in topic.documents:
+            section_lines.append(f"- [{planned_doc.title}]({planned_doc.slug}.md)")
+        section_lines.append("")
+        write_text(topic.directory / "_section.md", "\n".join(section_lines) + "\n")
+
+    topic_order = [topic.name for topic in plan.topics]
+    write_text(
+        plan.language_dir / "index.md",
+        _render_index(
+            language=plan.language_display,
+            slug=plan.language_slug,
+            source=plan.source,
+            source_slug=plan.source_slug,
+            source_url=plan.source_url,
+            mode=plan.mode,
+            topic_stats=plan.topic_stats,
+            topic_order=topic_order,
+        ),
+    )
+    write_text_parts(plan.consolidated_path, iter_consolidated_parts(plan))
+    write_json(plan.language_dir / "_meta.json", _render_meta(plan))
+    shutil.rmtree(plan.language_dir / "_fragments", ignore_errors=True)
+
+
+def iter_consolidated_parts(plan: CompilationPlan) -> Iterable[str]:
+    topic_order = [topic.name for topic in plan.topics]
+    yield _render_consolidated_header(
+        language=plan.language_display,
+        source=plan.source,
+        source_slug=plan.source_slug,
+        source_url=plan.source_url,
+        mode=plan.mode,
+        total_documents=plan.total_documents,
+        topics=topic_order,
+        topic_docs={
+            topic.name: [
+                Document(
+                    topic=topic.name,
+                    slug=planned_doc.slug,
+                    title=planned_doc.title,
+                    markdown="",
+                    source_url=planned_doc.source_url,
+                    order_hint=planned_doc.order_hint,
+                )
+                for planned_doc in topic.documents
+            ]
+            for topic in plan.topics
+        },
+    )
+    for topic in plan.topics:
+        yield f"### {topic.name}\n\n"
+        for planned_doc in topic.documents:
+            if planned_doc.fragment_path is not None:
+                yield planned_doc.fragment_path.read_text(encoding="utf-8")
 
 
 def _render_meta(plan: CompilationPlan) -> dict[str, Any]:
@@ -250,7 +354,7 @@ def _unique_slug(base: str, used: set[str]) -> str:
     return f"{base}-{i}"
 
 
-def _render_document(doc: Document, *, topic: str, language: str) -> str:
+def render_document(doc: Document, *, topic: str, language: str) -> str:
     header = [
         f"# {doc.title}",
         "",
@@ -261,6 +365,19 @@ def _render_document(doc: Document, *, topic: str, language: str) -> str:
     header.append("")
     body = _normalize_markdown(doc.markdown)
     return "\n".join(header) + "\n" + body.rstrip() + "\n"
+
+
+def render_consolidated_document_fragment(doc: Document) -> str:
+    lines = [
+        f"#### {doc.title}",
+        "",
+    ]
+    if doc.source_url:
+        lines.append(f"_Source: <{doc.source_url}>_")
+        lines.append("")
+    lines.append(_normalize_markdown(doc.markdown).rstrip())
+    lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def _render_index(
@@ -313,6 +430,40 @@ def _render_consolidated(
     topic_docs: dict[str, list[Document]],
 ) -> str:
     lines = [
+        _render_consolidated_header(
+            language=language,
+            source=source,
+            source_slug=source_slug,
+            source_url=source_url,
+            mode=mode,
+            total_documents=total_documents,
+            topics=topics,
+            topic_docs=topic_docs,
+        )
+    ]
+
+    for topic in topics:
+        lines.append(f"### {topic}")
+        lines.append("")
+        for doc in topic_docs[topic]:
+            lines.append(render_consolidated_document_fragment(doc).rstrip())
+            lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def _render_consolidated_header(
+    *,
+    language: str,
+    source: str,
+    source_slug: str,
+    source_url: str,
+    mode: str,
+    total_documents: int,
+    topics: list[str],
+    topic_docs: dict[str, list[Document]],
+) -> str:
+    lines = [
         f"# {language} Documentation",
         "",
         "## Metadata",
@@ -335,18 +486,6 @@ def _render_consolidated(
     lines.append("")
     lines.append("## Documentation")
     lines.append("")
-
-    for topic in topics:
-        lines.append(f"### {topic}")
-        lines.append("")
-        for doc in topic_docs[topic]:
-            lines.append(f"#### {doc.title}")
-            lines.append("")
-            if doc.source_url:
-                lines.append(f"_Source: <{doc.source_url}>_")
-                lines.append("")
-            lines.append(_normalize_markdown(doc.markdown).rstrip())
-            lines.append("")
 
     return "\n".join(lines) + "\n"
 

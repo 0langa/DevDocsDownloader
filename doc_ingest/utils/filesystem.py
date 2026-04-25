@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,17 @@ def write_text(path: Path, text: str) -> None:
     temp_path = path.with_name(f"{path.name}.tmp")
     with temp_path.open("wb") as handle:
         handle.write(text.encode("utf-8"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path)
+
+
+def write_text_parts(path: Path, parts: Iterable[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.tmp")
+    with temp_path.open("wb") as handle:
+        for part in parts:
+            handle.write(part.encode("utf-8"))
         handle.flush()
         os.fsync(handle.fileno())
     temp_path.replace(path)

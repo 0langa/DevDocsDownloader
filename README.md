@@ -330,10 +330,10 @@ The current tests focus on:
 
 The most realistic next steps, based on the current repository state, are:
 
-1. Reconcile dependency manifests
-2. Improve Markdown cleanup and validation depth
-3. Add deterministic tests for complete source adapter flows
-4. Decide whether the project should remain a curated source ingester or return to a general crawler architecture
+1. Add adapter-level resume from checkpoints
+2. Reduce generated-Markdown fsync overhead with durability modes
+3. Add per-source concurrency and rate limits
+4. Improve Markdown cleanup and validation depth
 
 ## Documentation map
 

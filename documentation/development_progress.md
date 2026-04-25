@@ -236,17 +236,17 @@ These observations come from code inspection; the benchmark harness now supports
 | Reporting | Working | Summary artifacts generated |
 | State store | Working | Stable final state plus active checkpoint persistence |
 | Progress UI | Working | Presentation layer only |
-| Tests | Partial | Good focused regressions, limited integration coverage |
-| Benchmarks | Stale | Not compatible with current CLI |
-| Support scripts | Mixed | Benchmark and state manifest target active runtime; path analyzer remains historical |
+| Tests | Working | Contract, integration, CLI, resilience, architecture, and opt-in live endpoint coverage |
+| Benchmarks | Working | Targets current CLI and reports cold/warm cache throughput |
+| Support scripts | Aligned | Setup, benchmark, and state manifest target active runtime; crawler path analyzer is archived |
 
 ## Priority improvements
 
 ### Highest priority
 
-1. **Reconcile dependency manifests**
-	- align `pyproject.toml`, `requirements.txt`, and `source-documents/requirements.txt`
-	- remove unused dependencies or document why they remain
+1. **Add adapter-level resume from checkpoints**
+	- let adapters skip safely to the last persisted document boundary where source inventory order is stable
+	- keep full replay fallback for sources that cannot seek safely
 
 2. **Deepen validation**
 	- validate link structure, duplicate sections, and heading integrity
