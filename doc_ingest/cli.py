@@ -10,9 +10,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import load_config
-from .models import CrawlMode
-from .pipeline import DocumentationPipeline
+from .models import CacheFreshnessPolicy, CrawlMode
 from .progress import CrawlProgressTracker
+from .runtime import SourceRuntime
+from .services import BulkRunRequest, DocumentationService, RunLanguageRequest
 from .sources.presets import PRESETS
 from .sources.registry import SourceRegistry
 
@@ -60,27 +61,38 @@ def _execute_run(
     output_dir: Path | None,
     include_topics: list[str] | None = None,
     exclude_topics: list[str] | None = None,
+    document_frontmatter: bool = False,
+    chunks: bool = False,
+    chunk_max_chars: int = 8_000,
+    chunk_overlap_chars: int = 400,
+    cache_policy: CacheFreshnessPolicy = "use-if-present",
+    cache_ttl_hours: int | None = None,
 ) -> None:
     config = load_config(output_dir=output_dir)
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
 
     async def _runner() -> None:
         tracker = CrawlProgressTracker(console=console)
-        pipeline = DocumentationPipeline(config)
-        try:
-            with tracker.live():
-                summary = await pipeline.run(
-                    language_name=language,
+        service = DocumentationService(config)
+        with tracker.live():
+            summary = await service.run_language(
+                RunLanguageRequest(
+                    language=language,
                     mode=mode,
-                    source_name=source,
+                    source=source,
                     force_refresh=force_refresh,
-                    progress_tracker=tracker,
                     validate_only=validate_only,
                     include_topics=include_topics,
                     exclude_topics=exclude_topics,
-                )
-        finally:
-            await pipeline.close()
+                    emit_document_frontmatter=document_frontmatter,
+                    emit_chunks=chunks,
+                    chunk_max_chars=chunk_max_chars,
+                    chunk_overlap_chars=chunk_overlap_chars,
+                    cache_policy=cache_policy,
+                    cache_ttl_hours=cache_ttl_hours,
+                ),
+                progress_tracker=tracker,
+            )
 
         table = Table(title="Documentation Download Summary")
         table.add_column("Language")
@@ -185,6 +197,22 @@ def run(
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
+    document_frontmatter: bool = typer.Option(
+        False,
+        "--document-frontmatter/--no-document-frontmatter",
+        help="Emit YAML frontmatter in each per-document Markdown file.",
+    ),
+    chunks: bool = typer.Option(False, "--chunks", help="Emit retrieval chunks and chunks/manifest.jsonl."),
+    chunk_max_chars: int = typer.Option(8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk."),
+    chunk_overlap_chars: int = typer.Option(400, "--chunk-overlap-chars", min=0, help="Characters of chunk overlap."),
+    cache_policy: CacheFreshnessPolicy = typer.Option(
+        "use-if-present",
+        "--cache-policy",
+        help="Cache policy: use-if-present, ttl, always-refresh, or validate-if-possible.",
+    ),
+    cache_ttl_hours: int | None = typer.Option(
+        None, "--cache-ttl-hours", min=0, help="TTL hours for --cache-policy ttl."
+    ),
 ) -> None:
     """Download and compile documentation for a language.
 
@@ -211,6 +239,12 @@ def run(
         output_dir=output_dir,
         include_topics=include_topic,
         exclude_topics=exclude_topic,
+        document_frontmatter=document_frontmatter,
+        chunks=chunks,
+        chunk_max_chars=chunk_max_chars,
+        chunk_overlap_chars=chunk_overlap_chars,
+        cache_policy=cache_policy,
+        cache_ttl_hours=cache_ttl_hours,
     )
 
 
@@ -260,6 +294,22 @@ def bulk(
     silent: bool = typer.Option(False, "--silent"),
     debug: bool = typer.Option(False, "--debug"),
     verbose: bool = typer.Option(False, "--verbose"),
+    document_frontmatter: bool = typer.Option(
+        False,
+        "--document-frontmatter/--no-document-frontmatter",
+        help="Emit YAML frontmatter in each per-document Markdown file.",
+    ),
+    chunks: bool = typer.Option(False, "--chunks", help="Emit retrieval chunks and chunks/manifest.jsonl."),
+    chunk_max_chars: int = typer.Option(8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk."),
+    chunk_overlap_chars: int = typer.Option(400, "--chunk-overlap-chars", min=0, help="Characters of chunk overlap."),
+    cache_policy: CacheFreshnessPolicy = typer.Option(
+        "use-if-present",
+        "--cache-policy",
+        help="Cache policy: use-if-present, ttl, always-refresh, or validate-if-possible.",
+    ),
+    cache_ttl_hours: int | None = typer.Option(
+        None, "--cache-ttl-hours", min=0, help="TTL hours for --cache-policy ttl."
+    ),
 ) -> None:
     """Run downloads for a predefined set of languages or for everything available.
 
@@ -282,10 +332,16 @@ def bulk(
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
 
     async def _runner() -> None:
-        registry = SourceRegistry(cache_dir=config.paths.cache_dir)
+        registry = SourceRegistry(
+            cache_dir=config.paths.cache_dir,
+            runtime=SourceRuntime(cache_policy=cache_policy, cache_ttl_hours=cache_ttl_hours),
+        )
 
         if target_key == "all":
-            resolved = await registry.all_languages(force_refresh=force_refresh)
+            try:
+                resolved = await registry.all_languages(force_refresh=force_refresh)
+            finally:
+                await registry.runtime.close()
             language_names = [catalog.display_name for _source, catalog in resolved]
             size_bytes, count = _estimate_size(resolved)
             scale = 1.0 if mode == "full" else 0.25
@@ -322,20 +378,25 @@ def bulk(
             raise typer.Exit(code=1)
 
         tracker = CrawlProgressTracker(console=console)
-        pipeline = DocumentationPipeline(config)
-        try:
-            with tracker.live():
-                summary = await pipeline.run_many(
-                    language_names=language_names,
+        service = DocumentationService(config)
+        with tracker.live():
+            summary = await service.run_bulk(
+                BulkRunRequest(
+                    languages=language_names,
                     mode=mode,
                     force_refresh=force_refresh,
-                    progress_tracker=tracker,
                     language_concurrency=language_concurrency,
                     include_topics=include_topic,
                     exclude_topics=exclude_topic,
-                )
-        finally:
-            await pipeline.close()
+                    emit_document_frontmatter=document_frontmatter,
+                    emit_chunks=chunks,
+                    chunk_max_chars=chunk_max_chars,
+                    chunk_overlap_chars=chunk_overlap_chars,
+                    cache_policy=cache_policy,
+                    cache_ttl_hours=cache_ttl_hours,
+                ),
+                progress_tracker=tracker,
+            )
 
         table = Table(title="Bulk Download Summary")
         table.add_column("Language")
@@ -364,7 +425,8 @@ def bulk(
 
 @app.command("list-presets", help="List predefined bulk presets and the languages they contain.")
 def list_presets() -> None:
-    for name, langs in sorted(PRESETS.items()):
+    service = DocumentationService(load_config())
+    for name, langs in service.list_presets().items():
         console.print(f"[bold cyan]{name}[/bold cyan]: {', '.join(langs)}")
 
 
@@ -383,7 +445,7 @@ def audit_presets(
         raise typer.Exit(code=1)
 
     async def _runner() -> None:
-        registry = SourceRegistry(cache_dir=config.paths.cache_dir)
+        service = DocumentationService(config)
         table = Table(title="Preset Coverage Audit")
         table.add_column("Preset", style="bold cyan")
         table.add_column("Language")
@@ -393,16 +455,13 @@ def audit_presets(
 
         resolved_count = 0
         missing_count = 0
-        for preset_name in preset_names:
-            for language in PRESETS[preset_name]:
-                match = await registry.resolve(language, source_name=source, force_refresh=force_refresh)
-                if match is None:
-                    missing_count += 1
-                    table.add_row(preset_name, language, "[red]missing[/red]", "", "")
-                    continue
+        for result in await service.audit_presets(presets=preset_names, source=source, force_refresh=force_refresh):
+            if result.resolved:
                 resolved_count += 1
-                matched_source, catalog = match
-                table.add_row(preset_name, language, "[green]resolved[/green]", matched_source.name, catalog.slug)
+                table.add_row(result.preset, result.language, "[green]resolved[/green]", result.source, result.slug)
+            else:
+                missing_count += 1
+                table.add_row(result.preset, result.language, "[red]missing[/red]", "", "")
 
         console.print(table)
         console.print(f"[dim]Resolved: {resolved_count}  Missing: {missing_count}[/dim]")
@@ -420,8 +479,7 @@ def list_languages(
     config = load_config()
 
     async def _runner() -> None:
-        registry = SourceRegistry(cache_dir=config.paths.cache_dir)
-        catalogs = await registry.catalog(force_refresh=force_refresh)
+        service = DocumentationService(config)
 
         table = Table(title="Supported languages")
         table.add_column("Language", style="bold cyan")
@@ -429,14 +487,9 @@ def list_languages(
         table.add_column("Slug")
         table.add_column("Version")
 
-        rows: list[tuple[str, str, str, str]] = []
-        for source_name, entries in catalogs.items():
-            if source and source_name != source:
-                continue
-            for entry in entries:
-                rows.append((entry.display_name, source_name, entry.slug, entry.version or ""))
-        for row in sorted(rows, key=lambda r: (r[0].lower(), r[1])):
-            table.add_row(*row)
+        rows = await service.list_languages(source=source, force_refresh=force_refresh)
+        for row in rows:
+            table.add_row(row.language, row.source, row.slug, row.version)
         console.print(table)
         console.print(f"[dim]Total: {len(rows)} entries[/dim]")
 
@@ -448,10 +501,10 @@ def refresh_catalogs() -> None:
     config = load_config()
 
     async def _runner() -> None:
-        registry = SourceRegistry(cache_dir=config.paths.cache_dir)
-        catalogs = await registry.catalog(force_refresh=True)
-        for name, entries in catalogs.items():
-            console.print(f"[bold]{name}[/bold]: {len(entries)} entries")
+        service = DocumentationService(config)
+        catalogs = await service.refresh_catalogs()
+        for name, count in catalogs.items():
+            console.print(f"[bold]{name}[/bold]: {count} entries")
 
     asyncio.run(_runner())
 

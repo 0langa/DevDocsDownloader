@@ -19,6 +19,7 @@ The runtime path is usable today for those three source families. The repository
 	- a language index
 	- a single consolidated Markdown file per language
 	- metadata JSON for each compiled language bundle
+- Optionally emits YAML frontmatter and retrieval-friendly Markdown chunks with JSONL manifests
 - Validates the compiled output with a simple structural scoring pass
 - Produces JSON and Markdown run summaries in `output/reports/`
 - Writes active per-language checkpoints under `state/checkpoints/` during runs and removes them after successful completion
@@ -33,7 +34,7 @@ The runtime path is usable today for those three source families. The repository
 	- Filters to configured “core” topic types in `important` mode using `doc_ingest/sources/devdocs_core.json`
 - **MDN**
 	- Treats supported MDN areas as a fixed catalog: JavaScript, HTML, CSS, Web APIs, HTTP, and WebAssembly
-	- Downloads the MDN content repository tarball from GitHub and extracts only the relevant `files/en-us/...` trees into cache
+	- Downloads the MDN content repository tarball from GitHub and extracts only the relevant `files/en-us/...` trees into cache, guarded by checksum and area-readiness metadata
 	- Reads frontmatter from `index.md` files and filters by `page-type` in `important` mode
 - **Dash / Kapeli**
 	- Uses `doc_ingest/sources/dash_seed.json` because Dash does not expose a clean JSON catalog in this codebase
@@ -50,6 +51,7 @@ Typical generated files:
 - `index.md` — language-level index
 - `python.md` — consolidated language documentation file
 - `_meta.json` — generation metadata
+- `chunks/manifest.jsonl` and `chunks/*.md` — optional retrieval chunk export
 - `<topic>/_section.md` — topic index
 - `<topic>/<document>.md` — one Markdown file per source document
 
@@ -149,6 +151,8 @@ python DevDocsDownloader.py run javascript --source mdn --mode full
 python DevDocsDownloader.py run swift --source dash
 python DevDocsDownloader.py run python --include-topic asyncio --include-topic typing
 python DevDocsDownloader.py run swift --exclude-topic Guide
+python DevDocsDownloader.py run python --document-frontmatter --chunks
+python DevDocsDownloader.py run python --cache-policy ttl --cache-ttl-hours 24
 ```
 
 ### Run the interactive wizard
@@ -162,6 +166,7 @@ python DevDocsDownloader.py
 ```bash
 python DevDocsDownloader.py bulk webapp
 python DevDocsDownloader.py bulk backend --mode full
+python DevDocsDownloader.py bulk webapp --chunks --chunk-max-chars 6000
 ```
 
 ### Download every available language
@@ -255,7 +260,7 @@ The validation score is heuristic. It does not verify semantic correctness or so
 
 ### Checkpoint behavior
 
-During an active language run, the pipeline writes `state/checkpoints/<language>.json` with the source slug, mode, current phase, emitted document count, last document metadata, and any failure records. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the last safe document boundary and failure phase can be inspected before retrying.
+During an active language run, the pipeline writes `state/checkpoints/<language>.json` with the source slug, mode, current phase, emitted document count, last document metadata, emitted artifact manifest, and any failure records. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the next matching run can automatically resume after the last safe document boundary when the saved per-document files and consolidated fragments are still present. If those artifacts are missing or stale, the pipeline warns and safely replays from the start.
 
 ### Source diagnostics behavior
 
@@ -266,6 +271,35 @@ Each run records source diagnostics in reports and final state:
 - `skipped` — reason-count map for source-level and pipeline-level skips
 
 Common skip reasons include mode filtering, duplicate paths, missing content, empty converted Markdown, and topic include/exclude filtering.
+
+### Performance and durability behavior
+
+Generated Markdown files are still written through atomic temp-file replacement, but they use balanced durability by default to avoid an `fsync()` on every per-document file and fragment. State files, active checkpoints, reports, downloaded archives, and cache payloads keep strict durability.
+
+`SourceRuntime` applies conservative source-profile throttling around HTTP requests and archive downloads. Operational overrides are available through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`.
+
+### Output and downstream consumption behavior
+
+Consolidated manuals include explicit stable anchors before topic and document headings. The table of contents uses the same anchor registry, so repeated headings receive deterministic suffixes such as `repeat` and `repeat-2`.
+
+Optional per-document YAML frontmatter is enabled with `--document-frontmatter`. It records language/source identity, topic, slug, title, order hint, mode, source URL, and generation timestamp while preserving the existing human-readable metadata lines.
+
+Optional retrieval chunks are enabled with `--chunks`. The compiler writes size-bounded Markdown chunks under `output/markdown/<language>/chunks/` and a `manifest.jsonl` file with stable chunk IDs, source references, topic metadata, document metadata, text paths, and character offsets.
+
+### Cache freshness behavior
+
+`--cache-policy` controls source cache reuse:
+
+- `use-if-present` keeps the historical default behavior
+- `ttl` refreshes cache entries older than `--cache-ttl-hours`
+- `always-refresh` refreshes source cache artifacts each run
+- `validate-if-possible` records the intent and falls back to local cache when a source-specific validator is unavailable
+
+`--force-refresh` remains the strongest override. Source cache artifacts write sidecar `*.meta.json` files with fetched timestamp, URL, ETag/Last-Modified when available, checksum, byte count, and policy.
+
+### GUI-ready service boundary
+
+`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, and runtime inspection workflows. Future GUI work should call this service layer directly instead of shelling out to the Typer CLI.
 
 ## Repository layout
 
@@ -283,12 +317,13 @@ source-documents/           # legacy support requirements and inputs
 
 ### Active pipeline limitations
 
-- Output quality depends entirely on upstream source structure and `markdownify`
+- Output quality still depends on upstream source structure, but DevDocs and Dash now use source-specific HTML cleanup before `markdownify`
 - The compiler does not preserve source navigation hierarchy beyond topic grouping
-- Validation is shallow and does not inspect broken links, duplicated sections, or malformed converted Markdown beyond unbalanced fences
+- Validation is heuristic and now reports unresolved relative links, likely HTML leftovers, malformed table shapes, and definition-list artifacts, but it is not a semantic correctness proof
 - `DocumentationPipeline.close()` releases shared source-runtime HTTP clients
-- Bulk runs gather all language tasks via `asyncio.gather`, with only semaphore-based concurrency limiting at the pipeline layer
-- Checkpoints expose the last emitted document boundary, but adapters do not yet support seeking directly to that position on retry
+- Bulk runs gather language tasks via `asyncio.gather`, with language-level concurrency in the pipeline and source-profile throttling in `SourceRuntime`
+- Checkpoint resume depends on the saved artifact manifest; runs with missing fragments fall back to full replay
+- Optional frontmatter and chunk exports are off by default to preserve conservative output behavior
 
 ### Source-specific limitations
 
@@ -297,19 +332,19 @@ source-documents/           # legacy support requirements and inputs
 	- Treats DevDocs entry `type` as the topic label
 - **MDN**
 	- Only six MDN areas are exposed in the catalog
-	- Frontmatter parsing is minimal and ignores indented or complex YAML structures
-	- Archive extraction is large and disk-heavy
+	- Frontmatter is parsed with safe YAML, but downstream metadata usage is still limited
+	- Archive extraction is still large, but unchanged archives with ready area trees are not re-extracted
 - **Dash**
 	- Catalog coverage is limited to `doc_ingest/sources/dash_seed.json` unless the seed is extended
 	- SQLite index structure is assumed to match the expected `searchIndex` schema
-	- HTML conversion may include navigation noise depending on docset quality
+	- HTML conversion removes common navigation noise but still depends on docset HTML quality
 
 ### Repository consistency notes
 
 - `scripts/benchmark_pipeline.py` now targets the active source-adapter CLI and reports document throughput for cold and warm cache trials.
 - `scripts/build_skip_manifest.py` now writes a current state and checkpoint manifest from `state/*.json` and `state/checkpoints/*.json`; URL-level crawler skip manifests are not part of the active pipeline.
 - `pyproject.toml` is the canonical dependency manifest; `requirements.txt` and `source-documents/requirements.txt` are compatibility shims.
-- Extended conversion, browser, analysis, benchmark, and developer packages are optional extras instead of baseline runtime dependencies.
+- BeautifulSoup, lxml, and PyYAML are runtime dependencies for source cleanup and frontmatter parsing. Extended conversion, browser, benchmark, and developer packages remain optional extras.
 
 ## Testing
 
@@ -325,15 +360,17 @@ The current tests focus on:
 - concurrency behavior in `run_many`
 - slug safety on Windows paths
 - docset/tarball failure handling
+- source-specific HTML cleanup, MDN YAML frontmatter parsing, link rewriting, and conversion-quality validation
+- collision-safe consolidated anchors, optional document frontmatter, optional chunk exports, cache freshness policy, and service-layer wiring
 
 ## Future direction
 
 The most realistic next steps, based on the current repository state, are:
 
-1. Add adapter-level resume from checkpoints
-2. Reduce generated-Markdown fsync overhead with durability modes
-3. Add per-source concurrency and rate limits
-4. Improve Markdown cleanup and validation depth
+1. Build a local visual GUI over `DocumentationService`
+2. Add plugin-ready source registration
+3. Wire extended conversion backends intentionally
+4. Add quality dashboards and trend reports
 
 ## Documentation map
 

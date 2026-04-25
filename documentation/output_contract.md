@@ -11,6 +11,9 @@ output/markdown/<language>/
   _meta.json
   index.md
   <language>.md
+  chunks/
+    manifest.jsonl
+    <chunk>.md
   <topic>/
     _section.md
     <document>.md
@@ -86,7 +89,19 @@ Each `<topic>/<document>.md` file must contain:
 
 `state/<language>.json` is the stable completed-run summary. It must include language/source identity, mode, topics, total document count, source diagnostics when available, `output_path`, `completed`, warnings, failures, and timestamps.
 
-`state/checkpoints/<language>.json` is only for active or failed runs. Successful runs remove it after the stable state file is saved. Failed checkpoints must retain phase, document inventory position, emitted document count, last document metadata, and structured failure records.
+`state/checkpoints/<language>.json` is only for active or failed runs. Successful runs remove it after the stable state file is saved. Failed checkpoints must retain phase, document inventory position, emitted document count, last document metadata, emitted artifact metadata, and structured failure records.
+
+When a checkpoint has a valid emitted artifact manifest, each `emitted_documents` entry includes:
+
+- `topic`
+- `slug`
+- `title`
+- `source_url`
+- `order_hint`
+- `path`, pointing to the emitted per-document Markdown file
+- `fragment_path`, pointing to the temporary consolidated fragment used for resume
+
+On the next matching run, the pipeline may automatically resume after `document_inventory_position` if language, source, source slug, mode, output path, and all manifest artifact paths are still valid. Missing or stale artifacts must cause a full replay rather than a partial final output.
 
 ## Reports and Diagnostics
 
@@ -98,6 +113,20 @@ When available, `SourceRunDiagnostics` must report:
 - `emitted`: documents yielded by the source before pipeline filters
 - `skipped`: reason-count map
 
-Standard skip reasons currently include `filtered_mode`, `filtered_topic_include`, `filtered_topic_exclude`, `duplicate_or_empty_path`, `missing_content`, `empty_markdown`, `missing_path_or_type`, `duplicate_path`, and `missing_file`.
+Standard skip reasons currently include `filtered_mode`, `filtered_topic_include`, `filtered_topic_exclude`, `checkpoint_resume_skip`, `malformed_frontmatter`, `duplicate_or_empty_path`, `missing_content`, `empty_markdown`, `missing_path_or_type`, `duplicate_path`, and `missing_file`.
 
 Validation results must include `score`, `quality_score`, `issues`, language, and output path. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.
+
+Current validation issue codes include structural issues such as `missing_output`, `no_documents`, `tiny_output`, `code_fence`, `missing_section`, and `no_topics`, plus conversion-quality warnings such as `relative_link`, `relative_image`, `empty_link_target`, `html_leftover`, `malformed_table`, and `definition_list_artifact`.
+
+## Phase 7 Optional Outputs
+
+Consolidated manuals emit explicit HTML anchors before each topic and document heading. Table-of-contents links must use the exact same generated anchor IDs. Duplicate heading text receives deterministic numeric suffixes such as `repeat` and `repeat-2`.
+
+Per-document YAML frontmatter is optional and disabled by default. When enabled, each `<topic>/<document>.md` starts with YAML fields for language, language slug, source, source slug, source URL, topic, slug, title, order hint, mode, and generation timestamp. The existing human-readable metadata lines remain present for compatibility.
+
+Chunk export is optional and disabled by default. When enabled, generated chunks live under `chunks/` and `chunks/manifest.jsonl` contains one JSON object per chunk with stable chunk ID, language/source identity, topic, document slug/title, source URL, order hint, chunk index, text path, and character offsets. Chunks are character-bounded Markdown derived from per-document files, not the consolidated manual.
+
+When optional outputs are enabled, `_meta.json` may include an `outputs` object describing enabled frontmatter and chunk settings. Consumers must treat `outputs` as optional.
+
+Source cache metadata is written beside source cache artifacts as `*.meta.json` where practical. Metadata records source, cache key, URL, fetched timestamp, source version when known, ETag, Last-Modified, checksum, byte count, cache policy, and whether refresh was forced.

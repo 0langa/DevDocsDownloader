@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 CrawlMode = Literal["important", "full"]
 CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "completed", "failed"]
+CacheFreshnessPolicy = Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"]
 
 
 class TopicStats(BaseModel):
@@ -64,6 +65,37 @@ class DocumentCheckpoint(BaseModel):
     order_hint: int = 0
 
 
+class DocumentArtifactCheckpoint(DocumentCheckpoint):
+    path: str
+    fragment_path: str
+
+
+class ResumeBoundary(BaseModel):
+    document_inventory_position: int
+    emitted_document_count: int
+
+
+class CacheEntryMetadata(BaseModel):
+    source: str
+    cache_key: str
+    url: str = ""
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    source_version: str = ""
+    etag: str = ""
+    last_modified: str = ""
+    checksum: str = ""
+    byte_count: int = 0
+    policy: CacheFreshnessPolicy = "use-if-present"
+    refreshed_by_force: bool = False
+
+
+class CacheDecision(BaseModel):
+    should_refresh: bool
+    reason: str
+    policy: CacheFreshnessPolicy = "use-if-present"
+    metadata: CacheEntryMetadata | None = None
+
+
 class CheckpointFailure(BaseModel):
     phase: CheckpointPhase
     error_type: str
@@ -87,6 +119,7 @@ class LanguageRunCheckpoint(BaseModel):
     emitted_document_count: int = 0
     output_path: str | None = None
     last_document: DocumentCheckpoint | None = None
+    emitted_documents: list[DocumentArtifactCheckpoint] = Field(default_factory=list)
     failures: list[CheckpointFailure] = Field(default_factory=list)
 
 

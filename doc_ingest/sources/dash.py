@@ -10,9 +10,9 @@ import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from markdownify import markdownify as html_to_md
-
-from ..models import SourceRunDiagnostics
+from ..cache import decide_cache_refresh, write_cache_metadata, write_cache_metadata_for_bytes
+from ..conversion import DASH_PROFILE, convert_html_to_markdown
+from ..models import ResumeBoundary, SourceRunDiagnostics
 from ..runtime import SourceRuntime
 from ..utils.archive import safe_extract_tar
 from ..utils.filesystem import write_json
@@ -61,7 +61,15 @@ class DashFeedSource:
         self.runtime = runtime or SourceRuntime(user_agent=USER_AGENT)
 
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]:
-        if not force_refresh and self.catalog_path.exists():
+        decision = decide_cache_refresh(
+            self.catalog_path,
+            source=self.name,
+            cache_key="catalog",
+            policy=self.runtime.cache_policy,
+            ttl_hours=self.runtime.cache_ttl_hours,
+            force_refresh=force_refresh,
+        )
+        if not decision.should_refresh and self.catalog_path.exists():
             try:
                 payload = json.loads(self.catalog_path.read_text(encoding="utf-8"))
                 return [self._catalog_from_entry(entry) for entry in payload.get("entries", [])]
@@ -75,6 +83,14 @@ class DashFeedSource:
             entries = _DEFAULT_DASH_SEED
 
         write_json(self.catalog_path, {"entries": entries})
+        write_cache_metadata(
+            self.catalog_path,
+            source=self.name,
+            cache_key="catalog",
+            url=str(self._catalog_seed or "bundled-dash-seed"),
+            policy=self.runtime.cache_policy,
+            refreshed_by_force=force_refresh,
+        )
         return [self._catalog_from_entry(entry) for entry in entries]
 
     def _catalog_from_entry(self, entry: dict) -> LanguageCatalog:
@@ -88,9 +104,18 @@ class DashFeedSource:
             homepage=entry.get("homepage", ""),
         )
 
-    async def _download_docset(self, slug: str) -> Path:
+    async def _download_docset(self, slug: str, *, force_refresh: bool = False) -> Path:
         target_dir = self.docsets_dir / slug
-        if any(target_dir.glob("*.docset")):
+        metadata_target = target_dir / "_docset.tgz"
+        decision = decide_cache_refresh(
+            metadata_target,
+            source=self.name,
+            cache_key=f"{slug}/docset",
+            policy=self.runtime.cache_policy,
+            ttl_hours=self.runtime.cache_ttl_hours,
+            force_refresh=force_refresh,
+        )
+        if not decision.should_refresh and any(target_dir.glob("*.docset")):
             return next(target_dir.glob("*.docset"))
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,6 +141,17 @@ class DashFeedSource:
         matches = list(target_dir.glob("*.docset"))
         if not matches:
             raise RuntimeError(f"No .docset found after extracting {slug}")
+        metadata_target.write_bytes(b"metadata marker")
+        write_cache_metadata_for_bytes(
+            metadata_target,
+            tar_bytes,
+            source=self.name,
+            cache_key=f"{slug}/docset",
+            url=tarball_url,
+            policy=self.runtime.cache_policy,
+            response=resp,
+            refreshed_by_force=force_refresh,
+        )
         return matches[0]
 
     async def fetch(
@@ -123,8 +159,10 @@ class DashFeedSource:
         language: LanguageCatalog,
         mode: CrawlMode,
         diagnostics: SourceRunDiagnostics | None = None,
+        resume_boundary: ResumeBoundary | None = None,
+        force_refresh: bool = False,
     ) -> AsyncIterator[Document]:
-        docset_path = await self._download_docset(language.slug)
+        docset_path = await self._download_docset(language.slug, force_refresh=force_refresh)
         dsidx = docset_path / "Contents" / "Resources" / "docSet.dsidx"
         docs_root = docset_path / "Contents" / "Resources" / "Documents"
 
@@ -143,6 +181,14 @@ class DashFeedSource:
 
         seen_paths: set[str] = set()
         for order, (name, entry_type, path) in enumerate(rows):
+            doc_key = str(path).split("#", 1)[0] if path else ""
+            if resume_boundary is not None and order <= resume_boundary.document_inventory_position:
+                if doc_key:
+                    seen_paths.add(doc_key)
+                if diagnostics is not None:
+                    diagnostics.skip("checkpoint_resume_skip")
+                continue
+
             if not path or not entry_type:
                 if diagnostics is not None:
                     diagnostics.skip("missing_path_or_type")
@@ -153,7 +199,6 @@ class DashFeedSource:
                     diagnostics.skip("filtered_mode")
                 continue
 
-            doc_key = path.split("#", 1)[0]
             if doc_key in seen_paths:
                 if diagnostics is not None:
                     diagnostics.skip("duplicate_path")
@@ -167,7 +212,8 @@ class DashFeedSource:
                 continue
 
             html = await asyncio.to_thread(html_file.read_text, "utf-8", "ignore")
-            markdown = await asyncio.to_thread(_convert_html, html)
+            source_url = f"dash://{language.slug}/{doc_key}"
+            markdown = await asyncio.to_thread(_convert_html, html, source_url)
             if not markdown.strip():
                 if diagnostics is not None:
                     diagnostics.skip("empty_markdown")
@@ -180,7 +226,7 @@ class DashFeedSource:
                 slug=_slug(doc_key),
                 title=str(name),
                 markdown=markdown,
-                source_url=f"dash://{language.slug}/{doc_key}",
+                source_url=source_url,
                 order_hint=order,
             )
 
@@ -189,12 +235,14 @@ class DashFeedSource:
         language: LanguageCatalog,
         mode: CrawlMode,
         diagnostics: SourceRunDiagnostics | None = None,
+        resume_boundary: ResumeBoundary | None = None,
+        force_refresh: bool = False,
     ) -> AsyncIterator[AdapterEvent]:
-        return document_events(self.fetch(language, mode, diagnostics=diagnostics))
+        return document_events(self.fetch(language, mode, diagnostics=diagnostics, resume_boundary=resume_boundary))
 
 
-def _convert_html(html: str) -> str:
-    return html_to_md(html, heading_style="ATX", strip=["script", "style"])
+def _convert_html(html: str, base_url: str = "dash://docset/index.html") -> str:
+    return convert_html_to_markdown(html, base_url=base_url, profile=DASH_PROFILE)
 
 
 def _slug(path: str) -> str:

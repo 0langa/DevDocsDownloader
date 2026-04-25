@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import CheckpointFailure, CheckpointPhase, DocumentCheckpoint, LanguageRunCheckpoint, LanguageRunState
+from .models import (
+    CheckpointFailure,
+    CheckpointPhase,
+    DocumentArtifactCheckpoint,
+    DocumentCheckpoint,
+    LanguageRunCheckpoint,
+    LanguageRunState,
+)
 from .utils.filesystem import read_json, write_json
 
 
@@ -61,6 +68,24 @@ class RunCheckpointStore:
         checkpoint.emitted_document_count += 1
         checkpoint.document_inventory_position = document.order_hint
         checkpoint.last_document = document
+        self.save(checkpoint)
+
+    def record_document_artifact(
+        self,
+        checkpoint: LanguageRunCheckpoint,
+        document: DocumentArtifactCheckpoint,
+    ) -> None:
+        checkpoint.phase = "compiling"
+        checkpoint.emitted_document_count += 1
+        checkpoint.document_inventory_position = document.order_hint
+        checkpoint.last_document = DocumentCheckpoint(
+            topic=document.topic,
+            slug=document.slug,
+            title=document.title,
+            source_url=document.source_url,
+            order_hint=document.order_hint,
+        )
+        checkpoint.emitted_documents.append(document)
         self.save(checkpoint)
 
     def record_failure(

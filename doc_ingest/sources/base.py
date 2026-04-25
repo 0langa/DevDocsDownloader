@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, TypeAlias
 
-from ..models import SourceRunDiagnostics
+from ..models import ResumeBoundary, SourceRunDiagnostics
 
 CrawlMode = Literal["important", "full"]
 
@@ -81,6 +81,8 @@ class DocumentationSource(Protocol):
         language: LanguageCatalog,
         mode: CrawlMode,
         diagnostics: SourceRunDiagnostics | None = None,
+        resume_boundary: ResumeBoundary | None = None,
+        force_refresh: bool = False,
     ) -> AsyncIterator[Document]: ...
 
     def events(
@@ -88,4 +90,6 @@ class DocumentationSource(Protocol):
         language: LanguageCatalog,
         mode: CrawlMode,
         diagnostics: SourceRunDiagnostics | None = None,
+        resume_boundary: ResumeBoundary | None = None,
+        force_refresh: bool = False,
     ) -> AsyncIterator[AdapterEvent]: ...

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -48,6 +49,13 @@ class PathsConfig(BaseModel):
 class AppConfig(BaseModel):
     paths: PathsConfig
     language_concurrency: int = 3
+    generated_markdown_durability: Literal["strict", "balanced"] = "balanced"
+    emit_document_frontmatter: bool = False
+    emit_chunks: bool = False
+    chunk_max_chars: int = 8_000
+    chunk_overlap_chars: int = 400
+    cache_policy: Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"] = "use-if-present"
+    cache_ttl_hours: int | None = None
 
 
 def load_config(root: Path | None = None, *, output_dir: Path | None = None) -> AppConfig:

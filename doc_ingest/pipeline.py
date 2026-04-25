@@ -7,14 +7,15 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import cast
 
-from .compiler import compile_from_stream
+from .compiler import CompilationDocument, artifact_checkpoint, compile_from_stream
 from .config import AppConfig
 from .models import (
     CrawlMode,
-    DocumentCheckpoint,
+    DocumentArtifactCheckpoint,
     LanguageRunCheckpoint,
     LanguageRunReport,
     LanguageRunState,
+    ResumeBoundary,
     RunSummary,
     SourceRunDiagnostics,
     TopicStats,
@@ -46,7 +47,10 @@ LOGGER = logging.getLogger("doc_ingest")
 class DocumentationPipeline:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
-        self.runtime = SourceRuntime()
+        self.runtime = SourceRuntime(
+            cache_policy=config.cache_policy,
+            cache_ttl_hours=config.cache_ttl_hours,
+        )
         self.registry = SourceRegistry(cache_dir=config.paths.cache_dir, runtime=self.runtime)
 
     async def close(self) -> None:
@@ -141,6 +145,7 @@ class DocumentationPipeline:
             validate_only=validate_only,
             include_topics=include_topics,
             exclude_topics=exclude_topics,
+            force_refresh=force_refresh,
         )
         summary.reports.append(report)
         if _write_reports:
@@ -219,6 +224,7 @@ class DocumentationPipeline:
         validate_only: bool,
         include_topics: list[str] | None = None,
         exclude_topics: list[str] | None = None,
+        force_refresh: bool = False,
     ) -> LanguageRunReport:
         language_slug = slugify(catalog.display_name)
         output_root = self.config.paths.markdown_dir
@@ -239,6 +245,8 @@ class DocumentationPipeline:
             mode=mode,
         )
         previous_checkpoint = checkpoint_store.load()
+        resume_artifacts: list[DocumentArtifactCheckpoint] = []
+        resume_boundary: ResumeBoundary | None = None
         if previous_checkpoint is not None and previous_checkpoint.phase != "completed":
             report.warnings.append(
                 "Previous incomplete checkpoint found: "
@@ -246,6 +254,22 @@ class DocumentationPipeline:
                 f"emitted={previous_checkpoint.emitted_document_count}, "
                 f"position={previous_checkpoint.document_inventory_position}."
             )
+            resume_artifacts, resume_boundary = _validated_resume(
+                previous_checkpoint,
+                language_slug=language_slug,
+                source=source.name,
+                source_slug=catalog.slug,
+                mode=mode,
+                output_path=consolidated_path,
+            )
+            if resume_boundary is None:
+                report.warnings.append("Checkpoint resume artifacts were missing or stale; replaying from the start.")
+            else:
+                report.warnings.append(
+                    "Resuming from checkpoint boundary "
+                    f"position={resume_boundary.document_inventory_position}, "
+                    f"emitted={resume_boundary.emitted_document_count}."
+                )
 
         if validate_only:
             report.output_path = consolidated_path if consolidated_path.exists() else None
@@ -287,19 +311,18 @@ class DocumentationPipeline:
             mode=mode,
             phase="initialized",
             output_path=str(consolidated_path),
+            emitted_documents=list(resume_artifacts),
         )
+        if resume_boundary is not None:
+            checkpoint.document_inventory_position = resume_boundary.document_inventory_position
+            checkpoint.emitted_document_count = resume_boundary.emitted_document_count
+            checkpoint.last_document = resume_artifacts[-1]
         checkpoint_store.save(checkpoint)
 
-        async def _on_document(doc: Document) -> None:
-            checkpoint_store.record_document(
+        async def _on_document(doc: Document, artifact: CompilationDocument) -> None:
+            checkpoint_store.record_document_artifact(
                 checkpoint,
-                DocumentCheckpoint(
-                    topic=doc.topic,
-                    slug=doc.slug,
-                    title=doc.title,
-                    source_url=doc.source_url,
-                    order_hint=doc.order_hint,
-                ),
+                artifact_checkpoint(artifact, topic=doc.topic),
             )
             if progress_tracker is not None:
                 await progress_tracker.on_document_completed(language_slug)
@@ -308,7 +331,14 @@ class DocumentationPipeline:
             checkpoint_store.update_phase(checkpoint, "fetching", output_path=str(consolidated_path))
             documents = _filtered_documents(
                 _documents_from_events(
-                    _fetch_events(source, catalog, mode, diagnostics),
+                    _fetch_events(
+                        source,
+                        catalog,
+                        mode,
+                        diagnostics,
+                        resume_boundary=resume_boundary,
+                        force_refresh=force_refresh,
+                    ),
                     diagnostics=diagnostics,
                     warnings=report.warnings,
                 ),
@@ -326,6 +356,12 @@ class DocumentationPipeline:
                 output_root=output_root,
                 documents=documents,
                 on_document=_on_document,
+                resume_artifacts=resume_artifacts,
+                durability=self.config.generated_markdown_durability,
+                emit_document_frontmatter=self.config.emit_document_frontmatter,
+                emit_chunks=self.config.emit_chunks,
+                chunk_max_chars=self.config.chunk_max_chars,
+                chunk_overlap_chars=self.config.chunk_overlap_chars,
             )
         except Exception as exc:
             LOGGER.exception("Failed to compile %s from %s", catalog.display_name, source.name)
@@ -397,27 +433,78 @@ def _normalize_topic_filter(values: list[str] | None) -> set[str]:
     return {value.strip().lower() for value in values or [] if value.strip()}
 
 
+def _validated_resume(
+    checkpoint: LanguageRunCheckpoint,
+    *,
+    language_slug: str,
+    source: str,
+    source_slug: str,
+    mode: CrawlMode,
+    output_path: Path,
+) -> tuple[list[DocumentArtifactCheckpoint], ResumeBoundary | None]:
+    if checkpoint.slug != language_slug:
+        return [], None
+    if checkpoint.source != source or checkpoint.source_slug != source_slug or checkpoint.mode != mode:
+        return [], None
+    if checkpoint.output_path and Path(checkpoint.output_path) != output_path:
+        return [], None
+    if checkpoint.document_inventory_position is None or not checkpoint.emitted_documents:
+        return [], None
+
+    artifacts = checkpoint.emitted_documents
+    for artifact in artifacts:
+        if not Path(artifact.path).exists() or not Path(artifact.fragment_path).exists():
+            return [], None
+
+    return artifacts, ResumeBoundary(
+        document_inventory_position=checkpoint.document_inventory_position,
+        emitted_document_count=checkpoint.emitted_document_count,
+    )
+
+
 async def _fetch_events(
     source: DocumentationSource,
     catalog: LanguageCatalog,
     mode: CrawlMode,
     diagnostics: SourceRunDiagnostics,
+    resume_boundary: ResumeBoundary | None = None,
+    force_refresh: bool = False,
 ) -> AsyncIterator[AdapterEvent]:
     events = getattr(source, "events", None)
     if events is not None:
         try:
-            async for event in events(catalog, mode, diagnostics=diagnostics):
+            async for event in events(
+                catalog,
+                mode,
+                diagnostics=diagnostics,
+                resume_boundary=resume_boundary,
+                force_refresh=force_refresh,
+            ):
                 yield event
             return
         except TypeError:
-            async for event in events(catalog, mode):
-                yield event
-            return
+            try:
+                async for event in events(catalog, mode, diagnostics=diagnostics):
+                    yield event
+                return
+            except TypeError:
+                async for event in events(catalog, mode):
+                    yield event
+                return
 
     try:
-        documents = source.fetch(catalog, mode, diagnostics=diagnostics)
+        documents = source.fetch(
+            catalog,
+            mode,
+            diagnostics=diagnostics,
+            resume_boundary=resume_boundary,
+            force_refresh=force_refresh,
+        )
     except TypeError:
-        documents = source.fetch(catalog, mode)
+        try:
+            documents = source.fetch(catalog, mode, diagnostics=diagnostics)
+        except TypeError:
+            documents = source.fetch(catalog, mode)
     async for event in document_events(documents):
         yield event
 

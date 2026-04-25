@@ -12,14 +12,18 @@
 ## Table of Contents
 
 - [Reference](#reference)
-  - [Vector API](#reference-vector-api)
-  - [Vector Guide](#reference-vector-guide)
+  - [Vector API](#vector-api)
+  - [Vector Guide](#vector-guide)
 - [Guides](#guides)
-  - [Getting Started](#guides-getting-started)
+  - [Getting Started](#getting-started)
 
 ## Documentation
 
+<a id="reference"></a>
+
 ### Reference
+
+<a id="vector-api"></a>
 
 #### Vector API
 
@@ -33,6 +37,8 @@ _Source: <https://example.invalid/reference/vector>_
 print('fixture')
 ```
 
+<a id="vector-guide"></a>
+
 #### Vector Guide
 
 _Source: <https://example.invalid/reference/vector-guide>_
@@ -45,7 +51,11 @@ _Source: <https://example.invalid/reference/vector-guide>_
 print('fixture')
 ```
 
+<a id="guides"></a>
+
 ### Guides
+
+<a id="getting-started"></a>
 
 #### Getting Started
 
@@ -58,4 +68,3 @@ _Source: <https://example.invalid/guides/start>_
 ```python
 print('fixture')
 ```
-

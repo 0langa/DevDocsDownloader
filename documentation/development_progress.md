@@ -2,12 +2,12 @@
 
 ## Current state summary
 
-The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, and dependency/tooling hygiene. Historical crawler-oriented utilities are archived outside the active runtime.
+The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, and a GUI-ready service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
 
 In short:
 
 - **Working core:** source resolution, ingestion, active run checkpoints, compilation, validation, reporting
-- **Partially complete areas:** lifecycle cleanup, validation depth, test coverage, dependency hygiene
+- **Partially complete areas:** validation depth, plugin expansion, visual GUI, long-term quality trend reporting
 - **Recently stabilized areas:** benchmark harness and state manifest script now target the current package API
 
 ## What works today
@@ -65,6 +65,9 @@ In short:
 - Consolidated language Markdown generation works
 - Metadata JSON generation works
 - Duplicate slugs within a topic are handled
+- Consolidated anchors are collision-safe through a shared unique-anchor registry
+- Optional per-document YAML frontmatter is implemented
+- Optional retrieval chunk export writes Markdown chunks and JSONL manifests
 - Windows-reserved filenames are normalized safely through `slugify()`
 
 ### Validation and reporting
@@ -83,6 +86,7 @@ In short:
 - Concurrency limiting in `run_many()` is tested
 - Corrupt cache handling is tested
 - Windows-safe slug handling is tested
+- Output contract, CLI contracts, fixture-backed integration, live endpoint probes, streaming resume, conversion quality, cache policy, chunk export, and service-layer behavior are tested
 
 ## Partially implemented or shallow areas
 
@@ -110,16 +114,16 @@ It does **not** currently verify:
 - source adapters receive the shared runtime from `SourceRegistry`
 - HTTP clients are pooled by runtime profile and reused across source calls
 
-Remaining lifecycle work is mostly policy-level: per-source rate limits, richer telemetry, and cache ownership boundaries.
+Remaining lifecycle work is mostly richer telemetry and GUI-facing progress/event exposure.
 
 ### Resume and checkpoint depth
 
-The pipeline now records per-language active checkpoints with phase, emitted document count, document inventory position, last document metadata, and failure records. This makes failed run boundaries inspectable. It does not yet skip already emitted source documents on retry because the source adapter contract does not support seeking into a stream.
+The pipeline records per-language active checkpoints with phase, emitted document count, document inventory position, last document metadata, emitted artifact manifests, and failure records. Matching reruns automatically resume after the saved safe boundary when artifacts still exist; stale or missing artifacts fall back to full replay.
 
 ### Concurrency and throughput controls
 
 - language-level concurrency exists through `run_many()` and `AppConfig.language_concurrency`
-- there are no explicit per-source concurrency controls or retry strategies
+- `SourceRuntime` applies per-profile source throttling and retry helpers
 - there is no adaptive worker model in the active pipeline, despite older scripts referring to one
 
 ### Dependency management
@@ -135,8 +139,7 @@ These are not promised by the current code, but they are the most obvious gaps f
 
 ### Remaining operational gaps
 
-- no adapter-level seek/resume from an active checkpoint position
-- no cache expiry strategy
+- no visual GUI yet, although `DocumentationService` is ready for one
 - no per-document structured warning stream beyond aggregate skip diagnostics
 - no pluggable source system beyond editing Python code
 
@@ -144,7 +147,7 @@ These are not promised by the current code, but they are the most obvious gaps f
 
 - no cross-document link rewriting
 - no deduplicated shared assets or image handling
-- no chunking strategy optimized for downstream RAG/embedding ingestion
+- chunking is character-bounded, not tokenizer-aware
 - no per-document validation reports
 - no optional alternate output formats beyond Markdown and metadata JSON
 
@@ -171,23 +174,17 @@ This file now writes `cache/state_manifest.json` from current `LanguageRunState`
 
 Local settings under `.claude/settings.local.json` now reference current CLI, test, lint, and type-check commands.
 
-### 3. MDN frontmatter parsing is intentionally simplistic
+### 3. MDN frontmatter parsing is YAML-based but still source-specific
 
-The parser in `doc_ingest/sources/mdn.py`:
+The parser in `doc_ingest/sources/mdn.py` uses `yaml.safe_load()` and preserves nested/list metadata for filtering and future reporting. Malformed frontmatter is recoverable and counted in diagnostics.
 
-- uses a single regex to split frontmatter
-- ignores nested YAML structure
-- ignores indented metadata lines
-
-This is workable for many MDN pages but fragile if frontmatter format changes.
-
-### 4. Source conversion quality depends on `markdownify`
+### 4. Source conversion quality depends on cleanup plus `markdownify`
 
 Both DevDocs and Dash ingest rendered HTML and rely on `markdownify`.
 
 Risks:
 
-- noisy navigation remnants
+- noisy navigation remnants when a source changes markup significantly
 - imperfect code block preservation
 - inconsistent list/table formatting
 - source-specific HTML quirks leaking into output

@@ -13,12 +13,17 @@ DevDocsDownloader/
 │       └── core_docs_v1.json
 ├── doc_ingest/
 │   ├── __init__.py
+│   ├── cache.py
 │   ├── cli.py
 │   ├── compiler.py
 │   ├── config.py
+│   ├── conversion.py
+│   ├── live_probe.py
 │   ├── models.py
 │   ├── pipeline.py
 │   ├── progress.py
+│   ├── runtime.py
+│   ├── services.py
 │   ├── state.py
 │   ├── validator.py
 │   ├── reporting/
@@ -52,6 +57,13 @@ DevDocsDownloader/
 │   └── requirements.txt
 └── tests/
 		├── __init__.py
+		├── helpers.py
+		├── test_cli_contract.py
+		├── test_output_contract.py
+		├── test_phase4_architecture.py
+		├── test_phase5_performance.py
+		├── test_phase6_conversion_quality.py
+		├── test_phase7_output_consumption.py
 		└── test_source_resilience.py
 ```
 
@@ -107,9 +119,29 @@ DevDocsDownloader/
 **Calls into**
 
 - `load_config()`
-- `DocumentationPipeline`
+- `DocumentationService`
 - `CrawlProgressTracker`
 - `SourceRegistry`
+
+### `doc_ingest/services.py`
+
+**Purpose**
+
+- GUI-ready service facade over pipeline and registry workflows
+
+**Key symbols**
+
+- `DocumentationService`
+- `RunLanguageRequest`
+- `BulkRunRequest`
+- `LanguageEntry`
+- `AuditPresetResult`
+- `RuntimeSnapshot`
+
+**Used by**
+
+- CLI
+- future local GUI or API layer
 
 ### `doc_ingest/config.py`
 
@@ -148,6 +180,9 @@ DevDocsDownloader/
 - `LanguageRunCheckpoint`
 - `LanguageRunReport`
 - `RunSummary`
+- `CacheEntryMetadata`
+- `CacheDecision`
+- `CacheFreshnessPolicy`
 
 **Used by**
 
@@ -189,11 +224,13 @@ DevDocsDownloader/
 **Key symbols**
 
 - `CompiledOutput`
+- `AnchorRegistry`
 - `LanguageOutputBuilder`
 	- `add()`
 	- `finalize()`
 - `compile_from_stream()`
-- `_render_document()`
+- `render_document()`
+- `write_chunks()`
 - `_render_index()`
 - `_render_consolidated()`
 - `_normalize_markdown()`
@@ -203,6 +240,19 @@ DevDocsDownloader/
 
 - `write_text()`
 - `slugify()`
+
+### `doc_ingest/cache.py`
+
+**Purpose**
+
+- Shared cache freshness decisions and sidecar metadata writing
+
+**Key symbols**
+
+- `decide_cache_refresh()`
+- `write_cache_metadata()`
+- `write_cache_metadata_for_bytes()`
+- `read_cache_metadata()`
 
 ### `doc_ingest/progress.py`
 
@@ -353,7 +403,7 @@ DevDocsDownloader/
 
 - exposes a fixed catalog, not a remote-discovered one
 - reads source Markdown directly from the MDN repo export
-- does simple frontmatter parsing via regex and line splitting
+- parses frontmatter with safe YAML and preserves nested/list metadata for filtering and future reporting
 
 ### `doc_ingest/sources/dash.py`
 
@@ -375,6 +425,26 @@ DevDocsDownloader/
 
 - depends on `.docset` archive shape and SQLite metadata
 - uses a built-in seed list instead of runtime feed discovery
+
+### `doc_ingest/conversion.py`
+
+**Purpose**
+
+- Shared HTML cleanup, source-link rewriting, and Markdown post-processing helpers
+
+**Key symbols**
+
+- `convert_html_to_markdown()`
+- `rewrite_markdown_links()`
+- `resolve_source_link()`
+- `DEVDOCS_PROFILE`
+- `DASH_PROFILE`
+
+**Notable details**
+
+- uses BeautifulSoup/lxml before `markdownify`
+- removes common navigation, search, header/footer, and hidden elements
+- rewrites relative source links outside code spans and fenced blocks
 
 ### `doc_ingest/sources/presets.py`
 

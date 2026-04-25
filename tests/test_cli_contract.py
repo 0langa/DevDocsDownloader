@@ -7,7 +7,6 @@ from typer.testing import CliRunner
 import doc_ingest.cli as cli
 from doc_ingest.config import load_config
 from doc_ingest.models import RunSummary
-from doc_ingest.sources.base import LanguageCatalog
 from doc_ingest.utils.filesystem import write_json, write_text
 
 runner = CliRunner()
@@ -24,9 +23,11 @@ def test_cli_help_exposes_scripted_contract_options() -> None:
     assert "--output-dir" in run_result.output
 
     assert bulk_result.exit_code == 0
-    assert "--language-concurrency" in bulk_result.output
+    assert "--language-conc" in bulk_result.output
     assert "--include-topic" in bulk_result.output
     assert "--exclude-topic" in bulk_result.output
+    assert "--chunks" in run_result.output
+    assert "--cache-policy" in run_result.output
 
     assert audit_result.exit_code == 0
     assert "--source" in audit_result.output
@@ -76,19 +77,16 @@ def test_cli_bulk_wires_topic_filters(monkeypatch, tmp_path: Path) -> None:
     def fake_load_config(*_args, **_kwargs):
         return config
 
-    class FakePipeline:
+    class FakeService:
         def __init__(self, config):
             self.config = config
 
-        async def run_many(self, **kwargs):
-            captured.update(kwargs)
+        async def run_bulk(self, request, *, progress_tracker=None):
+            captured.update(request.model_dump())
             return RunSummary()
 
-        async def close(self):
-            return None
-
     monkeypatch.setattr(cli, "load_config", fake_load_config)
-    monkeypatch.setattr(cli, "DocumentationPipeline", FakePipeline)
+    monkeypatch.setattr(cli, "DocumentationService", FakeService)
 
     result = runner.invoke(
         cli.app,
@@ -167,18 +165,27 @@ def test_cli_audit_presets_exit_codes(monkeypatch, tmp_path: Path) -> None:
     def fake_load_config(*_args, **_kwargs):
         return config
 
-    class FakeRegistry:
-        def __init__(self, cache_dir):
-            self.cache_dir = cache_dir
+    class FakeService:
+        def __init__(self, config):
+            self.config = config
 
-        async def resolve(self, language, source_name=None, force_refresh=False):
-            return (
-                type("Source", (), {"name": source_name or "devdocs"})(),
-                LanguageCatalog(source=source_name or "devdocs", slug=language.lower(), display_name=language),
-            )
+        async def audit_presets(self, *, presets=None, source=None, force_refresh=False):
+            from doc_ingest.services import AuditPresetResult
+
+            return [
+                AuditPresetResult(
+                    preset=preset,
+                    language=language,
+                    resolved=True,
+                    source=source or "devdocs",
+                    slug=language.lower(),
+                )
+                for preset in presets or []
+                for language in cli.PRESETS[preset]
+            ]
 
     monkeypatch.setattr(cli, "load_config", fake_load_config)
-    monkeypatch.setattr(cli, "SourceRegistry", FakeRegistry)
+    monkeypatch.setattr(cli, "DocumentationService", FakeService)
 
     ok = runner.invoke(cli.app, ["audit-presets", "webapp", "--source", "devdocs"])
     missing = runner.invoke(cli.app, ["audit-presets", "does-not-exist"])

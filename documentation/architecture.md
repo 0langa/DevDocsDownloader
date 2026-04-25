@@ -11,6 +11,7 @@ The active code path lives entirely under `doc_ingest/` plus the top-level boots
 ```text
 user command
 	-> doc_ingest.cli
+	-> DocumentationService
 	-> DocumentationPipeline
 	-> SourceRegistry
 	-> {DevDocs | MDN | Dash} adapter
@@ -30,6 +31,7 @@ user command
 ### Supporting patterns
 
 - **Registry pattern** via `SourceRegistry`
+- **Service facade** via `DocumentationService`
 - **Builder pattern** via `LanguageOutputBuilder`
 - **State persistence wrapper** via `RunStateStore`
 - **Post-run validation/reporting pass** via validator and writer modules
@@ -48,14 +50,14 @@ user command
 - expose the Typer application
 - parse command-line arguments
 - run the interactive wizard when no subcommand is provided
-- initialize config, logging, progress tracking, and the pipeline
+- initialize config, logging, progress tracking, and service requests
 - render terminal summaries with Rich
 
 **Key behavior:**
 
 - `DevDocsDownloader.py` is a thin bootstrap that imports `app` and executes it
 - `doc_ingest/cli.py` owns all user-facing commands
-- single-language runs and bulk runs both eventually call into `DocumentationPipeline`
+- single-language runs and bulk runs call `DocumentationService`, which owns the pipeline lifecycle
 
 ### 2. Configuration and path management
 
@@ -78,7 +80,7 @@ user command
 - `state/checkpoints/`
 - `tmp/`
 
-The config surface is intentionally small. There is no environment-variable config layer, no settings file, and no runtime plugin system in the current code.
+The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. There is no settings file or runtime plugin system in the current code.
 
 ### 3. Source resolution layer
 
@@ -139,7 +141,7 @@ Each adapter implements the same external contract but uses a different internal
 4. iterate DevDocs entries
 5. optionally filter by core topic type in `important` mode
 6. look up HTML content in `db.json`
-7. convert HTML to Markdown with `markdownify`
+7. select the primary content container, remove common navigation noise, rewrite relative links to source-absolute URLs, and convert HTML to Markdown with `markdownify`
 8. emit `Document`
 
 **Tradeoffs:**
@@ -159,17 +161,18 @@ Each adapter implements the same external contract but uses a different internal
 
 1. expose a static catalog for selected MDN areas
 2. ensure the tarball is downloaded to `cache/mdn/mdn-content-main.tar.gz`
-3. extract only relevant `files/en-us` trees into cache
-4. locate each `index.md` file under the selected area
-5. parse simple YAML-like frontmatter
-6. optionally filter by `page-type` in `important` mode
-7. emit body content directly as Markdown in a `Document`
+3. check `cache/mdn/cache_meta.json` for archive checksum, size, mtime, and ready areas
+4. extract only relevant `files/en-us` trees into cache when metadata or area readiness is stale
+5. locate each `index.md` file under the selected area
+6. parse YAML frontmatter with `yaml.safe_load`
+7. optionally filter by `page-type` in `important` mode
+8. emit body content directly as Markdown in a `Document`
 
 **Tradeoffs:**
 
 - preserves Markdown source directly from MDN rather than converting rendered HTML
 - extraction and storage cost are significantly larger than simple API-backed sources
-- frontmatter parsing is intentionally shallow and may miss complex metadata
+- rich frontmatter is preserved for filtering and future metadata work, but only selected fields are used today
 
 #### 4.3 Dash adapter
 
@@ -188,7 +191,7 @@ Each adapter implements the same external contract but uses a different internal
 4. iterate `(name, type, path)` rows ordered by type and name
 5. optionally filter by type in `important` mode
 6. read referenced HTML files
-7. convert HTML to Markdown with `markdownify`
+7. clean docset navigation noise, rewrite relative links to source URLs, and convert HTML to Markdown with `markdownify`
 8. emit `Document`
 
 **Tradeoffs:**
@@ -226,6 +229,14 @@ Each adapter implements the same external contract but uses a different internal
 
 The stable compatibility contract for generated Markdown, `_meta.json`, state, checkpoints, diagnostics, and reports is defined in `documentation/output_contract.md`.
 
+Phase 7 extends the compiler for downstream consumption:
+
+- consolidated topic and document headings receive explicit deterministic anchors
+- TOC links are generated from the same unique-anchor registry as emitted headings
+- `--document-frontmatter` emits YAML metadata at the top of per-document Markdown files
+- `--chunks` emits size-bounded Markdown chunks and `chunks/manifest.jsonl`
+- `_meta.json` includes an optional `outputs` object only when optional outputs are enabled
+
 ### 6. Validation layer
 
 **File:** `doc_ingest/validator.py`
@@ -236,6 +247,7 @@ The stable compatibility contract for generated Markdown, `_meta.json`, state, c
 - check minimum output size
 - check for balanced code fences
 - confirm required top-level sections exist
+- report unresolved relative links, unresolved relative images, empty link targets, likely HTML leftovers, malformed table rows, and definition-list artifacts
 - compute a simple heuristic quality score
 
 This subsystem is intentionally lightweight. It validates output structure, not document correctness.
@@ -273,9 +285,10 @@ This subsystem is intentionally lightweight. It validates output structure, not 
 - last emitted document metadata
 - current document inventory position from `Document.order_hint`
 - emitted document count
+- emitted document artifact manifest with per-document path and consolidated fragment path
 - failure records with phase, error type, message, and document position
 
-Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection before retrying.
+Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection and automatic resume. A matching rerun resumes only when the checkpoint identity matches the current language/source/mode/output path and every artifact path in the manifest still exists; otherwise the pipeline warns and replays from the start.
 
 **Source diagnostics contents:**
 
@@ -304,16 +317,17 @@ This is presentation-only and does not affect the core pipeline.
 1. CLI parses `run` arguments
 2. `load_config()` resolves paths and creates directories
 3. logging is configured to `logs/run.log`
-4. `DocumentationPipeline.run()` resolves the requested language
-5. selected source adapter fetches source documents
-6. `RunCheckpointStore` records active phase and per-document progress
-7. pipeline-level topic include/exclude filters are applied if configured
-8. `compile_from_stream()` consumes documents and writes output files
-9. `validate_output()` scores the consolidated file
-10. `RunStateStore.save()` persists language state and source diagnostics
-11. the active checkpoint is removed after successful state save
-12. `write_reports()` writes JSON and Markdown summaries
-13. CLI prints a Rich summary table
+4. `DocumentationService.run_language()` applies output/cache options and owns pipeline shutdown
+5. `DocumentationPipeline.run()` resolves the requested language
+6. selected source adapter fetches source documents, optionally with a resume boundary loaded from a valid checkpoint
+7. `RunCheckpointStore` records active phase, per-document progress, and emitted artifact paths
+8. pipeline-level topic include/exclude filters are applied if configured
+9. `compile_from_stream()` consumes documents and writes output files
+10. `validate_output()` scores the consolidated file
+11. `RunStateStore.save()` persists language state and source diagnostics
+12. the active checkpoint is removed after successful state save
+13. `write_reports()` writes JSON and Markdown summaries
+14. CLI prints a Rich summary table
 
 ### Bulk run
 
@@ -380,9 +394,13 @@ DevDocsDownloader.py
 doc_ingest.cli
 	-> doc_ingest.config
 	-> doc_ingest.models
-	-> doc_ingest.pipeline
 	-> doc_ingest.progress
+	-> doc_ingest.services
 	-> doc_ingest.sources.presets
+	-> doc_ingest.sources.registry
+
+doc_ingest.services
+	-> doc_ingest.pipeline
 	-> doc_ingest.sources.registry
 
 doc_ingest.pipeline
@@ -410,11 +428,12 @@ doc_ingest.compiler
 - `pydantic` — run state and result models
 - `httpx` — async HTTP downloads
 - `markdownify` — HTML to Markdown conversion
+- `beautifulsoup4` / `lxml` — source-specific HTML cleanup before conversion
+- `PyYAML` — safe MDN frontmatter parsing
 - `orjson` — optional fast JSON serialization
 - `pytest` — test runner in the `dev` extra
 - `ruff` — lint and format check in the `dev` extra
 - `mypy` — pragmatic type-checking gate in the `dev` extra
-- `lxml` / `beautifulsoup4` — support-script dependencies in the `analysis` extra
 - `docling`, `mammoth`, and `pypdf` — future extended conversion dependencies in the `conversion-extended` extra
 - `playwright` — optional browser package in the `browser` extra
 - `psutil` — benchmark support in the `benchmark` extra
@@ -432,8 +451,11 @@ doc_ingest.compiler
 
 ### Concurrency limits
 
-- only language-level concurrency is configurable through `AppConfig.language_concurrency`
-- adapters use the shared bounded HTTP retry helper for retryable network failures, but there is no explicit per-source rate limiting
+- language-level concurrency is configurable through `AppConfig.language_concurrency`
+- `SourceRuntime` applies per-profile semaphores and minimum request spacing around shared HTTP clients
+- generated Markdown uses balanced atomic writes by default; state, checkpoints, reports, and cache/archive payloads retain strict fsync-backed writes
+- source cache artifacts write `*.meta.json` sidecars where practical
+- cache freshness policies are `use-if-present`, `ttl`, `always-refresh`, and `validate-if-possible`; `--force-refresh` remains the strongest override
 
 ## Design decisions and tradeoffs
 
@@ -453,6 +475,9 @@ The validator is intended as a quick sanity pass, not a correctness proof. It is
 ## Current architectural boundaries
 
 - `DocumentationPipeline` owns a shared `SourceRuntime` and closes pooled HTTP clients at shutdown.
+- `DocumentationService` exposes typed request/response models for CLI and future GUI workflows. A future GUI should call this service layer directly instead of shelling out to Typer.
+- `SourceRuntime` owns retry policy, telemetry, and conservative source-profile throttling.
 - Source adapters expose typed events through a compatibility-first event stream while retaining document-fetch compatibility.
 - Compilation is split into planning, pure rendering, and writing behind the existing public compile API.
+- Compilation can preload checkpointed artifact manifests, then append newly emitted documents after a resume boundary.
 - Historical crawler path-analysis code is archived under `documentation/archive/`; the active product is the curated source-adapter ingester.
