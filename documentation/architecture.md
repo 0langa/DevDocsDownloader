@@ -20,6 +20,15 @@ user command
 	-> output/state/reports
 ```
 
+Optional GUI flow:
+
+```text
+local browser
+	-> doc_ingest.gui
+	-> DocumentationService
+	-> same pipeline/state/report/output paths as CLI
+```
+
 ## Architectural style
 
 ### Primary pattern
@@ -58,6 +67,29 @@ user command
 - `DevDocsDownloader.py` is a thin bootstrap that imports `app` and executes it
 - `doc_ingest/cli.py` owns all user-facing commands
 - single-language runs and bulk runs call `DocumentationService`, which owns the pipeline lifecycle
+
+The optional `gui` command launches the local NiceGUI operator interface when the `gui` extra is installed. Missing GUI dependencies produce an actionable install message instead of affecting normal CLI imports.
+
+### 1.1 Local GUI and operator workflow layer
+
+**Files:**
+
+- `doc_ingest/gui/app.py`
+- `doc_ingest/gui/state.py`
+
+**Responsibilities:**
+
+- expose the same meaningful run, bulk, validation, catalog, preset, output, report, checkpoint, and cache workflows available from the CLI
+- keep a local in-process job queue with one active job by default
+- subscribe to `DocumentationService` events for phase, document, warning, validation, telemetry, and failure updates
+- browse generated output bundles, report artifacts, checkpoint manifests, and cache metadata through service methods with strict path checks
+
+**Key behavior:**
+
+- NiceGUI is optional through `.[gui]`
+- the GUI calls `DocumentationService` directly and does not shell out to Typer commands
+- file reads are constrained to configured output/report/cache/state roots
+- destructive checkpoint deletion is limited to `state/checkpoints/*.json`
 
 ### 2. Configuration and path management
 
@@ -237,6 +269,14 @@ Phase 7 extends the compiler for downstream consumption:
 - `--chunks` emits size-bounded Markdown chunks and `chunks/manifest.jsonl`
 - `_meta.json` includes an optional `outputs` object only when optional outputs are enabled
 
+Phase 8 extends validation and observability:
+
+- validation checks internal anchors, duplicate topic/document sections, document heading counts, and source inventory reconciliation
+- per-document validation records are emitted to `output/reports/validation_documents.jsonl`
+- report history is persisted under `output/reports/history/`
+- trend reports summarize validation, diagnostics, runtime telemetry, cache decisions, and failures
+- structured document warnings and runtime telemetry are persisted on run reports/state when available
+
 ### 6. Validation layer
 
 **File:** `doc_ingest/validator.py`
@@ -248,6 +288,8 @@ Phase 7 extends the compiler for downstream consumption:
 - check for balanced code fences
 - confirm required top-level sections exist
 - report unresolved relative links, unresolved relative images, empty link targets, likely HTML leftovers, malformed table rows, and definition-list artifacts
+- report missing internal anchors, duplicate sections/headings, and source-inventory mismatches
+- produce document-local validation records for generated per-document Markdown files
 - compute a simple heuristic quality score
 
 This subsystem is intentionally lightweight. It validates output structure, not document correctness.
@@ -399,6 +441,10 @@ doc_ingest.cli
 	-> doc_ingest.sources.presets
 	-> doc_ingest.sources.registry
 
+doc_ingest.gui
+	-> doc_ingest.services
+	-> doc_ingest.gui.state
+
 doc_ingest.services
 	-> doc_ingest.pipeline
 	-> doc_ingest.sources.registry
@@ -434,6 +480,7 @@ doc_ingest.compiler
 - `pytest` — test runner in the `dev` extra
 - `ruff` — lint and format check in the `dev` extra
 - `mypy` — pragmatic type-checking gate in the `dev` extra
+- `nicegui` — optional local operator GUI in the `gui` extra
 - `docling`, `mammoth`, and `pypdf` — future extended conversion dependencies in the `conversion-extended` extra
 - `playwright` — optional browser package in the `browser` extra
 - `psutil` — benchmark support in the `benchmark` extra
@@ -475,7 +522,9 @@ The validator is intended as a quick sanity pass, not a correctness proof. It is
 ## Current architectural boundaries
 
 - `DocumentationPipeline` owns a shared `SourceRuntime` and closes pooled HTTP clients at shutdown.
-- `DocumentationService` exposes typed request/response models for CLI and future GUI workflows. A future GUI should call this service layer directly instead of shelling out to Typer.
+- `DocumentationService` exposes typed request/response models for CLI and GUI workflows. The GUI calls this service layer directly instead of shelling out to Typer.
+- `DocumentationService` accepts an optional event sink for phase, document, warning, validation, telemetry, and failure events.
+- GUI-safe service readers expose output bundles, report artifacts, checkpoints, and cache metadata with strict root-bound path resolution.
 - `SourceRuntime` owns retry policy, telemetry, and conservative source-profile throttling.
 - Source adapters expose typed events through a compatibility-first event stream while retaining document-fetch compatibility.
 - Compilation is split into planning, pure rendering, and writing behind the existing public compile API.

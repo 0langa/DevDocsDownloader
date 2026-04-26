@@ -22,6 +22,7 @@ The runtime path is usable today for those three source families. The repository
 - Optionally emits YAML frontmatter and retrieval-friendly Markdown chunks with JSONL manifests
 - Validates the compiled output with a simple structural scoring pass
 - Produces JSON and Markdown run summaries in `output/reports/`
+- Produces additive per-document validation, report history, and quality trend artifacts
 - Writes active per-language checkpoints under `state/checkpoints/` during runs and removes them after successful completion
 
 ## Current feature set
@@ -68,6 +69,7 @@ The stable generated-output contract is documented in `documentation/output_cont
 - `refresh-catalogs`
 - `validate`
 - `init`
+- `gui` (optional NiceGUI extra)
 
 ## High-level architecture
 
@@ -122,6 +124,7 @@ Optional extras:
 - `conversion-extended` — future PDF/DOCX conversion dependencies
 - `browser` — Playwright package only
 - `benchmark` — benchmark helper dependencies
+- `gui` — local NiceGUI operator interface
 
 ### Optional helper setup
 
@@ -130,6 +133,7 @@ The repository includes `scripts/setup.py`, which creates `.venv`, installs the 
 ```bash
 python scripts/setup.py
 python scripts/setup.py --extras dev,analysis,benchmark
+python scripts/setup.py --extras dev,gui
 python scripts/setup.py --extras dev,browser --with-playwright-browser
 ```
 
@@ -154,6 +158,19 @@ python DevDocsDownloader.py run swift --exclude-topic Guide
 python DevDocsDownloader.py run python --document-frontmatter --chunks
 python DevDocsDownloader.py run python --cache-policy ttl --cache-ttl-hours 24
 ```
+
+### Launch the local GUI
+
+The optional GUI exposes the same operational controls as the CLI plus output browsing, report drill-down, checkpoint inspection, and cache metadata views.
+
+```bash
+python -m pip install -e .[gui]
+python DevDocsDownloader.py gui
+python DevDocsDownloader.py gui --host 127.0.0.1 --port 8080
+python DevDocsDownloader.py gui --output-dir output
+```
+
+The GUI is a local operator interface. It calls `DocumentationService` in-process and does not shell out to CLI commands for core operations. Do not expose it as a public multi-user web service.
 
 ### Run the interactive wizard
 
@@ -255,6 +272,10 @@ Compiled output is scored by `doc_ingest/validator.py` using simple checks:
 	- `## Metadata`
 	- `## Table of Contents`
 	- `## Documentation`
+- internal table-of-contents links point to emitted anchors
+- duplicate topic/document headings and malformed heading hierarchy are reported
+- source diagnostics reconcile discovered, emitted, skipped, and compiled document counts where available
+- generated per-document files are scanned for local conversion/link issues
 
 The validation score is heuristic. It does not verify semantic correctness or source completeness.
 
@@ -299,13 +320,20 @@ Optional retrieval chunks are enabled with `--chunks`. The compiler writes size-
 
 ### GUI-ready service boundary
 
-`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, and runtime inspection workflows. Future GUI work should call this service layer directly instead of shelling out to the Typer CLI.
+`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, validation-only, runtime inspection, output bundle browsing, report reading, checkpoint inspection/deletion, and cache metadata workflows. The local NiceGUI app calls this service layer directly instead of shelling out to the Typer CLI.
+
+The service layer also accepts an optional event sink for GUI-ready phase, document, warning, validation, runtime telemetry, and failure events. Existing CLI rendering continues to use Rich progress. The GUI keeps a local in-process queue with one active job by default and shows queued, running, completed, failed, and cancelled jobs.
+
+### Report history and trends
+
+`output/reports/run_summary.json` and `run_summary.md` remain the latest report files. Each report write also stores a timestamped JSON copy under `output/reports/history/`, writes document-level validation records to `validation_documents.jsonl`, and updates `trends.json` / `trends.md` with historical counts, issue codes, runtime telemetry, cache decisions, and failures.
 
 ## Repository layout
 
 ```text
 DevDocsDownloader.py         # top-level entry point
 doc_ingest/                 # active package
+doc_ingest/gui/             # optional NiceGUI operator interface
 documentation/              # project documentation files
 scripts/                    # helper and historical support scripts
 tests/                      # focused regression tests
@@ -319,7 +347,7 @@ source-documents/           # legacy support requirements and inputs
 
 - Output quality still depends on upstream source structure, but DevDocs and Dash now use source-specific HTML cleanup before `markdownify`
 - The compiler does not preserve source navigation hierarchy beyond topic grouping
-- Validation is heuristic and now reports unresolved relative links, likely HTML leftovers, malformed table shapes, and definition-list artifacts, but it is not a semantic correctness proof
+- Validation is heuristic and now reports unresolved relative links, internal anchor issues, duplicate sections/headings, source-inventory mismatches, likely HTML leftovers, malformed table shapes, and definition-list artifacts, but it is not a semantic correctness proof
 - `DocumentationPipeline.close()` releases shared source-runtime HTTP clients
 - Bulk runs gather language tasks via `asyncio.gather`, with language-level concurrency in the pipeline and source-profile throttling in `SourceRuntime`
 - Checkpoint resume depends on the saved artifact manifest; runs with missing fragments fall back to full replay
@@ -362,15 +390,15 @@ The current tests focus on:
 - docset/tarball failure handling
 - source-specific HTML cleanup, MDN YAML frontmatter parsing, link rewriting, and conversion-quality validation
 - collision-safe consolidated anchors, optional document frontmatter, optional chunk exports, cache freshness policy, and service-layer wiring
+- GUI-safe service artifact readers, checkpoint/cache inspection, job queue transitions, CLI GUI launcher wiring, and optional NiceGUI app-factory smoke coverage
 
 ## Future direction
 
 The most realistic next steps, based on the current repository state, are:
 
-1. Build a local visual GUI over `DocumentationService`
-2. Add plugin-ready source registration
-3. Wire extended conversion backends intentionally
-4. Add quality dashboards and trend reports
+1. Improve source expansion and output fidelity with plugins, local cross-document links, asset handling, tokenizer-aware chunks, and intentional extended conversion backends
+2. Add adaptive scaling policy and expanded live extraction probes
+3. Harden the GUI with packaged desktop distribution and richer progress cancellation once the backend exposes cooperative cancellation inside active runs
 
 ## Documentation map
 

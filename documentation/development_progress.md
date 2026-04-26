@@ -2,12 +2,12 @@
 
 ## Current state summary
 
-The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, and a GUI-ready service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
+The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, and a local NiceGUI operator interface over the service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
 
 In short:
 
 - **Working core:** source resolution, ingestion, active run checkpoints, compilation, validation, reporting
-- **Partially complete areas:** validation depth, plugin expansion, visual GUI, long-term quality trend reporting
+- **Partially complete areas:** plugin expansion, adaptive scaling, advanced output fidelity, packaged desktop distribution
 - **Recently stabilized areas:** benchmark harness and state manifest script now target the current package API
 
 ## What works today
@@ -22,6 +22,7 @@ In short:
 - Validation-only command path is complete
 - Catalog listing and refresh commands are implemented
 - Output directory initialization command is implemented
+- Optional `gui` command launches the local operator interface when `.[gui]` is installed
 
 ### Source registry and resolution
 
@@ -80,33 +81,48 @@ In short:
 - Source diagnostics are persisted with discovered, emitted, and skipped document counts
 - Topic include/exclude filters are available through the CLI and are recorded in diagnostics
 
+### Local GUI and operator workflows
+
+- NiceGUI-based dashboard is available through `python DevDocsDownloader.py gui`
+- Single-language, validation-only, and bulk/preset/all runs expose CLI-equivalent options
+- GUI job queue records service events, progress, failures, and completed summaries
+- Language listing, preset audit, catalog refresh, report inspection, output browsing, checkpoint controls, and cache metadata views are present
+- GUI file reads and checkpoint deletion go through `DocumentationService` path-safety checks
+
 ### Tests
 
 - Focused regression tests exist for several error-prone source behaviors
 - Concurrency limiting in `run_many()` is tested
 - Corrupt cache handling is tested
 - Windows-safe slug handling is tested
-- Output contract, CLI contracts, fixture-backed integration, live endpoint probes, streaming resume, conversion quality, cache policy, chunk export, and service-layer behavior are tested
+- Output contract, CLI contracts, fixture-backed integration, live endpoint probes, streaming resume, conversion quality, cache policy, chunk export, service-layer behavior, validation observability, and GUI-safe service behavior are tested
 
 ## Partially implemented or shallow areas
 
+The concrete remediation plan for these areas now lives in `documentation/roadmap.md`:
+
+- Phase 8 now covers deeper validation, per-document validation reports, structured source warnings, runtime telemetry, and quality trend reporting.
+- Phase 9 delivered the visual GUI and operator workflows over the service layer.
+- Phase 10 covers source expansion, cross-document links, assets, tokenizer-aware chunks, and extended conversion backends.
+- Phase 11 covers adaptive scaling and test expansion.
+
 ### Validation quality
 
-Current validation is structural, not semantic.
+Current validation is layered and pragmatic, not semantic.
 
 - detects missing output
 - detects tiny output
 - detects unbalanced code fences
 - checks for required top-level sections
+- checks internal anchors and duplicate section/document heading shapes
+- reconciles source inventory counters when diagnostics are available
+- emits document-local validation records
 
 It does **not** currently verify:
 
-- broken internal links
-- duplicate topic blocks
-- repeated documents
-- malformed heading hierarchies beyond simple presence checks
-- Markdown rendering quality
-- source completeness versus upstream inventory
+- semantic source correctness
+- Markdown rendering quality beyond static heuristics
+- full source completeness beyond discovered/emitted/skipped counter reconciliation
 
 ### Resource lifecycle management
 
@@ -114,7 +130,7 @@ It does **not** currently verify:
 - source adapters receive the shared runtime from `SourceRegistry`
 - HTTP clients are pooled by runtime profile and reused across source calls
 
-Remaining lifecycle work is mostly richer telemetry and GUI-facing progress/event exposure.
+Remaining lifecycle work is mostly adding cooperative cancellation inside active pipeline runs and exposing richer real-time progress milestones beyond the post-summary service events.
 
 ### Resume and checkpoint depth
 
@@ -139,16 +155,15 @@ These are not promised by the current code, but they are the most obvious gaps f
 
 ### Remaining operational gaps
 
-- no visual GUI yet, although `DocumentationService` is ready for one
-- no per-document structured warning stream beyond aggregate skip diagnostics
 - no pluggable source system beyond editing Python code
+- no packaged desktop app or hosted multi-user mode; the GUI is local/operator-focused
 
 ### Missing output features
 
 - no cross-document link rewriting
 - no deduplicated shared assets or image handling
 - chunking is character-bounded, not tokenizer-aware
-- no per-document validation reports
+- no semantic per-document validation reports beyond static issue records
 - no optional alternate output formats beyond Markdown and metadata JSON
 
 ### Remaining test coverage gaps
@@ -229,10 +244,11 @@ These observations come from code inspection; the benchmark harness now supports
 | MDN adapter | Working with caveats | Heavy cache and simple frontmatter parsing |
 | Dash adapter | Working with caveats | Seeded catalog and docset assumptions |
 | Compiler | Working | Core output generation complete |
-| Validator | Basic | Structural only |
+| Validator | Working | Layered structural, anchor, inventory, and per-document checks |
 | Reporting | Working | Summary artifacts generated |
 | State store | Working | Stable final state plus active checkpoint persistence |
 | Progress UI | Working | Presentation layer only |
+| Local GUI | Working | Optional NiceGUI dashboard over `DocumentationService` |
 | Tests | Working | Contract, integration, CLI, resilience, architecture, and opt-in live endpoint coverage |
 | Benchmarks | Working | Targets current CLI and reports cold/warm cache throughput |
 | Support scripts | Aligned | Setup, benchmark, and state manifest target active runtime; crawler path analyzer is archived |
@@ -241,35 +257,24 @@ These observations come from code inspection; the benchmark harness now supports
 
 ### Highest priority
 
-1. **Add adapter-level resume from checkpoints**
-	- let adapters skip safely to the last persisted document boundary where source inventory order is stable
-	- keep full replay fallback for sources that cannot seek safely
+1. **Improve source expansion and output fidelity**
+	- support plugin-ready source registration
+	- rewrite known cross-document links to local bundle paths
+	- add a first-class asset inventory for diagrams and images
 
-2. **Deepen validation**
-	- validate link structure, duplicate sections, and heading integrity
-	- add checks that compare compiled document count to source inventory
+2. **Extend downstream export quality**
+	- add tokenizer-aware chunking as an optional mode
+	- decide which extended conversion backends are real product features
 
 ### Medium priority
 
-4. **Improve source robustness**
-	- add more explicit source-level error reporting
-	- extend diagnostics from aggregate skip counts to per-document warning records
+3. **Refine GUI operations**
+	- add cooperative cancellation for active runs when the pipeline exposes safe cancellation boundaries
+	- consider packaged local desktop distribution if operator adoption justifies it
 
-5. **Expand test coverage**
-	- fixture-based integration tests
-	- output snapshot tests
-	- command behavior tests
-
-6. **Review output ergonomics**
-	- better table handling
-	- link rewriting
-	- optional chunked export for downstream AI ingestion
-
-### Lower priority
-
-7. **Refine lifecycle and performance model**
-	- decide whether persistent HTTP clients are desirable
-	- decide whether document-level concurrency should be exposed
+4. **Add adaptive scaling and source-resolution test expansion**
+	- benchmark adaptive worker/backpressure policies before changing defaults
+	- add deterministic source suggestion quality tests
 
 ## Uncertainties that should be kept explicit
 

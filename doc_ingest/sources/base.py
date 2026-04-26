@@ -44,6 +44,17 @@ class WarningEvent:
 
 
 @dataclass(slots=True)
+class DocumentWarningEvent:
+    message: str
+    code: str = "document_warning"
+    source_url: str = ""
+    topic: str = ""
+    slug: str = ""
+    title: str = ""
+    order_hint: int | None = None
+
+
+@dataclass(slots=True)
 class SkippedEvent:
     reason: str
     count: int = 1
@@ -63,7 +74,9 @@ class AssetEvent:
     media_type: str = ""
 
 
-AdapterEvent: TypeAlias = DocumentEvent | WarningEvent | SkippedEvent | SourceStatsEvent | AssetEvent
+AdapterEvent: TypeAlias = (
+    DocumentEvent | WarningEvent | DocumentWarningEvent | SkippedEvent | SourceStatsEvent | AssetEvent
+)
 
 
 async def document_events(documents: AsyncIterator[Document]) -> AsyncIterator[AdapterEvent]:

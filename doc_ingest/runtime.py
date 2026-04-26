@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from .models import CacheFreshnessPolicy
+from .models import CacheDecision, CacheFreshnessPolicy
 from .utils.http import RetryConfig, request_with_retries, stream_to_file_with_retries
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; DocIngestBot/1.0)"
@@ -21,6 +21,8 @@ class SourceRuntimeTelemetry:
     retries: int = 0
     bytes_observed: int = 0
     failures: int = 0
+    cache_hits: int = 0
+    cache_refreshes: int = 0
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,12 @@ class SourceRuntime:
             limiter = _RuntimeLimiter(policy)
             self._limiters[key] = limiter
         return limiter
+
+    def record_cache_decision(self, decision: CacheDecision) -> None:
+        if decision.should_refresh:
+            self.telemetry.cache_refreshes += 1
+        else:
+            self.telemetry.cache_hits += 1
 
     async def request(
         self,

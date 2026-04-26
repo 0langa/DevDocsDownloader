@@ -49,6 +49,7 @@ class DevDocsSource:
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
         )
+        self.runtime.record_cache_decision(decision)
         if not decision.should_refresh and self.catalog_path.exists():
             try:
                 payload = json.loads(self.catalog_path.read_text(encoding="utf-8"))
@@ -115,6 +116,7 @@ class DevDocsSource:
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
         )
+        self.runtime.record_cache_decision(decision)
         if not decision.should_refresh and path.exists() and self._is_valid_json_file(path):
             return
         if path.exists():

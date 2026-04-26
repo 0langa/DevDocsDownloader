@@ -14,7 +14,8 @@ Completed foundations:
 - Architecture: shared `SourceRuntime`, pooled HTTP clients, typed adapter events, compiler planning/rendering/writing separation, and archived historical crawler utilities.
 - Performance and scalability: streaming compilation, automatic checkpoint resume with artifact manifests, balanced generated-Markdown durability, source-profile throttling, and metadata-driven MDN extraction reuse.
 - Extraction quality: source-specific DevDocs/Dash HTML cleanup, source-absolute link rewriting, safe MDN YAML frontmatter parsing, and richer validation warnings for links, HTML leftovers, malformed tables, and definition-list artifacts.
-- Output and consumption: collision-safe consolidated anchors, optional per-document YAML frontmatter, optional Markdown+JSONL chunk exports, source-agnostic cache freshness metadata, and a GUI-ready service layer over CLI workflows.
+- Output and consumption: collision-safe consolidated anchors, optional per-document YAML frontmatter, optional Markdown+JSONL chunk exports, source-agnostic cache freshness metadata, and service-layer output/report/checkpoint/cache inspection.
+- Operator workflows: optional local NiceGUI dashboard with CLI-equivalent run controls, in-process job queue, output browser, report drill-down, checkpoint controls, and cache metadata views.
 
 Current guarantees:
 
@@ -24,7 +25,7 @@ Current guarantees:
 - State, checkpoints, reports, and expensive cache/archive writes remain strict; generated Markdown defaults to balanced atomic writes.
 - DevDocs, Dash, and MDN normalize relative links toward source-absolute URLs where source context is known.
 - Optional downstream outputs are disabled by default, so the baseline output contract remains conservative.
-- Future GUI work should call `doc_ingest.services.DocumentationService` instead of shelling out to Typer commands.
+- The GUI calls `doc_ingest.services.DocumentationService` directly instead of shelling out to Typer commands.
 - The active product is a curated source-adapter ingester, not a general crawler.
 
 ## Phase 7: Output and Downstream Consumption - Completed
@@ -57,32 +58,122 @@ Current guarantees:
 - **Impact:** Makes recurring documentation updates auditable and predictable across all sources.
 - **Complexity:** Medium
 
-## Phase 8: Visual GUI and Advanced Expansion
+## Phase 8: Validation, Diagnostics, and Observability - Completed
+
+### 1. Deepen Output Validation Beyond Structural Checks
+
+- **Problem:** Validation is still mostly structural. It checks required sections, size, code fences, relative links, and a few conversion artifacts, but it does not verify broken internal links, duplicate topic blocks, repeated documents, malformed heading hierarchy, Markdown renderability, or source completeness against discovered inventory.
+- **Implemented:** `validate_output()` now adds internal-anchor checks, duplicate section/document checks, document heading-count checks, and source-inventory reconciliation using `SourceRunDiagnostics`.
+- **Impact:** Makes validation reports more actionable and catches regressions that current golden tests may miss.
+- **Complexity:** High
+
+### 2. Add Per-Document Validation Reports
+
+- **Problem:** Validation currently reports language-level issues only. Downstream consumers cannot easily identify which generated document caused a warning, duplicate, broken link, heading issue, or conversion artifact.
+- **Implemented:** `output/reports/validation_documents.jsonl` records document-local validation issues with language/source identity, path, topic, slug, source URL, issues, and context.
+- **Impact:** Improves debugging, GUI report drill-downs, and quality triage for large languages.
+- **Complexity:** Medium
+
+### 3. Formalize Per-Document Source Warnings
+
+- **Problem:** Typed adapter events support warnings, but diagnostics still mostly aggregate skip counts and report-level warning strings. Recoverable per-document warnings do not have a stable persisted path.
+- **Implemented:** `DocumentWarningEvent` and `SourceWarningRecord` persist structured document warnings on run reports/state while preserving human-readable warnings.
+- **Impact:** Enables better quality reporting, GUI inspection, and source-specific remediation without overloading `Document`.
+- **Complexity:** Medium
+
+### 4. Add Runtime Telemetry and GUI Progress Events
+
+- **Problem:** `SourceRuntime` has basic counters, and Rich progress shows live terminal state, but there is no stable event stream for GUI progress, throughput, retries, cache hits, bytes, or current phase transitions.
+- **Implemented:** `DocumentationService` accepts an optional event sink and emits phase, document, warning, validation, runtime telemetry, and failure events. Runtime telemetry now includes requests, retries, bytes, failures, cache hits, and cache refreshes.
+- **Impact:** Turns lifecycle and telemetry gaps into a reusable observability surface for both CLI and GUI.
+- **Complexity:** Medium
+
+### 5. Add Quality Trend Reports
+
+- **Problem:** Reports are per-run summaries without long-term trend tracking.
+- **Implemented:** Report writes now keep latest summaries, timestamped history files, document validation JSONL, and `trends.json` / `trends.md` summaries.
+- **Impact:** Helps monitor ingestion quality and upstream drift over time.
+- **Complexity:** Medium
+
+## Phase 9: Visual GUI and Operator Workflows - Completed
 
 ### 1. Build a Local Visual GUI Over the Service Layer
 
 - **Problem:** The CLI is scriptable and complete, but non-technical users need a visual way to configure languages, sources, modes, cache policy, output options, progress, validation, and reports.
-- **Proposed Solution:** Build a local GUI that calls `DocumentationService` for all operations. The first screen should be the operational dashboard, not a marketing page: language/source selection, preset/bulk controls, run queue, live progress, output browser, validation diagnostics, reports, checkpoints, and cache controls.
+- **Implemented:** Added an optional NiceGUI dashboard launched with `python DevDocsDownloader.py gui`. It calls `DocumentationService`, exposes run/bulk/validate/catalog/preset/output/report/checkpoint/cache workflows, and uses a local in-process job queue over service events.
 - **Impact:** Makes the full ingestion system accessible without weakening the CLI contract.
 - **Complexity:** High
 
-### 2. Add Plugin-Ready Source Registration
+### 2. Add Output Browser and Report Drill-Down
+
+- **Problem:** Users can generate per-document files, chunks, manifests, diagnostics, and reports, but there is no visual way to inspect them together.
+- **Implemented:** Added service readers and GUI views for language bundles, output trees, Markdown preview, latest reports, document validation JSONL, history/trends, checkpoints, and cache metadata sidecars.
+- **Impact:** Makes shallow validation and conversion issues easier to investigate without manually navigating output trees.
+- **Complexity:** Medium
+
+### 3. Add GUI Cache and Resume Controls
+
+- **Problem:** Cache policy, force refresh, checkpoints, and resume fallback are production-critical but currently controlled through CLI flags and filesystem inspection.
+- **Implemented:** Added GUI controls for cache policy, TTL, force refresh, catalog refresh, checkpoint listing, checkpoint manifest inspection through service APIs, and safe checkpoint deletion constrained to `state/checkpoints`.
+- **Impact:** Gives operators safe visibility and control over recurring documentation updates.
+- **Complexity:** Medium
+
+## Phase 10: Source Expansion and Output Fidelity - Active
+
+### 1. Add Plugin-Ready Source Registration
 
 - **Problem:** New sources require editing `SourceRegistry.__init__()` and shipping code inside the package.
 - **Proposed Solution:** Support optional entry-point or config-based source registration while keeping DevDocs, MDN, and Dash built in.
 - **Impact:** Enables source growth without hard-coding every adapter.
 - **Complexity:** High
 
-### 3. Add Extended Conversion Backends Intentionally
+### 2. Improve Cross-Document Link Rewriting
+
+- **Problem:** Phase 6 rewrites relative links to source-absolute URLs, but generated bundles still do not rewrite known same-language links to local generated documents.
+- **Proposed Solution:** Build a source-target map during compilation from source URL/source slug to final document path and anchor. Rewrite known intra-bundle links to local relative paths while keeping unknown links source-absolute and reporting unresolved references.
+- **Impact:** Produces more useful offline manuals and downstream corpora.
+- **Complexity:** High
+
+### 3. Add Asset Inventory and Deduplicated Asset Handling
+
+- **Problem:** Image and asset references are currently rewritten or stripped rather than represented as first-class output artifacts.
+- **Proposed Solution:** Extend `AssetEvent` handling into an optional asset inventory. Copy or reference supported assets under a stable `assets/` tree, deduplicate by checksum, and link assets from generated Markdown when safe.
+- **Impact:** Improves offline fidelity for documentation that relies on diagrams, screenshots, or local assets.
+- **Complexity:** Medium
+
+### 4. Add Tokenizer-Aware Chunking
+
+- **Problem:** Chunk export is character-bounded, which is deterministic and dependency-free but not ideal for embedding model limits.
+- **Proposed Solution:** Add optional tokenizer-aware chunking behind an extra or pluggable tokenizer interface. Preserve character chunking as the default fallback and keep manifest schema stable.
+- **Impact:** Makes RAG exports more predictable for embedding and retrieval workloads.
+- **Complexity:** Medium
+
+### 5. Add Extended Conversion Backends Intentionally
 
 - **Problem:** Optional dependencies support PDF, DOCX, browser, and document-conversion ambitions, but those paths are not wired into active adapters.
-- **Proposed Solution:** Either wire optional conversion backends under explicit adapters/extras or remove the unused optional capability.
+- **Proposed Solution:** Either wire optional conversion backends under explicit adapters/extras or remove the unused optional capability. Any enabled backend must have fixture coverage and an adapter path that justifies the dependency.
 - **Impact:** Converts ambiguous expansion paths into real capability or a cleaner package.
 - **Complexity:** High
 
-### 4. Add Quality Dashboards and Trend Reports
+## Phase 11: Scalability Intelligence and Test Expansion
 
-- **Problem:** Reports are per-run summaries without long-term trend tracking.
-- **Proposed Solution:** Persist timestamped run summaries and generate trend reports for document counts, validation issues, output size, duration, diagnostics, and failures.
-- **Impact:** Helps monitor ingestion quality over time.
+### 1. Add Adaptive Worker and Backpressure Policy
+
+- **Problem:** Bulk concurrency is static and there is no adaptive worker model, despite historical references to adaptive runtime behavior.
+- **Proposed Solution:** Add an optional adaptive policy that adjusts language concurrency and source runtime limits based on error rates, retry pressure, throughput, memory, and disk queue pressure. Keep static settings as the default until benchmarked.
+- **Impact:** Improves large bulk runs without sacrificing deterministic defaults.
+- **Complexity:** High
+
+### 2. Test Source Suggestion Quality
+
+- **Problem:** Source resolution has fuzzy suggestions for missing languages, but suggestion quality is not directly tested.
+- **Proposed Solution:** Add deterministic registry fixtures that verify exact, family, prefix, contains, and fuzzy suggestion ordering across DevDocs, MDN, and Dash-like catalogs.
+- **Impact:** Prevents CLI and GUI resolution regressions.
+- **Complexity:** Low
+
+### 3. Extend Live Probes Toward Extraction Sanity
+
+- **Problem:** Live endpoint probes validate representative link health but intentionally do not validate extraction or conversion correctness.
+- **Proposed Solution:** Add a second opt-in live tier that fetches one bounded source document per source family and runs source-specific parsing/conversion without compiling a full language. Keep it separate from the default live endpoint suite.
+- **Impact:** Catches upstream shape changes earlier while preserving deterministic routine tests.
 - **Complexity:** Medium

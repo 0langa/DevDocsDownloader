@@ -17,7 +17,9 @@ from .models import (
     LanguageRunState,
     ResumeBoundary,
     RunSummary,
+    RuntimeTelemetrySnapshot,
     SourceRunDiagnostics,
+    SourceWarningRecord,
     TopicStats,
 )
 from .progress import CrawlProgressTracker
@@ -29,6 +31,7 @@ from .sources.base import (
     Document,
     DocumentationSource,
     DocumentEvent,
+    DocumentWarningEvent,
     LanguageCatalog,
     SkippedEvent,
     SourceStatsEvent,
@@ -210,6 +213,9 @@ class DocumentationPipeline:
                 output_path=report.output_path,
                 total_documents=total_documents,
                 topics=topics,
+                source=report.source,
+                source_slug=report.source_slug,
+                source_diagnostics=state.source_diagnostics,
             )
         report.duration_seconds = time.perf_counter() - started
         return report
@@ -289,9 +295,13 @@ class DocumentationPipeline:
                     output_path=consolidated_path,
                     total_documents=prior.total_documents,
                     topics=prior.topics,
+                    source=source.name,
+                    source_slug=catalog.slug,
+                    source_diagnostics=prior.source_diagnostics,
                 )
                 report.total_documents = prior.total_documents
                 report.topics = prior.topics
+                report.runtime_telemetry = _telemetry_snapshot(self.runtime)
             report.duration_seconds = time.perf_counter() - started
             return report
 
@@ -299,6 +309,7 @@ class DocumentationPipeline:
             await progress_tracker.register_language(language_slug, catalog.display_name)
 
         diagnostics = SourceRunDiagnostics()
+        document_warnings: list[SourceWarningRecord] = []
         include_topic_set = _normalize_topic_filter(include_topics)
         exclude_topic_set = _normalize_topic_filter(exclude_topics)
 
@@ -341,6 +352,7 @@ class DocumentationPipeline:
                     ),
                     diagnostics=diagnostics,
                     warnings=report.warnings,
+                    document_warnings=document_warnings,
                 ),
                 diagnostics=diagnostics,
                 include_topics=include_topic_set,
@@ -366,6 +378,7 @@ class DocumentationPipeline:
         except Exception as exc:
             LOGGER.exception("Failed to compile %s from %s", catalog.display_name, source.name)
             report.failures.append(f"{type(exc).__name__}: {exc}")
+            report.document_warnings = document_warnings
             checkpoint_store.record_failure(
                 checkpoint,
                 phase=checkpoint.phase,
@@ -374,12 +387,15 @@ class DocumentationPipeline:
             )
             if progress_tracker is not None:
                 await progress_tracker.on_language_complete(language_slug, report)
+            report.runtime_telemetry = _telemetry_snapshot(self.runtime)
             report.duration_seconds = time.perf_counter() - started
             return report
 
         report.output_path = compiled.output_path
         report.total_documents = compiled.total_documents
         report.source_diagnostics = diagnostics
+        report.document_warnings = document_warnings
+        report.runtime_telemetry = _telemetry_snapshot(self.runtime)
         report.topics = compiled.topics
         try:
             checkpoint_store.update_phase(checkpoint, "validating", output_path=str(compiled.output_path))
@@ -388,6 +404,9 @@ class DocumentationPipeline:
                 output_path=compiled.output_path,
                 total_documents=compiled.total_documents,
                 topics=compiled.topics,
+                source=source.name,
+                source_slug=catalog.slug,
+                source_diagnostics=diagnostics,
             )
 
             state_store.save(
@@ -402,6 +421,8 @@ class DocumentationPipeline:
                     total_documents=compiled.total_documents,
                     source_diagnostics=diagnostics,
                     output_path=str(compiled.output_path),
+                    document_warnings=document_warnings,
+                    runtime_telemetry=report.runtime_telemetry,
                     completed=True,
                 )
             )
@@ -416,6 +437,7 @@ class DocumentationPipeline:
             )
             if progress_tracker is not None:
                 await progress_tracker.on_language_complete(language_slug, report)
+            report.runtime_telemetry = _telemetry_snapshot(self.runtime)
             report.duration_seconds = time.perf_counter() - started
             return report
 
@@ -459,6 +481,18 @@ def _validated_resume(
     return artifacts, ResumeBoundary(
         document_inventory_position=checkpoint.document_inventory_position,
         emitted_document_count=checkpoint.emitted_document_count,
+    )
+
+
+def _telemetry_snapshot(runtime: SourceRuntime) -> RuntimeTelemetrySnapshot:
+    telemetry = runtime.telemetry
+    return RuntimeTelemetrySnapshot(
+        requests=telemetry.requests,
+        retries=telemetry.retries,
+        bytes_observed=telemetry.bytes_observed,
+        failures=telemetry.failures,
+        cache_hits=telemetry.cache_hits,
+        cache_refreshes=telemetry.cache_refreshes,
     )
 
 
@@ -514,6 +548,7 @@ async def _documents_from_events(
     *,
     diagnostics: SourceRunDiagnostics,
     warnings: list[str],
+    document_warnings: list[SourceWarningRecord] | None = None,
 ) -> AsyncIterator[Document]:
     async for event in events:
         if isinstance(event, DocumentEvent):
@@ -523,6 +558,20 @@ async def _documents_from_events(
             if event.source_url:
                 detail = f"{detail} ({event.source_url})"
             warnings.append(detail)
+        elif isinstance(event, DocumentWarningEvent):
+            record = SourceWarningRecord(
+                code=event.code,
+                message=event.message,
+                source_url=event.source_url,
+                topic=event.topic,
+                slug=event.slug,
+                title=event.title,
+                order_hint=event.order_hint,
+            )
+            if document_warnings is not None:
+                document_warnings.append(record)
+            subject = event.title or event.slug or event.source_url or "document"
+            warnings.append(f"{event.code}: {subject}: {event.message}")
         elif isinstance(event, SkippedEvent):
             diagnostics.skip(event.reason, event.count)
         elif isinstance(event, SourceStatsEvent):

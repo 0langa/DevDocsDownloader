@@ -31,12 +31,45 @@ class ValidationIssue(BaseModel):
     message: str
 
 
+class DocumentValidationResult(BaseModel):
+    language: str
+    source: str = ""
+    source_slug: str = ""
+    topic: str = ""
+    slug: str = ""
+    title: str = ""
+    document_path: Path
+    source_url: str = ""
+    issues: list[ValidationIssue] = Field(default_factory=list)
+    context: str = ""
+
+
 class ValidationResult(BaseModel):
     language: str
     output_path: Path
     score: float = 0.0
     quality_score: float = 0.0
     issues: list[ValidationIssue] = Field(default_factory=list)
+    document_results: list[DocumentValidationResult] = Field(default_factory=list)
+
+
+class SourceWarningRecord(BaseModel):
+    code: str
+    message: str
+    source_url: str = ""
+    topic: str = ""
+    slug: str = ""
+    title: str = ""
+    order_hint: int | None = None
+
+
+class RuntimeTelemetrySnapshot(BaseModel):
+    requests: int = 0
+    retries: int = 0
+    bytes_observed: int = 0
+    failures: int = 0
+    cache_hits: int = 0
+    cache_refreshes: int = 0
 
 
 class LanguageRunState(BaseModel):
@@ -54,6 +87,8 @@ class LanguageRunState(BaseModel):
     output_path: str | None = None
     completed: bool = False
     warnings: list[str] = Field(default_factory=list)
+    document_warnings: list[SourceWarningRecord] = Field(default_factory=list)
+    runtime_telemetry: RuntimeTelemetrySnapshot | None = None
     failures: list[str] = Field(default_factory=list)
 
 
@@ -136,6 +171,8 @@ class LanguageRunReport(BaseModel):
     topics: list[TopicStats] = Field(default_factory=list)
     validation: ValidationResult | None = None
     warnings: list[str] = Field(default_factory=list)
+    document_warnings: list[SourceWarningRecord] = Field(default_factory=list)
+    runtime_telemetry: RuntimeTelemetrySnapshot | None = None
     failures: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0
 

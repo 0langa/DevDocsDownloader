@@ -530,6 +530,24 @@ def validate(
     )
 
 
+@app.command(help="Launch the optional local NiceGUI operator interface.")
+def gui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface for the local GUI server."),
+    port: int = typer.Option(8080, "--port", min=1, max=65535, help="Port for the local GUI server."),
+    reload: bool = typer.Option(False, "--reload", help="Enable NiceGUI reload while developing the GUI."),
+    native: bool = typer.Option(False, "--native", help="Launch NiceGUI in native window mode when available."),
+    output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
+) -> None:
+    config = load_config(output_dir=output_dir)
+    try:
+        from .gui.app import run_gui
+
+        run_gui(config, host=host, port=port, reload=reload, native=native)
+    except RuntimeError as exc:
+        console.print(str(exc), style="red", markup=False)
+        raise typer.Exit(code=1) from exc
+
+
 @app.command(help="Create the required project directories.")
 def init() -> None:
     config = load_config()

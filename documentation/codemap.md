@@ -26,6 +26,10 @@ DevDocsDownloader/
 │   ├── services.py
 │   ├── state.py
 │   ├── validator.py
+│   ├── gui/
+│   │   ├── __init__.py
+│   │   ├── app.py
+│   │   └── state.py
 │   ├── reporting/
 │   │   ├── __init__.py
 │   │   └── writer.py
@@ -64,6 +68,8 @@ DevDocsDownloader/
 		├── test_phase5_performance.py
 		├── test_phase6_conversion_quality.py
 		├── test_phase7_output_consumption.py
+		├── test_phase8_validation_observability.py
+		├── test_phase9_gui.py
 		└── test_source_resilience.py
 ```
 
@@ -114,6 +120,7 @@ DevDocsDownloader/
 - `list_languages()`
 - `refresh_catalogs()`
 - `validate()`
+- `gui()`
 - `init()`
 
 **Calls into**
@@ -127,21 +134,63 @@ DevDocsDownloader/
 
 **Purpose**
 
-- GUI-ready service facade over pipeline and registry workflows
+- Service facade over pipeline, registry, and GUI-safe artifact inspection workflows
 
 **Key symbols**
 
 - `DocumentationService`
 - `RunLanguageRequest`
 - `BulkRunRequest`
+- `ServiceEvent`
 - `LanguageEntry`
 - `AuditPresetResult`
 - `RuntimeSnapshot`
+- `OutputBundleSummary`
+- `OutputTreeNode`
+- `OutputFileContent`
+- `ReportBundle`
+- `CheckpointSummary`
+- `CacheMetadataSummary`
 
 **Used by**
 
 - CLI
-- future local GUI or API layer
+- optional local GUI or API layer
+
+### `doc_ingest/gui/app.py`
+
+**Purpose**
+
+- Optional NiceGUI operator interface over `DocumentationService`
+
+**Key symbols**
+
+- `create_gui_app()`
+- `run_gui()`
+- `INSTALL_MESSAGE`
+
+**Notable details**
+
+- imported only by the `gui` command or GUI tests
+- exposes run, bulk, languages, presets/audit, reports, output browser, checkpoints, cache, and settings/help views
+- does not shell out to CLI commands for core operations
+
+### `doc_ingest/gui/state.py`
+
+**Purpose**
+
+- In-process GUI job queue and job state models
+
+**Key symbols**
+
+- `GuiJobQueue`
+- `GuiJobState`
+
+**Notable details**
+
+- one active job is started by default
+- records `ServiceEvent` objects emitted by service runs
+- supports queued job cancellation and clearing finished jobs
 
 ### `doc_ingest/config.py`
 
@@ -174,12 +223,15 @@ DevDocsDownloader/
 - `SourceRunDiagnostics`
 - `ValidationIssue`
 - `ValidationResult`
+- `DocumentValidationResult`
 - `LanguageRunState`
 - `DocumentCheckpoint`
 - `CheckpointFailure`
 - `LanguageRunCheckpoint`
 - `LanguageRunReport`
 - `RunSummary`
+- `SourceWarningRecord`
+- `RuntimeTelemetrySnapshot`
 - `CacheEntryMetadata`
 - `CacheDecision`
 - `CacheFreshnessPolicy`
@@ -292,11 +344,12 @@ DevDocsDownloader/
 
 **Purpose**
 
-- Structural validation of consolidated Markdown output
+- Layered validation of consolidated and per-document Markdown output
 
 **Key symbols**
 
 - `validate_output()`
+- `validate_documents()`
 
 ## Reporting package
 
@@ -308,7 +361,7 @@ DevDocsDownloader/
 
 **Purpose**
 
-- Write machine-readable and human-readable run summary artifacts
+- Write machine-readable and human-readable run summary, document validation, history, and trend artifacts
 
 **Key symbols**
 
@@ -318,6 +371,10 @@ DevDocsDownloader/
 
 - `output/reports/run_summary.json`
 - `output/reports/run_summary.md`
+- `output/reports/validation_documents.jsonl`
+- `output/reports/history/<timestamp>-run_summary.json`
+- `output/reports/trends.json`
+- `output/reports/trends.md`
 
 ## Sources package
 
@@ -335,6 +392,9 @@ DevDocsDownloader/
 
 - `LanguageCatalog`
 - `Document`
+- `DocumentEvent`
+- `WarningEvent`
+- `DocumentWarningEvent`
 - `DocumentationSource`
 
 ### `doc_ingest/sources/registry.py`
@@ -648,6 +708,16 @@ doc_ingest.cli.validate()
 	-> DocumentationPipeline.run()
 	-> _run_language(validate_only=True)
 	-> existing state load + validate_output()
+```
+
+### Path: `gui` command
+
+```text
+doc_ingest.cli.gui()
+	-> doc_ingest.gui.app.run_gui()
+	-> doc_ingest.gui.state.GuiJobQueue
+	-> DocumentationService
+	-> same pipeline/report/state/output paths as CLI
 ```
 
 ## Generated vs source files

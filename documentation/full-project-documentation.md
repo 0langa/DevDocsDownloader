@@ -39,10 +39,28 @@ The Typer application in `doc_ingest/cli.py` exposes:
 - `refresh-catalogs`
 - `validate`
 - `init`
+- `gui`
 
-The CLI now acts as a presentation adapter over `doc_ingest.services.DocumentationService` for run, bulk, list, audit, refresh, and inspection-friendly workflows. The service returns typed models and owns pipeline lifecycle cleanup, which makes it the intended integration point for a future local GUI.
+The CLI now acts as a presentation adapter over `doc_ingest.services.DocumentationService` for run, bulk, list, audit, refresh, validation-only, and inspection-friendly workflows. The service returns typed models, owns pipeline lifecycle cleanup, and accepts an optional event sink for GUI-ready phase, document, warning, validation, telemetry, and failure events.
 
 For actual ingestion work, the CLI routes into `_execute_run()` for single-language execution and into a custom async runner inside `bulk()` for multi-language execution.
+
+### 2.1.1 Local GUI operator interface
+
+`python DevDocsDownloader.py gui` launches the optional NiceGUI dashboard when the `gui` extra is installed.
+
+The GUI is local/operator-focused and calls `DocumentationService` in-process. It does not shell out to Typer commands for core workflows. Its first screen is an operational dashboard with:
+
+- single-language, validation-only, preset, bulk, and all-language run controls
+- source, mode, topic filter, cache policy, TTL, force-refresh, frontmatter, chunk, and concurrency options
+- job queue and service event log
+- language listing, preset audit, and catalog refresh controls
+- output bundle browser and Markdown preview
+- report, validation JSONL, history, and trends views
+- checkpoint listing and safe deletion
+- source cache metadata inspection
+
+All GUI file reads are routed through service methods that resolve paths under configured output, report, cache, or checkpoint roots before reading or deleting.
 
 ### 2.2 Configuration and path setup
 
@@ -400,7 +418,7 @@ This heuristic exists so compiled document content nests cleanly inside the cons
 
 ## 7. Validation and scoring
 
-`validate_output()` in `doc_ingest/validator.py` performs a shallow structural pass.
+`validate_output()` in `doc_ingest/validator.py` performs a layered pragmatic validation pass.
 
 Checks:
 
@@ -411,6 +429,8 @@ Checks:
 5. required sections exist
 6. topic list is non-empty
 7. unresolved relative links, unresolved relative images, empty link targets, HTML leftovers, malformed table rows, and definition-list artifacts are reported as warnings
+8. missing internal anchors, duplicate topic/document sections, heading-count mismatches, and source-inventory mismatches are reported as warnings
+9. generated per-document Markdown files are scanned and emitted to `output/reports/validation_documents.jsonl` when they have document-local issues
 
 Score calculation:
 
@@ -529,6 +549,13 @@ Current cache usage:
 - `cache/dash/<slug>/...`
 
 Source cache artifacts now write sidecar metadata where practical. DevDocs catalogs and datasets, Dash catalogs and docset downloads, and MDN archive metadata expose source/cache identity, URL, fetched timestamp, checksum, byte count, HTTP validators when available, policy, and forced-refresh state. Cache policy is controlled by `--cache-policy` with `use-if-present`, `ttl`, `always-refresh`, and `validate-if-possible`; `--force-refresh` overrides policy.
+
+Report writes remain backward compatible:
+
+- `run_summary.json` and `run_summary.md` are the latest report files
+- `history/<timestamp>-run_summary.json` keeps timestamped summaries
+- `validation_documents.jsonl` stores document-local validation issues
+- `trends.json` and `trends.md` summarize historical document counts, issue codes, duration, runtime telemetry, cache decisions, and failures
 
 ## 10.3 Output layout example
 
@@ -649,9 +676,10 @@ Potential additions:
 
 The compiler is another natural extension point. Possible enhancements:
 
-- chunked exports for embedding pipelines
-- source-preserving frontmatter on per-document files
-- a visual GUI over `DocumentationService` for run configuration, progress, validation, output browsing, reports, checkpoint inspection, and cache controls
+- plugin-ready source registration
+- local cross-document link rewriting
+- first-class asset inventory and optional asset copying
+- tokenizer-aware chunking as an optional alternative to character-bounded chunks
 - optional HTML/plain-text output
 - TOC depth controls
 
@@ -677,9 +705,13 @@ The benchmark and state-manifest scripts have been updated for the active runtim
 - `typer`
 - `rich`
 - `pydantic`
+- `beautifulsoup4`
+- `lxml`
+- `PyYAML`
 - optional `orjson`
+- optional `nicegui` through the `gui` extra
 
-Developer tooling lives in the `dev` extra. Support-script, extended-conversion, browser, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
+Developer tooling lives in the `dev` extra. Support-script, extended-conversion, browser, GUI, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
 
 ## 14.3 Incomplete cleanup boundaries
 

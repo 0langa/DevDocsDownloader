@@ -11,7 +11,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 VENV_DIR = REPO_ROOT / ".venv"
 DEFAULT_EXTRA = "dev"
-KNOWN_EXTRAS = {"dev", "analysis", "conversion-extended", "browser", "benchmark"}
+KNOWN_EXTRAS = {"dev", "analysis", "conversion-extended", "browser", "benchmark", "gui"}
 
 
 def run_command(command: list[str], cwd: Path | None = None) -> None:
@@ -80,6 +80,8 @@ def print_next_steps(python_path: Path, extras: list[str], *, playwright_browser
     print("[setup] Common commands:")
     print(f"  {python_path} DevDocsDownloader.py --help")
     print(f"  {python_path} DevDocsDownloader.py run python")
+    if "gui" in extras:
+        print(f"  {python_path} DevDocsDownloader.py gui")
     print(f"  {python_path} DevDocsDownloader.py validate python")
     print(f"  {python_path} DevDocsDownloader.py audit-presets")
     print(f"  {python_path} -m pytest -q")

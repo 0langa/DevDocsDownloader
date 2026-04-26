@@ -26,6 +26,10 @@ state/<language>.json
 state/checkpoints/<language>.json
 output/reports/run_summary.json
 output/reports/run_summary.md
+output/reports/validation_documents.jsonl
+output/reports/history/<timestamp>-run_summary.json
+output/reports/trends.json
+output/reports/trends.md
 ```
 
 All generated file and directory names are slug-normalized and Windows-safe. Duplicate document slugs within the same topic receive numeric suffixes, for example `std-vector.md` and `std-vector-2.md`.
@@ -117,7 +121,16 @@ Standard skip reasons currently include `filtered_mode`, `filtered_topic_include
 
 Validation results must include `score`, `quality_score`, `issues`, language, and output path. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.
 
-Current validation issue codes include structural issues such as `missing_output`, `no_documents`, `tiny_output`, `code_fence`, `missing_section`, and `no_topics`, plus conversion-quality warnings such as `relative_link`, `relative_image`, `empty_link_target`, `html_leftover`, `malformed_table`, and `definition_list_artifact`.
+Current validation issue codes include structural issues such as `missing_output`, `no_documents`, `tiny_output`, `code_fence`, `missing_section`, and `no_topics`; navigation and structure warnings such as `missing_internal_anchor`, `duplicate_topic_section`, `document_heading_count_mismatch`, `malformed_heading_hierarchy`, and `duplicate_document_heading`; source reconciliation warnings such as `topic_total_mismatch`, `source_inventory_mismatch`, and `emitted_less_than_compiled`; plus conversion-quality warnings such as `relative_link`, `relative_image`, `empty_link_target`, `html_leftover`, `malformed_table`, and `definition_list_artifact`.
+
+`validation_documents.jsonl` is an additive per-document validation report. Each line includes language/source identity, topic, slug, title, document path, source URL, issue list, and a short context string for generated documents that have document-local validation issues.
+
+Reports include additive structured fields when available:
+
+- `document_warnings`: source warning records with code, message, optional document identity, source URL, topic, slug/title, and order hint
+- `runtime_telemetry`: request count, retry count, bytes observed, source failures, cache hits, and cache refreshes
+
+`output/reports/history/` stores timestamped copies of run summaries. `trends.json` and `trends.md` summarize historical document counts, validation scores, issue counts, duration, runtime telemetry, and failures. Existing `run_summary.json` and `run_summary.md` remain the latest-report contract.
 
 ## Phase 7 Optional Outputs
 
@@ -130,3 +143,7 @@ Chunk export is optional and disabled by default. When enabled, generated chunks
 When optional outputs are enabled, `_meta.json` may include an `outputs` object describing enabled frontmatter and chunk settings. Consumers must treat `outputs` as optional.
 
 Source cache metadata is written beside source cache artifacts as `*.meta.json` where practical. Metadata records source, cache key, URL, fetched timestamp, source version when known, ETag, Last-Modified, checksum, byte count, cache policy, and whether refresh was forced.
+
+## GUI Consumption
+
+The optional NiceGUI operator interface does not introduce new persisted output files. It reads this contract through `DocumentationService` methods for output bundles, Markdown files, `_meta.json`, reports, document validation JSONL, report history, trend files, checkpoints, and cache metadata. GUI file reads must remain constrained to configured output/report/cache/state roots, and checkpoint deletion must remain limited to `state/checkpoints/*.json`.

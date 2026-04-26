@@ -94,6 +94,7 @@ class MdnContentSource:
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
         )
+        self.runtime.record_cache_decision(decision)
         refresh_requested = force_refresh or decision.should_refresh
         if not refresh_requested and self.archive_path.exists() and self._metadata_matches(area):
             return self.extracted_root
