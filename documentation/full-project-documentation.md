@@ -617,14 +617,15 @@ Despite optional extras supporting broader ambitions, the active pipeline does *
 - user-specified local HTML files
 - free-form URL crawl lists
 
-Packages like `pypdf`, `mammoth`, and `docling` are isolated in the `conversion-extended` extra because they are not wired into the active code path.
+PDF/DOCX/browser conversion dependencies are intentionally not shipped as active extras. They should return only when a real adapter path and fixture coverage justify the install cost.
 
 ## 12. Performance characteristics
 
 ## 12.1 Work decomposition
 
 - single-language runs are mostly sequential within one adapter stream
-- bulk runs add language-level parallelism only
+- bulk runs add language-level parallelism
+- static bulk concurrency is the default; adaptive bulk scheduling is opt-in and changes only when new language jobs start
 - some blocking conversions are offloaded via `asyncio.to_thread()`
 
 ## 12.2 Likely memory behavior
@@ -651,10 +652,12 @@ To add a new source:
 1. implement the `DocumentationSource` protocol
 2. emit `LanguageCatalog` entries from `list_languages()`
 3. emit normalized `Document` objects from `fetch()`
-4. register the adapter in `SourceRegistry.__init__()`
+4. expose a Python entry point in the `devdocsdownloader.sources` group, or add the adapter as a built-in source when it belongs in the package
 5. define source-preference behavior if needed
 
-Because the compiler and report layers only depend on normalized `Document` objects, the adapter boundary is the main extensibility seam.
+Plugin factories receive the source cache directory and shared `SourceRuntime`, then return a `DocumentationSource`. Built-in source names win on collisions. Failed plugin loads are reported as warnings and do not block DevDocs, MDN, or Dash.
+
+Because the compiler and report layers depend on typed adapter events and normalized `Document` objects, the adapter boundary is the main extensibility seam.
 
 ## 13.2 Improving validation
 
@@ -668,20 +671,17 @@ The validator can be expanded without changing source adapters if it continues t
 Potential additions:
 
 - heading tree validation
-- broken local-link detection
-- duplicate heading/document detection
-- source count reconciliation
+- semantic Markdown rendering checks beyond current static heuristics
+- source-specific completeness checks beyond discovered/emitted/skipped reconciliation
 
 ## 13.3 Alternative output strategies
 
 The compiler is another natural extension point. Possible enhancements:
 
-- plugin-ready source registration
-- local cross-document link rewriting
-- first-class asset inventory and optional asset copying
-- tokenizer-aware chunking as an optional alternative to character-bounded chunks
 - optional HTML/plain-text output
 - TOC depth controls
+- richer asset-producing adapters that emit local asset bytes or safe local paths
+- exact local anchors for known section-level source links
 
 ## 14. Repository inconsistencies and explicit uncertainties
 
@@ -710,12 +710,13 @@ The benchmark and state-manifest scripts have been updated for the active runtim
 - `PyYAML`
 - optional `orjson`
 - optional `nicegui` through the `gui` extra
+- optional `tiktoken` through the `tokenizer` extra
 
-Developer tooling lives in the `dev` extra. Support-script, extended-conversion, browser, GUI, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
+Developer tooling lives in the `dev` extra. Support-script, browser, GUI, tokenizer, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
 
 ## 14.3 Incomplete cleanup boundaries
 
-- source-runtime throttling is conservative and profile-based; it does not yet tune policies dynamically from live upstream feedback
+- source-runtime throttling is conservative and profile-based; adaptive bulk mode changes language scheduling rather than mutating source HTTP policy
 - benchmark corpus assets are small live-run inputs for the current benchmark runner
 
 These are not runtime blockers for the active ingestion path, but they matter for maintainability.

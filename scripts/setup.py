@@ -11,7 +11,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 VENV_DIR = REPO_ROOT / ".venv"
 DEFAULT_EXTRA = "dev"
-KNOWN_EXTRAS = {"dev", "analysis", "conversion-extended", "browser", "benchmark", "gui"}
+KNOWN_EXTRAS = {"dev", "analysis", "browser", "benchmark", "gui", "tokenizer"}
 
 
 def run_command(command: list[str], cwd: Path | None = None) -> None:
@@ -89,6 +89,10 @@ def print_next_steps(python_path: Path, extras: list[str], *, playwright_browser
     print(f"  {python_path} -m ruff format --check .")
     print(f"  {python_path} -m mypy doc_ingest")
     print("  PowerShell live probe: $env:DEVDOCS_LIVE_TESTS='1'; python -m pytest -m live -q")
+    print(
+        "  PowerShell extraction probe: "
+        "$env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\\test_live_extraction_sanity.py -q"
+    )
 
 
 def main() -> None:

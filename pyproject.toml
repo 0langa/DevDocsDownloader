@@ -27,11 +27,6 @@ dev = [
   "mypy>=1.13,<2",
 ]
 analysis = []
-conversion-extended = [
-  "docling>=2.0",
-  "mammoth>=1.9,<2",
-  "pypdf>=5,<7",
-]
 browser = [
   "playwright>=1.53,<2",
 ]
@@ -40,6 +35,9 @@ benchmark = [
 ]
 gui = [
   "nicegui>=2,<3",
+]
+tokenizer = [
+  "tiktoken>=0.7,<1",
 ]
 
 [tool.setuptools]
@@ -55,7 +53,7 @@ exclude = ["cache*", "logs*", "output*", "state*", "tmp*", "tests*", "scripts*",
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "live: opt-in live upstream endpoint probes; requires DEVDOCS_LIVE_TESTS=1",
+  "live: opt-in live upstream endpoint or extraction sanity probes; requires DEVDOCS_LIVE_TESTS=1 or DEVDOCS_LIVE_EXTRACTION_TESTS=1",
 ]
 
 [tool.ruff]

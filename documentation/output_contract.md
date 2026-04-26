@@ -11,6 +11,9 @@ output/markdown/<language>/
   _meta.json
   index.md
   <language>.md
+  assets/
+    manifest.json
+    <checksum>-<asset-name>
   chunks/
     manifest.jsonl
     <chunk>.md
@@ -129,6 +132,7 @@ Reports include additive structured fields when available:
 
 - `document_warnings`: source warning records with code, message, optional document identity, source URL, topic, slug/title, and order hint
 - `runtime_telemetry`: request count, retry count, bytes observed, source failures, cache hits, and cache refreshes
+- `adaptive_telemetry`: bulk scheduling policy, min/max/current concurrency, adjustment count, adjustment reasons, observed windows, failed language count, and retry-pressure windows
 
 `output/reports/history/` stores timestamped copies of run summaries. `trends.json` and `trends.md` summarize historical document counts, validation scores, issue counts, duration, runtime telemetry, and failures. Existing `run_summary.json` and `run_summary.md` remain the latest-report contract.
 
@@ -140,7 +144,13 @@ Per-document YAML frontmatter is optional and disabled by default. When enabled,
 
 Chunk export is optional and disabled by default. When enabled, generated chunks live under `chunks/` and `chunks/manifest.jsonl` contains one JSON object per chunk with stable chunk ID, language/source identity, topic, document slug/title, source URL, order hint, chunk index, text path, and character offsets. Chunks are character-bounded Markdown derived from per-document files, not the consolidated manual.
 
-When optional outputs are enabled, `_meta.json` may include an `outputs` object describing enabled frontmatter and chunk settings. Consumers must treat `outputs` as optional.
+Character-bounded chunks remain the default. Token-bounded chunks are optional and require the `tokenizer` extra. Token chunk manifests preserve the existing fields and add `chunk_strategy`, `token_start`, `token_end`, and `token_count`.
+
+Known same-language links may be rewritten to local generated Markdown files when the compiler has an exact match from a document source URL, normalized source URL without fragment, source slug/path, or generated path. Unknown targets keep the existing source-absolute or unchanged link policy. Links inside fenced code blocks are not rewritten.
+
+Asset inventory is optional and event-driven. When adapters emit `AssetEvent` records, the compiler writes `assets/manifest.json`. Manifest records include source URL, media type, original path, optional local output path, checksum, byte count, status, and reason. Assets with bytes or safe local paths are deduplicated by checksum and copied under `assets/`; matching Markdown image/source references are rewritten to local relative paths. Assets without local payload are recorded as references only. The compiler does not fetch arbitrary asset URLs.
+
+When optional outputs are enabled, `_meta.json` may include an `outputs` object describing enabled frontmatter, chunk settings, and asset inventory summary. Consumers must treat `outputs` as optional.
 
 Source cache metadata is written beside source cache artifacts as `*.meta.json` where practical. Metadata records source, cache key, URL, fetched timestamp, source version when known, ETag, Last-Modified, checksum, byte count, cache policy, and whether refresh was forced.
 

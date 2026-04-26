@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import load_config
-from .models import CacheFreshnessPolicy, CrawlMode
+from .models import BulkConcurrencyPolicy, CacheFreshnessPolicy, CrawlMode
 from .progress import CrawlProgressTracker
 from .runtime import SourceRuntime
 from .services import BulkRunRequest, DocumentationService, RunLanguageRequest
@@ -65,9 +65,15 @@ def _execute_run(
     chunks: bool = False,
     chunk_max_chars: int = 8_000,
     chunk_overlap_chars: int = 400,
+    chunk_strategy: str = "chars",
+    chunk_max_tokens: int = 1_000,
+    chunk_overlap_tokens: int = 100,
     cache_policy: CacheFreshnessPolicy = "use-if-present",
     cache_ttl_hours: int | None = None,
 ) -> None:
+    if chunk_strategy not in {"chars", "tokens"}:
+        console.print("[red]--chunk-strategy must be 'chars' or 'tokens'.[/red]")
+        raise typer.Exit(code=1)
     config = load_config(output_dir=output_dir)
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
 
@@ -88,6 +94,9 @@ def _execute_run(
                     emit_chunks=chunks,
                     chunk_max_chars=chunk_max_chars,
                     chunk_overlap_chars=chunk_overlap_chars,
+                    chunk_strategy=chunk_strategy,  # type: ignore[arg-type]
+                    chunk_max_tokens=chunk_max_tokens,
+                    chunk_overlap_tokens=chunk_overlap_tokens,
                     cache_policy=cache_policy,
                     cache_ttl_hours=cache_ttl_hours,
                 ),
@@ -205,6 +214,9 @@ def run(
     chunks: bool = typer.Option(False, "--chunks", help="Emit retrieval chunks and chunks/manifest.jsonl."),
     chunk_max_chars: int = typer.Option(8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk."),
     chunk_overlap_chars: int = typer.Option(400, "--chunk-overlap-chars", min=0, help="Characters of chunk overlap."),
+    chunk_strategy: str = typer.Option("chars", "--chunk-strategy", help="Chunk strategy: chars or tokens."),
+    chunk_max_tokens: int = typer.Option(1000, "--chunk-max-tokens", min=100, help="Maximum tokens per token chunk."),
+    chunk_overlap_tokens: int = typer.Option(100, "--chunk-overlap-tokens", min=0, help="Token overlap for chunks."),
     cache_policy: CacheFreshnessPolicy = typer.Option(
         "use-if-present",
         "--cache-policy",
@@ -243,6 +255,9 @@ def run(
         chunks=chunks,
         chunk_max_chars=chunk_max_chars,
         chunk_overlap_chars=chunk_overlap_chars,
+        chunk_strategy=chunk_strategy,
+        chunk_max_tokens=chunk_max_tokens,
+        chunk_overlap_tokens=chunk_overlap_tokens,
         cache_policy=cache_policy,
         cache_ttl_hours=cache_ttl_hours,
     )
@@ -281,6 +296,23 @@ def bulk(
     language_concurrency: int = typer.Option(
         3, "--language-concurrency", min=1, help="Languages to process in parallel during bulk runs."
     ),
+    concurrency_policy: BulkConcurrencyPolicy = typer.Option(
+        "static",
+        "--concurrency-policy",
+        help="Bulk concurrency policy: static or adaptive.",
+    ),
+    adaptive_min_concurrency: int = typer.Option(
+        1,
+        "--adaptive-min-concurrency",
+        min=1,
+        help="Minimum adaptive language concurrency.",
+    ),
+    adaptive_max_concurrency: int = typer.Option(
+        6,
+        "--adaptive-max-concurrency",
+        min=1,
+        help="Maximum adaptive language concurrency.",
+    ),
     include_topic: list[str] | None = typer.Option(
         None,
         "--include-topic",
@@ -302,6 +334,9 @@ def bulk(
     chunks: bool = typer.Option(False, "--chunks", help="Emit retrieval chunks and chunks/manifest.jsonl."),
     chunk_max_chars: int = typer.Option(8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk."),
     chunk_overlap_chars: int = typer.Option(400, "--chunk-overlap-chars", min=0, help="Characters of chunk overlap."),
+    chunk_strategy: str = typer.Option("chars", "--chunk-strategy", help="Chunk strategy: chars or tokens."),
+    chunk_max_tokens: int = typer.Option(1000, "--chunk-max-tokens", min=100, help="Maximum tokens per token chunk."),
+    chunk_overlap_tokens: int = typer.Option(100, "--chunk-overlap-tokens", min=0, help="Token overlap for chunks."),
     cache_policy: CacheFreshnessPolicy = typer.Option(
         "use-if-present",
         "--cache-policy",
@@ -326,9 +361,16 @@ def bulk(
     elif verbose:
         verbosity = "verbose"
 
+    if chunk_strategy not in {"chars", "tokens"}:
+        console.print("[red]--chunk-strategy must be 'chars' or 'tokens'.[/red]")
+        raise typer.Exit(code=1)
+
     target_key = target.strip().lower()
     config = load_config()
     config.language_concurrency = max(1, language_concurrency)
+    config.bulk_concurrency_policy = concurrency_policy
+    config.adaptive_min_concurrency = max(1, adaptive_min_concurrency)
+    config.adaptive_max_concurrency = max(config.adaptive_min_concurrency, adaptive_max_concurrency)
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
 
     async def _runner() -> None:
@@ -386,12 +428,18 @@ def bulk(
                     mode=mode,
                     force_refresh=force_refresh,
                     language_concurrency=language_concurrency,
+                    concurrency_policy=concurrency_policy,
+                    adaptive_min_concurrency=adaptive_min_concurrency,
+                    adaptive_max_concurrency=adaptive_max_concurrency,
                     include_topics=include_topic,
                     exclude_topics=exclude_topic,
                     emit_document_frontmatter=document_frontmatter,
                     emit_chunks=chunks,
                     chunk_max_chars=chunk_max_chars,
                     chunk_overlap_chars=chunk_overlap_chars,
+                    chunk_strategy=chunk_strategy,  # type: ignore[arg-type]
+                    chunk_max_tokens=chunk_max_tokens,
+                    chunk_overlap_tokens=chunk_overlap_tokens,
                     cache_policy=cache_policy,
                     cache_ttl_hours=cache_ttl_hours,
                 ),

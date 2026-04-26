@@ -72,6 +72,8 @@ class AssetEvent:
     path: str
     source_url: str = ""
     media_type: str = ""
+    content: bytes | None = None
+    local_path: str = ""
 
 
 AdapterEvent: TypeAlias = (

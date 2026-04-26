@@ -2,12 +2,12 @@
 
 ## Current state summary
 
-The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, and a local NiceGUI operator interface over the service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
+The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, optional adaptive bulk scheduling, and a local NiceGUI operator interface over the service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
 
 In short:
 
 - **Working core:** source resolution, ingestion, active run checkpoints, compilation, validation, reporting
-- **Partially complete areas:** plugin expansion, adaptive scaling, advanced output fidelity, packaged desktop distribution
+- **Partially complete areas:** packaged desktop distribution and future source-specific semantic validation
 - **Recently stabilized areas:** benchmark harness and state manifest script now target the current package API
 
 ## What works today
@@ -103,8 +103,8 @@ The concrete remediation plan for these areas now lives in `documentation/roadma
 
 - Phase 8 now covers deeper validation, per-document validation reports, structured source warnings, runtime telemetry, and quality trend reporting.
 - Phase 9 delivered the visual GUI and operator workflows over the service layer.
-- Phase 10 covers source expansion, cross-document links, assets, tokenizer-aware chunks, and extended conversion backends.
-- Phase 11 covers adaptive scaling and test expansion.
+- Phase 10 delivered source plugins, exact local cross-document links, asset inventory, tokenizer-aware chunks, and dependency cleanup.
+- Phase 11 delivered opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, and v0.1.0 release readiness docs.
 
 ### Validation quality
 
@@ -140,13 +140,13 @@ The pipeline records per-language active checkpoints with phase, emitted documen
 
 - language-level concurrency exists through `run_many()` and `AppConfig.language_concurrency`
 - `SourceRuntime` applies per-profile source throttling and retry helpers
-- there is no adaptive worker model in the active pipeline, despite older scripts referring to one
+- adaptive bulk scheduling is available as an opt-in policy; static concurrency remains the default
 
 ### Dependency management
 
 - `pyproject.toml` is the canonical dependency manifest
 - runtime dependencies are limited to active package imports
-- developer, analysis, conversion, browser, and benchmark packages are split into optional extras
+- developer, analysis, browser, GUI, tokenizer, and benchmark packages are split into optional extras
 - `requirements.txt` and `source-documents/requirements.txt` are compatibility shims, not independent manifests
 
 ## Missing features relative to likely next needs
@@ -155,21 +155,18 @@ These are not promised by the current code, but they are the most obvious gaps f
 
 ### Remaining operational gaps
 
-- no pluggable source system beyond editing Python code
 - no packaged desktop app or hosted multi-user mode; the GUI is local/operator-focused
 
 ### Missing output features
 
-- no cross-document link rewriting
-- no deduplicated shared assets or image handling
-- chunking is character-bounded, not tokenizer-aware
+- no source-section-level local anchor inference for cross-document links
+- asset handling is inventory-first and depends on adapters emitting bytes or safe local paths
 - no semantic per-document validation reports beyond static issue records
 - no optional alternate output formats beyond Markdown and metadata JSON
 
 ### Remaining test coverage gaps
 
-- no tests for suggestion quality in source resolution
-- live endpoint probes are opt-in and intentionally do not validate extraction quality
+- live endpoint and live extraction probes are opt-in and intentionally bounded
 
 ## Known bugs, mismatches, and fragile areas
 
@@ -257,24 +254,16 @@ These observations come from code inspection; the benchmark harness now supports
 
 ### Highest priority
 
-1. **Improve source expansion and output fidelity**
-	- support plugin-ready source registration
-	- rewrite known cross-document links to local bundle paths
-	- add a first-class asset inventory for diagrams and images
-
-2. **Extend downstream export quality**
-	- add tokenizer-aware chunking as an optional mode
-	- decide which extended conversion backends are real product features
-
-### Medium priority
-
-3. **Refine GUI operations**
+1. **Refine GUI operations**
 	- add cooperative cancellation for active runs when the pipeline exposes safe cancellation boundaries
 	- consider packaged local desktop distribution if operator adoption justifies it
 
-4. **Add adaptive scaling and source-resolution test expansion**
-	- benchmark adaptive worker/backpressure policies before changing defaults
-	- add deterministic source suggestion quality tests
+### Medium priority
+
+2. **Improve optional output fidelity further**
+	- add source-section-level local anchors only when exact targets are known
+	- add asset-producing source adapters where upstream formats expose reliable local assets
+	- reintroduce PDF/DOCX/browser conversion only when a real adapter path and fixture coverage justify the dependency
 
 ## Uncertainties that should be kept explicit
 

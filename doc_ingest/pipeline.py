@@ -7,9 +7,12 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import cast
 
+from .adaptive import AdaptiveBulkController, AdaptiveBulkPolicy, static_bulk_telemetry
 from .compiler import CompilationDocument, artifact_checkpoint, compile_from_stream
 from .config import AppConfig
 from .models import (
+    AdaptiveBulkTelemetry,
+    BulkConcurrencyPolicy,
     CrawlMode,
     DocumentArtifactCheckpoint,
     LanguageRunCheckpoint,
@@ -69,32 +72,89 @@ class DocumentationPipeline:
         progress_tracker: CrawlProgressTracker | None = None,
         validate_only: bool = False,
         language_concurrency: int | None = None,
+        concurrency_policy: BulkConcurrencyPolicy | None = None,
+        adaptive_min_concurrency: int | None = None,
+        adaptive_max_concurrency: int | None = None,
         include_topics: list[str] | None = None,
         exclude_topics: list[str] | None = None,
     ) -> RunSummary:
         summary = RunSummary()
         concurrency = max(1, language_concurrency or self.config.language_concurrency)
-        semaphore = asyncio.Semaphore(concurrency)
+        policy = concurrency_policy or self.config.bulk_concurrency_policy
 
         async def _run_one(name: str) -> RunSummary:
-            async with semaphore:
-                return await self.run(
-                    language_name=name,
-                    mode=mode,
-                    source_name=source_name,
-                    force_refresh=force_refresh,
-                    progress_tracker=progress_tracker,
-                    validate_only=validate_only,
-                    include_topics=include_topics,
-                    exclude_topics=exclude_topics,
-                    _write_reports=False,
-                )
+            return await self.run(
+                language_name=name,
+                mode=mode,
+                source_name=source_name,
+                force_refresh=force_refresh,
+                progress_tracker=progress_tracker,
+                validate_only=validate_only,
+                include_topics=include_topics,
+                exclude_topics=exclude_topics,
+                _write_reports=False,
+            )
 
-        partials = await asyncio.gather(*(_run_one(name) for name in language_names))
+        if policy == "adaptive":
+            partials, telemetry = await self._run_many_adaptive(
+                language_names=language_names,
+                run_one=_run_one,
+                initial_concurrency=concurrency,
+                min_concurrency=adaptive_min_concurrency or self.config.adaptive_min_concurrency,
+                max_concurrency=adaptive_max_concurrency or self.config.adaptive_max_concurrency,
+            )
+            summary.adaptive_telemetry = telemetry
+        else:
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def _run_one_static(name: str) -> RunSummary:
+                async with semaphore:
+                    return await _run_one(name)
+
+            partials = await asyncio.gather(*(_run_one_static(name) for name in language_names))
+            summary.adaptive_telemetry = static_bulk_telemetry(concurrency=concurrency)
+
         for partial in partials:
             summary.reports.extend(partial.reports)
         write_reports(summary, self.config.paths.reports_dir)
         return summary
+
+    async def _run_many_adaptive(
+        self,
+        *,
+        language_names: list[str],
+        run_one,
+        initial_concurrency: int,
+        min_concurrency: int,
+        max_concurrency: int,
+    ) -> tuple[list[RunSummary], AdaptiveBulkTelemetry]:
+        controller = AdaptiveBulkController(
+            AdaptiveBulkPolicy(
+                initial_concurrency=initial_concurrency,
+                min_concurrency=min_concurrency,
+                max_concurrency=max(max_concurrency, initial_concurrency),
+            )
+        )
+        results: list[RunSummary | None] = [None] * len(language_names)
+        active: dict[asyncio.Task[RunSummary], int] = {}
+        next_index = 0
+
+        while next_index < len(language_names) or active:
+            while next_index < len(language_names) and len(active) < controller.current_concurrency:
+                task = asyncio.create_task(run_one(language_names[next_index]))
+                active[task] = next_index
+                next_index += 1
+            if not active:
+                continue
+            done, _pending = await asyncio.wait(active.keys(), return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                index = active.pop(task)
+                partial = await task
+                results[index] = partial
+                for report in partial.reports:
+                    controller.observe(report)
+
+        return [item for item in results if item is not None], controller.snapshot()
 
     async def run(
         self,
@@ -310,6 +370,7 @@ class DocumentationPipeline:
 
         diagnostics = SourceRunDiagnostics()
         document_warnings: list[SourceWarningRecord] = []
+        asset_events: list[AssetEvent] = []
         include_topic_set = _normalize_topic_filter(include_topics)
         exclude_topic_set = _normalize_topic_filter(exclude_topics)
 
@@ -353,6 +414,7 @@ class DocumentationPipeline:
                     diagnostics=diagnostics,
                     warnings=report.warnings,
                     document_warnings=document_warnings,
+                    assets=asset_events,
                 ),
                 diagnostics=diagnostics,
                 include_topics=include_topic_set,
@@ -374,6 +436,10 @@ class DocumentationPipeline:
                 emit_chunks=self.config.emit_chunks,
                 chunk_max_chars=self.config.chunk_max_chars,
                 chunk_overlap_chars=self.config.chunk_overlap_chars,
+                chunk_strategy=self.config.chunk_strategy,
+                chunk_max_tokens=self.config.chunk_max_tokens,
+                chunk_overlap_tokens=self.config.chunk_overlap_tokens,
+                assets=asset_events,
             )
         except Exception as exc:
             LOGGER.exception("Failed to compile %s from %s", catalog.display_name, source.name)
@@ -396,6 +462,7 @@ class DocumentationPipeline:
         report.source_diagnostics = diagnostics
         report.document_warnings = document_warnings
         report.runtime_telemetry = _telemetry_snapshot(self.runtime)
+        report.asset_inventory = compiled.asset_inventory
         report.topics = compiled.topics
         try:
             checkpoint_store.update_phase(checkpoint, "validating", output_path=str(compiled.output_path))
@@ -423,6 +490,7 @@ class DocumentationPipeline:
                     output_path=str(compiled.output_path),
                     document_warnings=document_warnings,
                     runtime_telemetry=report.runtime_telemetry,
+                    asset_inventory=report.asset_inventory,
                     completed=True,
                 )
             )
@@ -549,6 +617,7 @@ async def _documents_from_events(
     diagnostics: SourceRunDiagnostics,
     warnings: list[str],
     document_warnings: list[SourceWarningRecord] | None = None,
+    assets: list[AssetEvent] | None = None,
 ) -> AsyncIterator[Document]:
     async for event in events:
         if isinstance(event, DocumentEvent):
@@ -578,6 +647,8 @@ async def _documents_from_events(
             diagnostics.discovered += event.discovered
             diagnostics.emitted += event.emitted
         elif isinstance(event, AssetEvent):
+            if assets is not None:
+                assets.append(event)
             diagnostics.skip("asset_event", 1)
 
 

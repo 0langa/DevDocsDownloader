@@ -21,11 +21,17 @@ def test_cli_help_exposes_scripted_contract_options() -> None:
     assert "--include-topic" in run_result.output
     assert "--exclude-topic" in run_result.output
     assert "--output-dir" in run_result.output
+    assert "--chunk-strategy" in run_result.output
+    assert "Maximum tokens" in run_result.output
 
     assert bulk_result.exit_code == 0
     assert "--language-conc" in bulk_result.output
+    assert "static|adaptiv" in bulk_result.output
+    assert "Minimum adaptive" in bulk_result.output
     assert "--include-topic" in bulk_result.output
     assert "--exclude-topic" in bulk_result.output
+    assert "--chunk-strategy" in bulk_result.output
+    assert "Maximum tokens" in bulk_result.output
     assert "--chunks" in run_result.output
     assert "--cache-policy" in run_result.output
 
@@ -99,6 +105,12 @@ def test_cli_bulk_wires_topic_filters(monkeypatch, tmp_path: Path) -> None:
             "Internal",
             "--language-concurrency",
             "2",
+            "--concurrency-policy",
+            "adaptive",
+            "--adaptive-min-concurrency",
+            "1",
+            "--adaptive-max-concurrency",
+            "4",
             "--silent",
         ],
     )
@@ -107,6 +119,8 @@ def test_cli_bulk_wires_topic_filters(monkeypatch, tmp_path: Path) -> None:
     assert captured["include_topics"] == ["Reference"]
     assert captured["exclude_topics"] == ["Internal"]
     assert captured["language_concurrency"] == 2
+    assert captured["concurrency_policy"] == "adaptive"
+    assert captured["adaptive_max_concurrency"] == 4
 
 
 def test_cli_validate_output_dir_uses_local_output_and_writes_reports(monkeypatch, tmp_path: Path) -> None:

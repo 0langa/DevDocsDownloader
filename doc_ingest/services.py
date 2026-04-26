@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .config import AppConfig
 from .models import (
+    BulkConcurrencyPolicy,
     CacheEntryMetadata,
     CacheFreshnessPolicy,
     CrawlMode,
@@ -53,6 +54,9 @@ class RunLanguageRequest(BaseModel):
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
+    chunk_strategy: Literal["chars", "tokens"] = "chars"
+    chunk_max_tokens: int = 1_000
+    chunk_overlap_tokens: int = 100
     cache_policy: CacheFreshnessPolicy = "use-if-present"
     cache_ttl_hours: int | None = None
 
@@ -62,12 +66,18 @@ class BulkRunRequest(BaseModel):
     mode: CrawlMode = "important"
     force_refresh: bool = False
     language_concurrency: int = 3
+    concurrency_policy: BulkConcurrencyPolicy = "static"
+    adaptive_min_concurrency: int = 1
+    adaptive_max_concurrency: int = 6
     include_topics: list[str] | None = None
     exclude_topics: list[str] | None = None
     emit_document_frontmatter: bool = False
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
+    chunk_strategy: Literal["chars", "tokens"] = "chars"
+    chunk_max_tokens: int = 1_000
+    chunk_overlap_tokens: int = 100
     cache_policy: CacheFreshnessPolicy = "use-if-present"
     cache_ttl_hours: int | None = None
 
@@ -215,6 +225,11 @@ class DocumentationService:
     ) -> RunSummary:
         self._apply_output_options(request)
         self.config.language_concurrency = max(1, request.language_concurrency)
+        self.config.bulk_concurrency_policy = request.concurrency_policy
+        self.config.adaptive_min_concurrency = max(1, request.adaptive_min_concurrency)
+        self.config.adaptive_max_concurrency = max(
+            self.config.adaptive_min_concurrency, request.adaptive_max_concurrency
+        )
         await _emit(event_sink, ServiceEvent(event_type="phase_change", phase="bulk_started"))
         pipeline = DocumentationPipeline(self.config)
         try:
@@ -224,6 +239,9 @@ class DocumentationService:
                 force_refresh=request.force_refresh,
                 progress_tracker=progress_tracker,
                 language_concurrency=request.language_concurrency,
+                concurrency_policy=request.concurrency_policy,
+                adaptive_min_concurrency=request.adaptive_min_concurrency,
+                adaptive_max_concurrency=request.adaptive_max_concurrency,
                 include_topics=request.include_topics,
                 exclude_topics=request.exclude_topics,
             )
@@ -472,6 +490,9 @@ class DocumentationService:
         self.config.emit_chunks = request.emit_chunks
         self.config.chunk_max_chars = request.chunk_max_chars
         self.config.chunk_overlap_chars = request.chunk_overlap_chars
+        self.config.chunk_strategy = request.chunk_strategy
+        self.config.chunk_max_tokens = request.chunk_max_tokens
+        self.config.chunk_overlap_tokens = request.chunk_overlap_tokens
         self.config.cache_policy = request.cache_policy
         self.config.cache_ttl_hours = request.cache_ttl_hours
 

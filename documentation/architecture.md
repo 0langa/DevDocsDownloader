@@ -112,7 +112,7 @@ The optional `gui` command launches the local NiceGUI operator interface when th
 - `state/checkpoints/`
 - `tmp/`
 
-The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. There is no settings file or runtime plugin system in the current code.
+The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, tokenizer chunk settings, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. Source plugins are discovered from installed Python entry points in the `devdocsdownloader.sources` group; built-in sources are registered first.
 
 ### 3. Source resolution layer
 
@@ -461,6 +461,7 @@ doc_ingest.sources.registry
 	-> doc_ingest.sources.devdocs
 	-> doc_ingest.sources.mdn
 	-> doc_ingest.sources.dash
+	-> installed devdocsdownloader.sources entry points
 
 doc_ingest.compiler
 	-> doc_ingest.utils.filesystem
@@ -481,7 +482,7 @@ doc_ingest.compiler
 - `ruff` — lint and format check in the `dev` extra
 - `mypy` — pragmatic type-checking gate in the `dev` extra
 - `nicegui` — optional local operator GUI in the `gui` extra
-- `docling`, `mammoth`, and `pypdf` — future extended conversion dependencies in the `conversion-extended` extra
+- `tiktoken` — optional tokenizer-aware chunking in the `tokenizer` extra
 - `playwright` — optional browser package in the `browser` extra
 - `psutil` — benchmark support in the `benchmark` extra
 
@@ -499,6 +500,7 @@ doc_ingest.compiler
 ### Concurrency limits
 
 - language-level concurrency is configurable through `AppConfig.language_concurrency`
+- bulk runs default to static language concurrency; opt-in adaptive mode adjusts new language starts from recent failures, retry pressure, and optional local resource pressure
 - `SourceRuntime` applies per-profile semaphores and minimum request spacing around shared HTTP clients
 - generated Markdown uses balanced atomic writes by default; state, checkpoints, reports, and cache/archive payloads retain strict fsync-backed writes
 - source cache artifacts write `*.meta.json` sidecars where practical
@@ -525,8 +527,10 @@ The validator is intended as a quick sanity pass, not a correctness proof. It is
 - `DocumentationService` exposes typed request/response models for CLI and GUI workflows. The GUI calls this service layer directly instead of shelling out to Typer.
 - `DocumentationService` accepts an optional event sink for phase, document, warning, validation, telemetry, and failure events.
 - GUI-safe service readers expose output bundles, report artifacts, checkpoints, and cache metadata with strict root-bound path resolution.
+- `SourceRegistry` loads built-in DevDocs, MDN, and Dash adapters first, then discovers optional plugin adapters through Python entry points. Plugin load failures and duplicate built-in names are warnings, not hard failures.
 - `SourceRuntime` owns retry policy, telemetry, and conservative source-profile throttling.
 - Source adapters expose typed events through a compatibility-first event stream while retaining document-fetch compatibility.
 - Compilation is split into planning, pure rendering, and writing behind the existing public compile API.
+- The compiler builds an exact same-language target map for local cross-document links, writes optional asset inventories from adapter events, and supports optional token-bounded chunks when `tiktoken` is installed.
 - Compilation can preload checkpointed artifact manifests, then append newly emitted documents after a resume boundary.
 - Historical crawler path-analysis code is archived under `documentation/archive/`; the active product is the curated source-adapter ingester.

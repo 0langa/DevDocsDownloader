@@ -9,9 +9,10 @@ from pathlib import Path
 
 import httpx
 
+from .conversion import DASH_PROFILE, DEVDOCS_PROFILE, convert_html_to_markdown, rewrite_markdown_links
 from .sources.dash import FEED_BASE
 from .sources.devdocs import DOCS_INDEX_URL, DOCUMENTS_BASE
-from .sources.mdn import AREAS
+from .sources.mdn import AREAS, _parse_frontmatter
 
 DEFAULT_PROBE_BYTES = 4096
 DEFAULT_TIMEOUT_SECONDS = 20.0
@@ -46,6 +47,35 @@ async def probe_live_endpoints(
         headers={"User-Agent": "Mozilla/5.0 (compatible; DocIngestBot/1.0)"},
     ) as client:
         probes = await _build_probes(client=client, dash_seed_path=dash_seed_path)
+        if limit is not None:
+            probes = probes[: max(0, limit)]
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def run_probe(probe: ProbeCallable) -> LiveProbeResult:
+            async with semaphore:
+                return await probe(client)
+
+        return await asyncio.gather(*(run_probe(probe) for probe in probes))
+
+
+async def probe_live_extraction_sanity(
+    *,
+    concurrency: int = 3,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    limit: int | None = None,
+    dash_seed_path: Path | None = None,
+) -> list[LiveProbeResult]:
+    timeout = httpx.Timeout(timeout_seconds)
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; DocIngestBot/1.0)"},
+    ) as client:
+        probes: list[ProbeCallable] = [
+            _probe_devdocs_extraction,
+            _probe_mdn_extraction,
+            partial(_probe_dash_extraction, dash_seed_path=dash_seed_path),
+        ]
         if limit is not None:
             probes = probes[: max(0, limit)]
         semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -141,6 +171,108 @@ async def _probe_dash(client: httpx.AsyncClient, language: str, slug: str) -> Li
             message=f"GET succeeded; HEAD returned {head_status}",
         )
     return result
+
+
+async def _probe_devdocs_extraction(client: httpx.AsyncClient) -> LiveProbeResult:
+    source = "devdocs"
+    url = DOCS_INDEX_URL
+    downloaded = 0
+    try:
+        catalog_response = await client.get(DOCS_INDEX_URL)
+        downloaded += len(catalog_response.content)
+        catalog_response.raise_for_status()
+        entries = catalog_response.json()
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("DevDocs catalog did not return entries")
+        selected = next((entry for entry in entries if str(entry.get("slug") or "").startswith("python")), entries[0])
+        slug = str(selected.get("slug") or selected.get("name") or "").strip()
+        language = str(selected.get("name") or slug)
+        if not slug:
+            raise ValueError("DevDocs catalog entry had no slug")
+        url = f"{DOCUMENTS_BASE}/{slug}/db.json"
+        response = await client.get(url)
+        downloaded += len(response.content)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("DevDocs db.json was not an object")
+        html = next((value for value in payload.values() if isinstance(value, str) and value.strip()), "")
+        if not html:
+            raise ValueError("DevDocs db.json contained no HTML document bodies")
+        markdown = convert_html_to_markdown(html, base_url=f"https://devdocs.io/{slug}/", profile=DEVDOCS_PROFILE)
+        if len(markdown.strip()) < 20:
+            raise ValueError("DevDocs conversion produced tiny Markdown")
+        return LiveProbeResult(source, language, slug, url, response.status_code, downloaded, True, "conversion ok")
+    except Exception as exc:
+        return LiveProbeResult(source, "DevDocs", "", url, None, downloaded, False, f"{type(exc).__name__}: {exc}")
+
+
+async def _probe_mdn_extraction(client: httpx.AsyncClient) -> LiveProbeResult:
+    source = "mdn"
+    slug = "html"
+    display, area = AREAS[slug]
+    url = f"{MDN_RAW_BASE}/{area}/index.md"
+    downloaded = 0
+    try:
+        response = await client.get(url)
+        downloaded = len(response.content)
+        response.raise_for_status()
+        text = response.text
+        metadata, body, warning = _parse_frontmatter(text)
+        if warning:
+            raise ValueError(warning)
+        title = str(metadata.get("title") or "").strip()
+        if not title:
+            raise ValueError("MDN frontmatter title missing")
+        markdown = rewrite_markdown_links(body.strip(), base_url=f"https://developer.mozilla.org/en-US/docs/{area}")
+        if len(markdown.strip()) < 20:
+            raise ValueError("MDN body produced tiny Markdown")
+        return LiveProbeResult(source, display, slug, url, response.status_code, downloaded, True, "frontmatter ok")
+    except Exception as exc:
+        return LiveProbeResult(source, display, slug, url, None, downloaded, False, f"{type(exc).__name__}: {exc}")
+
+
+async def _probe_dash_extraction(client: httpx.AsyncClient, *, dash_seed_path: Path | None = None) -> LiveProbeResult:
+    source = "dash"
+    entry = next(iter(_load_dash_seed(dash_seed_path)), {"slug": "Swift", "display_name": "Swift"})
+    slug = str(entry.get("slug") or "Swift")
+    language = str(entry.get("display_name") or slug)
+    url = f"{FEED_BASE}/{slug}.tgz"
+    archive_probe = await _probe_capped_get(
+        client,
+        source=source,
+        language=language,
+        source_slug=slug,
+        url=url,
+        require_gzip=True,
+    )
+    if not archive_probe.ok:
+        return archive_probe
+    html = """
+    <html><body><nav>Noise</nav><main><h1>Dash Probe</h1><p>Content</p><pre><code>print(1)</code></pre></main></body></html>
+    """
+    markdown = convert_html_to_markdown(html, base_url=f"dash://{slug}/index.html", profile=DASH_PROFILE)
+    if "Dash Probe" not in markdown or "print(1)" not in markdown:
+        return LiveProbeResult(
+            source,
+            language,
+            slug,
+            url,
+            archive_probe.status_code,
+            archive_probe.downloaded_bytes,
+            False,
+            "Dash fixture conversion failed",
+        )
+    return LiveProbeResult(
+        source,
+        language,
+        slug,
+        url,
+        archive_probe.status_code,
+        archive_probe.downloaded_bytes,
+        True,
+        "archive shape and fixture conversion ok",
+    )
 
 
 async def _probe_capped_get(

@@ -20,6 +20,23 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
     _write_document_validation(summary, reports_dir)
 
     lines = ["# Documentation Ingestion Report", ""]
+    if summary.adaptive_telemetry is not None:
+        telemetry = summary.adaptive_telemetry
+        lines.extend(
+            [
+                "## Bulk Concurrency",
+                f"- Policy: {telemetry.policy}",
+                f"- Current concurrency: {telemetry.current_concurrency}",
+                f"- Min concurrency: {telemetry.min_concurrency}",
+                f"- Max concurrency: {telemetry.max_concurrency}",
+                f"- Adjustments: {telemetry.adjustment_count}",
+            ]
+        )
+        if telemetry.adjustment_reasons:
+            lines.append("- Adjustment reasons:")
+            for reason in telemetry.adjustment_reasons:
+                lines.append(f"  - {reason}")
+        lines.append("")
     for report in summary.reports:
         lines.extend(
             [
@@ -48,6 +65,12 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
             lines.append(f"  - Failures: {report.runtime_telemetry.failures}")
             lines.append(f"  - Cache hits: {report.runtime_telemetry.cache_hits}")
             lines.append(f"  - Cache refreshes: {report.runtime_telemetry.cache_refreshes}")
+        if report.asset_inventory is not None:
+            lines.append("- Asset inventory:")
+            lines.append(f"  - Total: {report.asset_inventory.total}")
+            lines.append(f"  - Copied: {report.asset_inventory.copied}")
+            lines.append(f"  - Referenced: {report.asset_inventory.referenced}")
+            lines.append(f"  - Skipped: {report.asset_inventory.skipped}")
         if report.source_diagnostics is not None:
             lines.append("- Source diagnostics:")
             lines.append(f"  - Discovered: {report.source_diagnostics.discovered}")
@@ -154,6 +177,12 @@ def _write_trends(reports_dir: Path) -> None:
             telemetry: dict[str, Any] = raw_telemetry if isinstance(raw_telemetry, dict) else {}
             for key in item["runtime"]:
                 item["runtime"][key] += int(telemetry.get(key) or 0)
+            raw_assets = report.get("asset_inventory")
+            assets: dict[str, Any] = raw_assets if isinstance(raw_assets, dict) else {}
+            if assets:
+                item.setdefault("assets", {"total": 0, "copied": 0, "referenced": 0, "skipped": 0})
+                for key in item["assets"]:
+                    item["assets"][key] += int(assets.get(key) or 0)
 
     trend["languages"] = {
         language: {

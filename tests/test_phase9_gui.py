@@ -12,7 +12,7 @@ import doc_ingest.cli as cli
 from doc_ingest.config import load_config
 from doc_ingest.gui.state import GuiJobQueue
 from doc_ingest.models import CacheEntryMetadata, LanguageRunCheckpoint, RunSummary
-from doc_ingest.services import DocumentationService, RunLanguageRequest, ServiceEvent
+from doc_ingest.services import BulkRunRequest, DocumentationService, RunLanguageRequest, ServiceEvent
 from doc_ingest.utils.filesystem import write_json, write_text
 
 runner = CliRunner()
@@ -133,6 +133,33 @@ def test_gui_job_queue_transitions_and_events() -> None:
             "validation_completed",
         ]
         assert state.summary["reports"] == []
+
+    asyncio.run(scenario())
+
+
+def test_gui_job_queue_bulk_preserves_adaptive_request_fields() -> None:
+    captured = {}
+
+    class FakeService:
+        async def run_bulk(self, request: BulkRunRequest, *, event_sink=None) -> RunSummary:
+            captured.update(request.model_dump())
+            return RunSummary()
+
+    async def scenario() -> None:
+        queue = GuiJobQueue()
+        state = queue.submit_bulk(
+            FakeService(),  # type: ignore[arg-type]
+            BulkRunRequest(
+                languages=["Synthetic"],
+                concurrency_policy="adaptive",
+                adaptive_min_concurrency=1,
+                adaptive_max_concurrency=4,
+            ),
+        )
+        await queue.wait_idle()
+        assert state.status == "completed"
+        assert captured["concurrency_policy"] == "adaptive"
+        assert captured["adaptive_max_concurrency"] == 4
 
     asyncio.run(scenario())
 

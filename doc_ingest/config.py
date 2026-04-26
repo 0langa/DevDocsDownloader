@@ -49,11 +49,17 @@ class PathsConfig(BaseModel):
 class AppConfig(BaseModel):
     paths: PathsConfig
     language_concurrency: int = 3
+    bulk_concurrency_policy: Literal["static", "adaptive"] = "static"
+    adaptive_min_concurrency: int = 1
+    adaptive_max_concurrency: int = 6
     generated_markdown_durability: Literal["strict", "balanced"] = "balanced"
     emit_document_frontmatter: bool = False
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
+    chunk_strategy: Literal["chars", "tokens"] = "chars"
+    chunk_max_tokens: int = 1_000
+    chunk_overlap_tokens: int = 100
     cache_policy: Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"] = "use-if-present"
     cache_ttl_hours: int | None = None
 

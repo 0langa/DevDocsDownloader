@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from difflib import get_close_matches
+from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 from ..runtime import SourceRuntime
 from .base import DocumentationSource, LanguageCatalog
@@ -14,6 +16,7 @@ LOGGER = logging.getLogger("doc_ingest.sources.registry")
 
 # Names where MDN should be preferred over DevDocs/Dash.
 _MDN_PREFERRED = {"html", "css", "http", "web-apis", "webassembly"}
+ENTRY_POINT_GROUP = "devdocsdownloader.sources"
 
 
 class SourceRegistry:
@@ -30,6 +33,30 @@ class SourceRegistry:
             MdnContentSource(cache_dir=cache_dir, runtime=self.runtime),
             DashFeedSource(cache_dir=cache_dir, catalog_seed=dash_seed_path, runtime=self.runtime),
         ]
+        self._load_entry_point_sources()
+
+    def _load_entry_point_sources(self) -> None:
+        known_names = {source.name for source in self.sources}
+        try:
+            entry_points = metadata.entry_points()
+            selected = entry_points.select(group=ENTRY_POINT_GROUP)
+        except Exception as exc:
+            LOGGER.warning("Failed to inspect source plugins: %s", exc)
+            return
+        for entry_point in selected:
+            try:
+                factory = entry_point.load()
+                source = _call_source_factory(factory, cache_dir=self.cache_dir, runtime=self.runtime)
+            except Exception as exc:
+                LOGGER.warning("Failed to load source plugin %s: %s", entry_point.name, exc)
+                continue
+            if source.name in known_names:
+                LOGGER.warning(
+                    "Skipping source plugin %s because source name %s already exists", entry_point.name, source.name
+                )
+                continue
+            known_names.add(source.name)
+            self.sources.append(source)
 
     def get(self, name: str) -> DocumentationSource | None:
         for source in self.sources:
@@ -122,20 +149,62 @@ class SourceRegistry:
 
     async def suggest(self, language: str, *, limit: int = 8) -> list[tuple[str, str]]:
         catalogs = await self.catalog()
-        pool: list[tuple[str, str, str]] = []
+        needle = language.strip().lower()
+        priority = {
+            name: idx
+            for idx, name in enumerate(
+                ["mdn", "devdocs", "dash"] if needle in _MDN_PREFERRED else ["devdocs", "mdn", "dash"]
+            )
+        }
+        scored: list[tuple[tuple[int, int, str, tuple, str], str, str]] = []
+        pool: list[tuple[str, str, str, str, LanguageCatalog]] = []
         for source_name, entries in catalogs.items():
             for entry in entries:
-                pool.append((entry.display_name.lower(), source_name, entry.display_name))
+                display = entry.display_name.lower()
+                slug = entry.slug.lower()
+                family = slug.split("~", 1)[0]
+                pool.append((display, slug, family, source_name, entry))
+                bucket = _suggestion_bucket(needle=needle, display=display, slug=slug, family=family)
+                if bucket is not None:
+                    scored.append(
+                        (
+                            (
+                                bucket,
+                                priority.get(source_name, 99),
+                                entry.display_name.lower(),
+                                _version_key(entry),
+                                source_name,
+                            ),
+                            source_name,
+                            entry.display_name,
+                        )
+                    )
         names = [item[0] for item in pool]
         matches = get_close_matches(language.lower(), names, n=limit, cutoff=0.5)
+        matched_names = set(matches)
+        for display, _slug, _family, source_name, entry in pool:
+            if display in matched_names:
+                scored.append(
+                    (
+                        (
+                            4,
+                            priority.get(source_name, 99),
+                            entry.display_name.lower(),
+                            _version_key(entry),
+                            source_name,
+                        ),
+                        source_name,
+                        entry.display_name,
+                    )
+                )
         out: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
-        for match in matches:
-            for lowered, source_name, display in pool:
-                if lowered == match and (source_name, display) not in seen:
-                    out.append((source_name, display))
-                    seen.add((source_name, display))
-                    break
+        for _score, source_name, display in sorted(scored):
+            if (source_name, display) not in seen:
+                out.append((source_name, display))
+                seen.add((source_name, display))
+            if len(out) >= limit:
+                break
         return out
 
 
@@ -172,3 +241,23 @@ def _exact_match(entries: list[LanguageCatalog], needle: str) -> LanguageCatalog
         return sorted(bucket, key=_version_key, reverse=True)[0]
 
     return _best(exact) or _best(prefix) or _best(contains)
+
+
+def _suggestion_bucket(*, needle: str, display: str, slug: str, family: str) -> int | None:
+    if display == needle or slug == needle or family == needle:
+        return 0
+    if display.startswith(needle) or family.startswith(needle):
+        return 1
+    if needle in display or needle in slug:
+        return 2
+    return None
+
+
+def _call_source_factory(factory: Any, *, cache_dir: Path, runtime: SourceRuntime) -> DocumentationSource:
+    try:
+        source = factory(cache_dir=cache_dir, runtime=runtime)
+    except TypeError:
+        source = factory(cache_dir, runtime)
+    if not hasattr(source, "name"):
+        raise TypeError("Source plugin factory did not return a DocumentationSource-like object")
+    return source

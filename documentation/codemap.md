@@ -14,6 +14,7 @@ DevDocsDownloader/
 ├── doc_ingest/
 │   ├── __init__.py
 │   ├── cache.py
+│   ├── adaptive.py
 │   ├── cli.py
 │   ├── compiler.py
 │   ├── config.py
@@ -283,14 +284,17 @@ DevDocsDownloader/
 - `compile_from_stream()`
 - `render_document()`
 - `write_chunks()`
+- `write_assets()`
 - `_render_index()`
 - `_render_consolidated()`
+- `_build_link_target_map()`
 - `_normalize_markdown()`
 - `_anchor()`
 
 **Calls into**
 
 - `write_text()`
+- `write_bytes()`
 - `slugify()`
 
 ### `doc_ingest/cache.py`
@@ -305,6 +309,18 @@ DevDocsDownloader/
 - `write_cache_metadata()`
 - `write_cache_metadata_for_bytes()`
 - `read_cache_metadata()`
+
+### `doc_ingest/adaptive.py`
+
+**Purpose**
+
+- Optional adaptive bulk scheduling controller
+
+**Key symbols**
+
+- `AdaptiveBulkPolicy`
+- `AdaptiveBulkController`
+- `static_bulk_telemetry()`
 
 ### `doc_ingest/progress.py`
 

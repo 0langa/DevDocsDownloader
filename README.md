@@ -121,10 +121,10 @@ python -m pip install -e .[dev]
 Optional extras:
 
 - `analysis` — support for archived crawler path-analysis utilities
-- `conversion-extended` — future PDF/DOCX conversion dependencies
 - `browser` — Playwright package only
 - `benchmark` — benchmark helper dependencies
 - `gui` — local NiceGUI operator interface
+- `tokenizer` — optional tiktoken-backed retrieval chunking
 
 ### Optional helper setup
 
@@ -139,29 +139,85 @@ python scripts/setup.py --extras dev,browser --with-playwright-browser
 
 Playwright Chromium is not installed by default.
 
-## Usage
+## CLI Guide
 
-### Show help
+The CLI is the primary automation interface. It supports one-language runs, preset/all-language bulk runs, validation-only checks, source catalog inspection, cache policy controls, output options, and optional adaptive bulk scheduling.
+
+### Show help and initialize directories
 
 ```bash
 python DevDocsDownloader.py --help
+python DevDocsDownloader.py init
 ```
 
-### Download one language
+### Run one language
 
 ```bash
 python DevDocsDownloader.py run python
 python DevDocsDownloader.py run javascript --source mdn --mode full
 python DevDocsDownloader.py run swift --source dash
+```
+
+Common run options:
+
+```bash
 python DevDocsDownloader.py run python --include-topic asyncio --include-topic typing
 python DevDocsDownloader.py run swift --exclude-topic Guide
 python DevDocsDownloader.py run python --document-frontmatter --chunks
+python DevDocsDownloader.py run python --chunks --chunk-strategy tokens --chunk-max-tokens 800
 python DevDocsDownloader.py run python --cache-policy ttl --cache-ttl-hours 24
 ```
 
-### Launch the local GUI
+### Run bulk downloads
 
-The optional GUI exposes the same operational controls as the CLI plus output browsing, report drill-down, checkpoint inspection, and cache metadata views.
+```bash
+python DevDocsDownloader.py bulk webapp
+python DevDocsDownloader.py bulk backend --mode full
+python DevDocsDownloader.py bulk all --mode important --yes
+```
+
+Bulk runs default to static language concurrency. Adaptive scheduling is opt-in:
+
+```bash
+python DevDocsDownloader.py bulk webapp --language-concurrency 3
+python DevDocsDownloader.py bulk webapp --concurrency-policy adaptive --adaptive-min-concurrency 1 --adaptive-max-concurrency 6
+```
+
+Bulk output options match single-language runs:
+
+```bash
+python DevDocsDownloader.py bulk webapp --chunks --chunk-max-chars 6000
+python DevDocsDownloader.py bulk webapp --chunks --chunk-strategy tokens --chunk-max-tokens 800
+```
+
+### Validate existing output
+
+```bash
+python DevDocsDownloader.py validate python
+```
+
+### Inspect catalogs and presets
+
+```bash
+python DevDocsDownloader.py list-languages
+python DevDocsDownloader.py list-languages --source mdn
+python DevDocsDownloader.py refresh-catalogs
+python DevDocsDownloader.py list-presets
+python DevDocsDownloader.py audit-presets
+python DevDocsDownloader.py audit-presets webapp
+```
+
+### Interactive wizard
+
+```bash
+python DevDocsDownloader.py
+```
+
+## GUI Guide
+
+The optional GUI exposes the CLI workflows through a local NiceGUI dashboard and adds output browsing, report drill-down, checkpoint inspection/deletion, cache metadata views, and a visual job queue.
+
+### Install and launch
 
 ```bash
 python -m pip install -e .[gui]
@@ -172,33 +228,18 @@ python DevDocsDownloader.py gui --output-dir output
 
 The GUI is a local operator interface. It calls `DocumentationService` in-process and does not shell out to CLI commands for core operations. Do not expose it as a public multi-user web service.
 
-### Run the interactive wizard
+### GUI workflows
 
-```bash
-python DevDocsDownloader.py
-```
+- **Run:** configure a single language, source, mode, topic filters, cache policy, frontmatter, chunks, and validation-only runs.
+- **Bulk:** run presets or all languages with static or adaptive concurrency.
+- **Languages:** list available source catalog entries.
+- **Presets/Audit:** inspect preset coverage and unresolved languages.
+- **Reports:** inspect latest reports, validation records, history, and trends.
+- **Output Browser:** browse generated language bundles, per-document Markdown, consolidated manuals, chunks, manifests, and metadata.
+- **Checkpoints:** inspect failed/active checkpoints and safely delete selected checkpoint files.
+- **Cache:** inspect cache metadata sidecars and refresh catalogs.
 
-### Download a preset bundle
-
-```bash
-python DevDocsDownloader.py bulk webapp
-python DevDocsDownloader.py bulk backend --mode full
-python DevDocsDownloader.py bulk webapp --chunks --chunk-max-chars 6000
-```
-
-### Download every available language
-
-```bash
-python DevDocsDownloader.py bulk all --mode important --yes
-```
-
-### Validate an existing compiled bundle
-
-```bash
-python DevDocsDownloader.py validate python
-```
-
-### Run live endpoint probes
+## Live Probe Guide
 
 Routine tests do not use the network. To verify that configured upstream source URLs are still reachable without downloading full languages, run the opt-in live probe suite:
 
@@ -214,22 +255,21 @@ Optional controls:
 
 The live probes check one representative endpoint per configured language/source entry. DevDocs probes each language `index.json`, MDN probes one raw `index.md` for each configured area, and Dash probes each configured `.tgz` feed with a capped ranged request. They validate link health only; they do not compile output or verify extraction quality.
 
-### Developer checks
+For a bounded extraction sanity tier that checks one representative source-family conversion path without compiling full languages:
+
+```powershell
+$env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live_extraction_sanity.py -q
+```
+
+This fetches a DevDocs document payload, one MDN raw `index.md`, and a capped Dash archive probe plus local Dash conversion fixture. It catches upstream shape drift but is not a full extraction correctness check.
+
+## Developer Checks
 
 ```bash
 python -m pytest -q
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy doc_ingest
-```
-
-### List languages and presets
-
-```bash
-python DevDocsDownloader.py list-languages
-python DevDocsDownloader.py list-presets
-python DevDocsDownloader.py audit-presets
-python DevDocsDownloader.py audit-presets webapp
 ```
 
 ## Execution behavior
@@ -299,6 +339,8 @@ Generated Markdown files are still written through atomic temp-file replacement,
 
 `SourceRuntime` applies conservative source-profile throttling around HTTP requests and archive downloads. Operational overrides are available through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`.
 
+Bulk runs default to static language concurrency. `--concurrency-policy adaptive` enables conservative adaptive scheduling that reduces new language starts after failures, retry pressure, or local resource pressure, and increases slowly after successful windows. Adaptive mode is opt-in for v0.1.0.
+
 ### Output and downstream consumption behavior
 
 Consolidated manuals include explicit stable anchors before topic and document headings. The table of contents uses the same anchor registry, so repeated headings receive deterministic suffixes such as `repeat` and `repeat-2`.
@@ -306,6 +348,17 @@ Consolidated manuals include explicit stable anchors before topic and document h
 Optional per-document YAML frontmatter is enabled with `--document-frontmatter`. It records language/source identity, topic, slug, title, order hint, mode, source URL, and generation timestamp while preserving the existing human-readable metadata lines.
 
 Optional retrieval chunks are enabled with `--chunks`. The compiler writes size-bounded Markdown chunks under `output/markdown/<language>/chunks/` and a `manifest.jsonl` file with stable chunk IDs, source references, topic metadata, document metadata, text paths, and character offsets.
+
+Character chunking is the default. Token chunking is opt-in and requires:
+
+```bash
+python -m pip install -e .[tokenizer]
+python DevDocsDownloader.py run python --chunks --chunk-strategy tokens
+```
+
+Known same-language document links are rewritten to local generated Markdown paths when the compiler can match the target exactly from source URLs or known source paths. Unknown links keep the existing source-absolute behavior.
+
+When adapters emit `AssetEvent` records with bytes or safe local files, the compiler writes deduplicated assets under `output/markdown/<language>/assets/`, writes `assets/manifest.json`, and rewrites matching Markdown references to local asset paths. Asset records without local payload are inventoried but are not fetched by the compiler.
 
 ### Cache freshness behavior
 
@@ -352,6 +405,8 @@ source-documents/           # legacy support requirements and inputs
 - Bulk runs gather language tasks via `asyncio.gather`, with language-level concurrency in the pipeline and source-profile throttling in `SourceRuntime`
 - Checkpoint resume depends on the saved artifact manifest; runs with missing fragments fall back to full replay
 - Optional frontmatter and chunk exports are off by default to preserve conservative output behavior
+- Tokenizer-aware chunks are opt-in through the `tokenizer` extra; character chunks remain the default
+- Asset inventory is event-driven only; the compiler does not crawl arbitrary image or asset URLs
 
 ### Source-specific limitations
 
@@ -372,7 +427,8 @@ source-documents/           # legacy support requirements and inputs
 - `scripts/benchmark_pipeline.py` now targets the active source-adapter CLI and reports document throughput for cold and warm cache trials.
 - `scripts/build_skip_manifest.py` now writes a current state and checkpoint manifest from `state/*.json` and `state/checkpoints/*.json`; URL-level crawler skip manifests are not part of the active pipeline.
 - `pyproject.toml` is the canonical dependency manifest; `requirements.txt` and `source-documents/requirements.txt` are compatibility shims.
-- BeautifulSoup, lxml, and PyYAML are runtime dependencies for source cleanup and frontmatter parsing. Extended conversion, browser, benchmark, and developer packages remain optional extras.
+- BeautifulSoup, lxml, and PyYAML are runtime dependencies for source cleanup and frontmatter parsing. Browser, benchmark, GUI, tokenizer, and developer packages remain optional extras.
+- Plugin source adapters can be installed as Python packages exposing entry points in the `devdocsdownloader.sources` group. Built-in DevDocs, MDN, and Dash adapters are registered first and keep priority on name collisions.
 
 ## Testing
 
@@ -391,14 +447,19 @@ The current tests focus on:
 - source-specific HTML cleanup, MDN YAML frontmatter parsing, link rewriting, and conversion-quality validation
 - collision-safe consolidated anchors, optional document frontmatter, optional chunk exports, cache freshness policy, and service-layer wiring
 - GUI-safe service artifact readers, checkpoint/cache inspection, job queue transitions, CLI GUI launcher wiring, and optional NiceGUI app-factory smoke coverage
+- source plugin registration, exact cross-document link rewriting, asset inventory, and optional tokenizer chunking
+- adaptive bulk scheduling, deterministic source suggestions, and opt-in live extraction sanity hooks
 
 ## Future direction
 
 The most realistic next steps, based on the current repository state, are:
 
-1. Improve source expansion and output fidelity with plugins, local cross-document links, asset handling, tokenizer-aware chunks, and intentional extended conversion backends
-2. Add adaptive scaling policy and expanded live extraction probes
-3. Harden the GUI with packaged desktop distribution and richer progress cancellation once the backend exposes cooperative cancellation inside active runs
+1. Package and distribute the local GUI if operator adoption justifies it
+2. Reintroduce PDF/DOCX/browser conversion only when a real source adapter path and fixture coverage justify the dependency
+
+## Release readiness
+
+The project is prepared as a v0.1.0 release candidate. Use `documentation/release_checklist.md` for the required deterministic checks, optional live probes, optional GUI smoke, and package build sanity.
 
 ## Documentation map
 
@@ -406,3 +467,6 @@ The most realistic next steps, based on the current repository state, are:
 - `documentation/codemap.md` — file-by-file navigation guide
 - `documentation/development_progress.md` — implementation status and known gaps
 - `documentation/full-project-documentation.md` — detailed technical reference
+- `documentation/output_contract.md` — generated output, state, checkpoint, and report contract
+- `documentation/release_checklist.md` — v0.1.0 release validation checklist
+- `documentation/roadmap.md` — completed roadmap and post-v0.1.0 future work

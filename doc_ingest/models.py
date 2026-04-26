@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 CrawlMode = Literal["important", "full"]
 CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "completed", "failed"]
 CacheFreshnessPolicy = Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"]
+BulkConcurrencyPolicy = Literal["static", "adaptive"]
 
 
 class TopicStats(BaseModel):
@@ -72,6 +73,37 @@ class RuntimeTelemetrySnapshot(BaseModel):
     cache_refreshes: int = 0
 
 
+class AdaptiveBulkTelemetry(BaseModel):
+    policy: BulkConcurrencyPolicy = "static"
+    min_concurrency: int = 1
+    max_concurrency: int = 1
+    current_concurrency: int = 1
+    adjustment_count: int = 0
+    adjustment_reasons: list[str] = Field(default_factory=list)
+    observed_windows: int = 0
+    failed_languages: int = 0
+    retry_pressure_windows: int = 0
+
+
+class AssetRecord(BaseModel):
+    source_url: str = ""
+    media_type: str = ""
+    original_path: str = ""
+    output_path: str | None = None
+    checksum: str = ""
+    byte_count: int = 0
+    status: Literal["copied", "referenced", "skipped"] = "referenced"
+    reason: str = ""
+
+
+class AssetInventorySummary(BaseModel):
+    total: int = 0
+    copied: int = 0
+    referenced: int = 0
+    skipped: int = 0
+    manifest_path: str | None = None
+
+
 class LanguageRunState(BaseModel):
     language: str
     slug: str
@@ -89,6 +121,7 @@ class LanguageRunState(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     document_warnings: list[SourceWarningRecord] = Field(default_factory=list)
     runtime_telemetry: RuntimeTelemetrySnapshot | None = None
+    asset_inventory: AssetInventorySummary | None = None
     failures: list[str] = Field(default_factory=list)
 
 
@@ -173,6 +206,7 @@ class LanguageRunReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     document_warnings: list[SourceWarningRecord] = Field(default_factory=list)
     runtime_telemetry: RuntimeTelemetrySnapshot | None = None
+    asset_inventory: AssetInventorySummary | None = None
     failures: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0
 
@@ -180,3 +214,4 @@ class LanguageRunReport(BaseModel):
 class RunSummary(BaseModel):
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reports: list[LanguageRunReport] = Field(default_factory=list)
+    adaptive_telemetry: AdaptiveBulkTelemetry | None = None

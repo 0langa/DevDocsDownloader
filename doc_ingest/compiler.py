@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
 from collections.abc import AsyncIterator, Iterable
@@ -8,20 +10,29 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urldefrag, urlparse
 
 import yaml  # type: ignore[import-untyped]
 
-from .models import DocumentArtifactCheckpoint, TopicStats
-from .sources.base import Document
-from .utils.filesystem import DurabilityMode, write_json, write_text, write_text_parts
+from .models import AssetInventorySummary, AssetRecord, DocumentArtifactCheckpoint, TopicStats
+from .sources.base import AssetEvent, Document
+from .utils.filesystem import DurabilityMode, write_bytes, write_json, write_text, write_text_parts
 from .utils.text import slugify
 
 
 class CompiledOutput:
-    def __init__(self, *, total_documents: int, topics: list[TopicStats], output_path: Path) -> None:
+    def __init__(
+        self,
+        *,
+        total_documents: int,
+        topics: list[TopicStats],
+        output_path: Path,
+        asset_inventory: AssetInventorySummary | None = None,
+    ) -> None:
         self.total_documents = total_documents
         self.topics = topics
         self.output_path = output_path
+        self.asset_inventory = asset_inventory
 
 
 @dataclass(slots=True)
@@ -60,6 +71,10 @@ class CompilationPlan:
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
+    chunk_strategy: str = "chars"
+    chunk_max_tokens: int = 1_000
+    chunk_overlap_tokens: int = 100
+    assets: list[AssetEvent] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -70,6 +85,7 @@ class RenderedCompilation:
     output_path: Path
     topic_stats: list[TopicStats]
     total_documents: int
+    asset_inventory: AssetInventorySummary | None = None
 
 
 class LanguageOutputBuilder:
@@ -88,6 +104,10 @@ class LanguageOutputBuilder:
         emit_chunks: bool = False,
         chunk_max_chars: int = 8_000,
         chunk_overlap_chars: int = 400,
+        chunk_strategy: str = "chars",
+        chunk_max_tokens: int = 1_000,
+        chunk_overlap_tokens: int = 100,
+        assets: list[AssetEvent] | None = None,
     ) -> None:
         self.language_display = language_display
         self.language_slug = language_slug
@@ -100,6 +120,10 @@ class LanguageOutputBuilder:
         self.emit_chunks = emit_chunks
         self.chunk_max_chars = chunk_max_chars
         self.chunk_overlap_chars = chunk_overlap_chars
+        self.chunk_strategy = chunk_strategy
+        self.chunk_max_tokens = chunk_max_tokens
+        self.chunk_overlap_tokens = chunk_overlap_tokens
+        self.assets = list(assets or [])
         self.language_dir = output_root / language_slug
         self.language_dir.mkdir(parents=True, exist_ok=True)
         self.fragments_dir = self.language_dir / "_fragments"
@@ -176,11 +200,12 @@ class LanguageOutputBuilder:
 
     def finalize(self) -> CompiledOutput:
         plan = self.build_plan()
-        write_streamed_compilation(plan, durability=self.durability)
+        asset_inventory = write_streamed_compilation(plan, durability=self.durability)
         return CompiledOutput(
             total_documents=plan.total_documents,
             topics=plan.topic_stats,
             output_path=plan.consolidated_path,
+            asset_inventory=asset_inventory,
         )
 
     def build_plan(self) -> CompilationPlan:
@@ -213,6 +238,10 @@ class LanguageOutputBuilder:
             emit_chunks=self.emit_chunks,
             chunk_max_chars=self.chunk_max_chars,
             chunk_overlap_chars=self.chunk_overlap_chars,
+            chunk_strategy=self.chunk_strategy,
+            chunk_max_tokens=self.chunk_max_tokens,
+            chunk_overlap_tokens=self.chunk_overlap_tokens,
+            assets=self.assets,
         )
 
 
@@ -299,7 +328,11 @@ def write_rendered_compilation(rendered: RenderedCompilation, *, durability: Dur
     write_json(rendered.meta_path, rendered.meta)
 
 
-def write_streamed_compilation(plan: CompilationPlan, *, durability: DurabilityMode = "balanced") -> None:
+def write_streamed_compilation(
+    plan: CompilationPlan, *, durability: DurabilityMode = "balanced"
+) -> AssetInventorySummary | None:
+    target_map = _build_link_target_map(plan)
+    asset_records, asset_rewrites = write_assets(plan, durability=durability)
     for topic in plan.topics:
         section_lines = [
             f"# {topic.name}",
@@ -311,6 +344,42 @@ def write_streamed_compilation(plan: CompilationPlan, *, durability: DurabilityM
         ]
         for planned_doc in topic.documents:
             section_lines.append(f"- [{planned_doc.title}]({planned_doc.slug}.md)")
+            if planned_doc.document is not None:
+                markdown = _rewrite_document_markdown(
+                    planned_doc.document.markdown,
+                    current_path=planned_doc.path,
+                    language_dir=plan.language_dir,
+                    target_map=target_map,
+                    asset_rewrites=asset_rewrites,
+                )
+                rewritten_doc = Document(
+                    topic=planned_doc.document.topic,
+                    slug=planned_doc.document.slug,
+                    title=planned_doc.document.title,
+                    markdown=markdown,
+                    source_url=planned_doc.document.source_url,
+                    order_hint=planned_doc.document.order_hint,
+                )
+                write_text(
+                    planned_doc.path,
+                    render_document(
+                        rewritten_doc,
+                        topic=topic.name,
+                        language=plan.language_display,
+                        language_slug=plan.language_slug,
+                        source=plan.source,
+                        source_slug=plan.source_slug,
+                        mode=plan.mode,
+                        emit_frontmatter=plan.emit_document_frontmatter,
+                    ),
+                    durability=durability,
+                )
+                if planned_doc.fragment_path is not None:
+                    write_text(
+                        planned_doc.fragment_path,
+                        render_consolidated_document_fragment(rewritten_doc),
+                        durability=durability,
+                    )
         section_lines.append("")
         write_text(topic.directory / "_section.md", "\n".join(section_lines) + "\n", durability=durability)
 
@@ -331,8 +400,12 @@ def write_streamed_compilation(plan: CompilationPlan, *, durability: DurabilityM
     )
     write_text_parts(plan.consolidated_path, iter_consolidated_parts(plan), durability=durability)
     chunk_count = write_chunks(plan, durability=durability) if plan.emit_chunks else 0
-    write_json(plan.language_dir / "_meta.json", _render_meta(plan, chunk_count=chunk_count))
+    write_json(
+        plan.language_dir / "_meta.json",
+        _render_meta(plan, chunk_count=chunk_count, asset_inventory=_asset_summary(asset_records)),
+    )
     shutil.rmtree(plan.language_dir / "_fragments", ignore_errors=True)
+    return _asset_summary(asset_records)
 
 
 def iter_consolidated_parts(plan: CompilationPlan) -> Iterable[str]:
@@ -371,7 +444,12 @@ def iter_consolidated_parts(plan: CompilationPlan) -> Iterable[str]:
                 yield planned_doc.fragment_path.read_text(encoding="utf-8")
 
 
-def _render_meta(plan: CompilationPlan, *, chunk_count: int = 0) -> dict[str, Any]:
+def _render_meta(
+    plan: CompilationPlan,
+    *,
+    chunk_count: int = 0,
+    asset_inventory: AssetInventorySummary | None = None,
+) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "language": plan.language_display,
         "slug": plan.language_slug,
@@ -393,7 +471,13 @@ def _render_meta(plan: CompilationPlan, *, chunk_count: int = 0) -> dict[str, An
             "chunk_count": chunk_count,
             "max_chars": plan.chunk_max_chars,
             "overlap_chars": plan.chunk_overlap_chars,
+            "strategy": plan.chunk_strategy,
         }
+        if plan.chunk_strategy == "tokens":
+            outputs["chunks"]["max_tokens"] = plan.chunk_max_tokens
+            outputs["chunks"]["overlap_tokens"] = plan.chunk_overlap_tokens
+    if asset_inventory is not None:
+        outputs["assets"] = asset_inventory.model_dump(mode="json")
     if outputs:
         meta["outputs"] = outputs
     return meta
@@ -416,6 +500,10 @@ async def compile_from_stream(
     emit_chunks: bool = False,
     chunk_max_chars: int = 8_000,
     chunk_overlap_chars: int = 400,
+    chunk_strategy: str = "chars",
+    chunk_max_tokens: int = 1_000,
+    chunk_overlap_tokens: int = 100,
+    assets: list[AssetEvent] | None = None,
 ) -> CompiledOutput:
     builder = LanguageOutputBuilder(
         language_display=language_display,
@@ -430,6 +518,10 @@ async def compile_from_stream(
         emit_chunks=emit_chunks,
         chunk_max_chars=chunk_max_chars,
         chunk_overlap_chars=chunk_overlap_chars,
+        chunk_strategy=chunk_strategy,
+        chunk_max_tokens=chunk_max_tokens,
+        chunk_overlap_tokens=chunk_overlap_tokens,
+        assets=assets,
     )
     for checkpoint_artifact in resume_artifacts or []:
         builder.preload_artifact(checkpoint_artifact)
@@ -437,6 +529,8 @@ async def compile_from_stream(
         artifact = builder.add(document)
         if on_document is not None:
             await on_document(document, artifact)
+    if assets is not None:
+        builder.assets = list(assets)
     return builder.finalize()
 
 
@@ -730,6 +824,195 @@ def _frontmatter(data: dict[str, Any]) -> str:
     return f"---\n{payload}\n---\n\n"
 
 
+def _build_link_target_map(plan: CompilationPlan) -> dict[str, Path]:
+    targets: dict[str, Path] = {}
+    for topic in plan.topics:
+        for doc in topic.documents:
+            keys = {doc.slug, f"{topic.slug}/{doc.slug}.md", f"{doc.slug}.md"}
+            if doc.source_url:
+                keys.add(doc.source_url)
+                keys.add(urldefrag(doc.source_url).url)
+                parsed = urlparse(doc.source_url)
+                if parsed.path:
+                    keys.add(parsed.path.lstrip("/"))
+                    keys.add(urldefrag(parsed.path.lstrip("/")).url)
+            for key in keys:
+                if key:
+                    targets[_normalize_link_key(key)] = doc.path
+    return targets
+
+
+_MARKDOWN_LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+
+
+def _rewrite_document_markdown(
+    markdown: str,
+    *,
+    current_path: Path,
+    language_dir: Path,
+    target_map: dict[str, Path],
+    asset_rewrites: dict[str, Path],
+) -> str:
+    lines: list[str] = []
+    in_fence = False
+    for line in markdown.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            lines.append(line)
+            continue
+        if in_fence:
+            lines.append(line)
+            continue
+        lines.append(
+            _MARKDOWN_LINK_RE.sub(
+                lambda match: _rewrite_link_match(
+                    match,
+                    current_path=current_path,
+                    language_dir=language_dir,
+                    target_map=target_map,
+                    asset_rewrites=asset_rewrites,
+                ),
+                line,
+            )
+        )
+    return "\n".join(lines)
+
+
+def _rewrite_link_match(
+    match: re.Match[str],
+    *,
+    current_path: Path,
+    language_dir: Path,
+    target_map: dict[str, Path],
+    asset_rewrites: dict[str, Path],
+) -> str:
+    prefix, label, target = match.group(1), match.group(2), match.group(3)
+    fragment = ""
+    base_target = target
+    if "#" in target:
+        base_target, fragment = target.split("#", 1)
+        fragment = f"#{fragment}"
+    normalized = _normalize_link_key(target)
+    base_normalized = _normalize_link_key(base_target)
+    if (
+        _is_external_or_special(target)
+        and normalized not in target_map
+        and base_normalized not in target_map
+        and normalized not in asset_rewrites
+        and base_normalized not in asset_rewrites
+    ):
+        return match.group(0)
+    replacement_path = asset_rewrites.get(normalized) or asset_rewrites.get(base_normalized)
+    if replacement_path is None:
+        replacement_path = target_map.get(normalized) or target_map.get(base_normalized)
+    if replacement_path is None:
+        return match.group(0)
+    relative = _relative_link(current_path, replacement_path)
+    return f"{prefix}[{label}]({relative}{fragment})"
+
+
+def _normalize_link_key(target: str) -> str:
+    target = target.strip().strip("<>")
+    if target.startswith("#"):
+        return target
+    target = urldefrag(target).url
+    parsed = urlparse(target)
+    if parsed.scheme and parsed.netloc:
+        normalized_path = parsed.path.rstrip("/")
+        return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{normalized_path}"
+    return target.lstrip("./").rstrip("/")
+
+
+def _is_external_or_special(target: str) -> bool:
+    parsed = urlparse(target)
+    return parsed.scheme in {"http", "https", "mailto", "tel", "data"}
+
+
+def _relative_link(current_path: Path, target_path: Path) -> str:
+    return Path(os.path.relpath(target_path, start=current_path.parent)).as_posix()
+
+
+def write_assets(
+    plan: CompilationPlan,
+    *,
+    durability: DurabilityMode = "balanced",
+) -> tuple[list[AssetRecord], dict[str, Path]]:
+    records: list[AssetRecord] = []
+    rewrites: dict[str, Path] = {}
+    if not plan.assets:
+        return records, rewrites
+    assets_dir = plan.language_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    by_checksum: dict[str, Path] = {}
+    for event in plan.assets:
+        payload = _asset_payload(event)
+        if payload is None:
+            records.append(
+                AssetRecord(
+                    source_url=event.source_url,
+                    media_type=event.media_type,
+                    original_path=event.path or event.local_path,
+                    status="referenced",
+                    reason="no local payload",
+                )
+            )
+            continue
+        checksum = hashlib.sha256(payload).hexdigest()
+        output_path = by_checksum.get(checksum)
+        if output_path is None:
+            output_path = (
+                assets_dir / f"{checksum[:16]}-{slugify(Path(event.path or event.local_path).name) or 'asset'}"
+            )
+            write_bytes(output_path, payload, durability=durability)
+            by_checksum[checksum] = output_path
+        record = AssetRecord(
+            source_url=event.source_url,
+            media_type=event.media_type,
+            original_path=event.path or event.local_path,
+            output_path=output_path.relative_to(plan.language_dir).as_posix(),
+            checksum=checksum,
+            byte_count=len(payload),
+            status="copied",
+        )
+        records.append(record)
+        for key in {event.path, event.source_url, event.local_path}:
+            if key:
+                rewrites[_normalize_link_key(key)] = output_path
+    write_json(
+        assets_dir / "manifest.json",
+        {"assets": [record.model_dump(mode="json") for record in records]},
+        durability=durability,
+    )
+    return records, rewrites
+
+
+def _asset_payload(event: AssetEvent) -> bytes | None:
+    if event.content is not None:
+        return event.content
+    local = Path(event.local_path)
+    if not event.local_path or not local.exists() or not local.is_file():
+        return None
+    try:
+        resolved = local.resolve()
+        if ".." in local.parts:
+            return None
+        return resolved.read_bytes()
+    except OSError:
+        return None
+
+
+def _asset_summary(records: list[AssetRecord]) -> AssetInventorySummary | None:
+    if not records:
+        return None
+    return AssetInventorySummary(
+        total=len(records),
+        copied=sum(1 for record in records if record.status == "copied"),
+        referenced=sum(1 for record in records if record.status == "referenced"),
+        skipped=sum(1 for record in records if record.status == "skipped"),
+        manifest_path="assets/manifest.json",
+    )
+
+
 def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balanced") -> int:
     chunks_dir = plan.language_dir / "chunks"
     if chunks_dir.exists():
@@ -737,42 +1020,57 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
     chunks_dir.mkdir(parents=True, exist_ok=True)
     records: list[str] = []
     chunk_count = 0
+    token_kwargs = {
+        "max_tokens": max(100, plan.chunk_max_tokens),
+        "overlap_tokens": max(0, plan.chunk_overlap_tokens),
+    }
     max_chars = max(500, plan.chunk_max_chars)
-    overlap = min(max(0, plan.chunk_overlap_chars), max_chars // 2)
+    char_kwargs = {"max_chars": max_chars, "overlap": min(max(0, plan.chunk_overlap_chars), max_chars // 2)}
     for topic in plan.topics:
         for doc in topic.documents:
             text = doc.path.read_text(encoding="utf-8")
-            for index, start, end, chunk_text in _chunk_text(text, max_chars=max_chars, overlap=overlap):
+            chunk_iterable = (
+                _token_chunks(text, **token_kwargs)
+                if plan.chunk_strategy == "tokens"
+                else _char_chunks(text, **char_kwargs)
+            )
+            for chunk in chunk_iterable:
+                index, start, end, chunk_text, token_start, token_end = chunk
                 chunk_id = f"{plan.language_slug}:{topic.slug}:{doc.slug}:{index:04d}"
                 filename = f"{topic.slug}-{doc.slug}-{index:04d}.md"
                 chunk_path = chunks_dir / filename
                 write_text(chunk_path, chunk_text.rstrip() + "\n", durability=durability)
-                records.append(
-                    json.dumps(
+                record = {
+                    "chunk_id": chunk_id,
+                    "language": plan.language_display,
+                    "source": plan.source,
+                    "source_slug": plan.source_slug,
+                    "topic": topic.name,
+                    "document_slug": doc.slug,
+                    "document_title": doc.title,
+                    "source_url": doc.source_url,
+                    "order_hint": doc.order_hint,
+                    "chunk_index": index,
+                    "text_path": f"chunks/{filename}",
+                    "char_start": start,
+                    "char_end": end,
+                    "chunk_strategy": plan.chunk_strategy,
+                }
+                if plan.chunk_strategy == "tokens":
+                    record.update(
                         {
-                            "chunk_id": chunk_id,
-                            "language": plan.language_display,
-                            "source": plan.source,
-                            "source_slug": plan.source_slug,
-                            "topic": topic.name,
-                            "document_slug": doc.slug,
-                            "document_title": doc.title,
-                            "source_url": doc.source_url,
-                            "order_hint": doc.order_hint,
-                            "chunk_index": index,
-                            "text_path": f"chunks/{filename}",
-                            "char_start": start,
-                            "char_end": end,
-                        },
-                        ensure_ascii=False,
+                            "token_start": token_start,
+                            "token_end": token_end,
+                            "token_count": token_end - token_start,
+                        }
                     )
-                )
+                records.append(json.dumps(record, ensure_ascii=False))
                 chunk_count += 1
     write_text(chunks_dir / "manifest.jsonl", "\n".join(records) + ("\n" if records else ""), durability=durability)
     return chunk_count
 
 
-def _chunk_text(text: str, *, max_chars: int, overlap: int) -> Iterable[tuple[int, int, int, str]]:
+def _char_chunks(text: str, *, max_chars: int, overlap: int) -> Iterable[tuple[int, int, int, str, int, int]]:
     if not text:
         return
     start = 0
@@ -785,10 +1083,35 @@ def _chunk_text(text: str, *, max_chars: int, overlap: int) -> Iterable[tuple[in
             boundary = max(text.rfind("\n\n", start, hard_end), text.rfind("\n", start, hard_end))
             if boundary > start + max_chars // 2:
                 end = boundary
-        yield index, start, end, text[start:end]
+        yield index, start, end, text[start:end], 0, 0
         if end >= length:
             break
         start = max(end - overlap, start + 1)
+        index += 1
+
+
+def _token_chunks(text: str, *, max_tokens: int, overlap_tokens: int) -> Iterable[tuple[int, int, int, str, int, int]]:
+    try:
+        import tiktoken  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("Tokenizer chunking requires: python -m pip install -e .[tokenizer]") from exc
+    encoding = tiktoken.get_encoding("cl100k_base")
+    tokens = encoding.encode(text)
+    if not tokens:
+        return
+    overlap = min(overlap_tokens, max_tokens // 2)
+    index = 0
+    token_start = 0
+    char_start = 0
+    while token_start < len(tokens):
+        token_end = min(len(tokens), token_start + max_tokens)
+        chunk_text = encoding.decode(tokens[token_start:token_end])
+        char_end = char_start + len(chunk_text)
+        yield index, char_start, char_end, chunk_text, token_start, token_end
+        if token_end >= len(tokens):
+            break
+        token_start = max(token_end - overlap, token_start + 1)
+        char_start = max(0, len(encoding.decode(tokens[:token_start])))
         index += 1
 
 

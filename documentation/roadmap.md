@@ -16,6 +16,8 @@ Completed foundations:
 - Extraction quality: source-specific DevDocs/Dash HTML cleanup, source-absolute link rewriting, safe MDN YAML frontmatter parsing, and richer validation warnings for links, HTML leftovers, malformed tables, and definition-list artifacts.
 - Output and consumption: collision-safe consolidated anchors, optional per-document YAML frontmatter, optional Markdown+JSONL chunk exports, source-agnostic cache freshness metadata, and service-layer output/report/checkpoint/cache inspection.
 - Operator workflows: optional local NiceGUI dashboard with CLI-equivalent run controls, in-process job queue, output browser, report drill-down, checkpoint controls, and cache metadata views.
+- Source expansion and fidelity: entry-point source plugins, exact local cross-document link rewriting, event-driven asset inventory, optional tokenizer chunking, and removal of unused extended-conversion extras.
+- Release readiness: opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, and a v0.1.0 release checklist.
 
 Current guarantees:
 
@@ -24,7 +26,9 @@ Current guarantees:
 - Failed runs can resume automatically when checkpoint identity and artifact paths are still valid.
 - State, checkpoints, reports, and expensive cache/archive writes remain strict; generated Markdown defaults to balanced atomic writes.
 - DevDocs, Dash, and MDN normalize relative links toward source-absolute URLs where source context is known.
+- Known same-language links are rewritten to generated local Markdown paths when exact targets are available.
 - Optional downstream outputs are disabled by default, so the baseline output contract remains conservative.
+- Asset handling is inventory-first and does not crawl arbitrary image URLs.
 - The GUI calls `doc_ingest.services.DocumentationService` directly instead of shelling out to Typer commands.
 - The active product is a curated source-adapter ingester, not a general crawler.
 
@@ -118,62 +122,69 @@ Current guarantees:
 - **Impact:** Gives operators safe visibility and control over recurring documentation updates.
 - **Complexity:** Medium
 
-## Phase 10: Source Expansion and Output Fidelity - Active
+## Phase 10: Source Expansion and Output Fidelity - Completed
 
 ### 1. Add Plugin-Ready Source Registration
 
 - **Problem:** New sources require editing `SourceRegistry.__init__()` and shipping code inside the package.
-- **Proposed Solution:** Support optional entry-point or config-based source registration while keeping DevDocs, MDN, and Dash built in.
+- **Implemented:** `SourceRegistry` registers DevDocs, MDN, and Dash first, then loads optional source factories from the `devdocsdownloader.sources` entry-point group. Built-ins win name collisions and plugin failures are isolated as warnings.
 - **Impact:** Enables source growth without hard-coding every adapter.
 - **Complexity:** High
 
 ### 2. Improve Cross-Document Link Rewriting
 
 - **Problem:** Phase 6 rewrites relative links to source-absolute URLs, but generated bundles still do not rewrite known same-language links to local generated documents.
-- **Proposed Solution:** Build a source-target map during compilation from source URL/source slug to final document path and anchor. Rewrite known intra-bundle links to local relative paths while keeping unknown links source-absolute and reporting unresolved references.
+- **Implemented:** The compiler builds an exact source-target map from source URLs, normalized source URLs, source paths, slugs, and generated document paths. Known same-bundle links are rewritten to local relative Markdown paths while external, unknown, and fenced-code links are preserved.
 - **Impact:** Produces more useful offline manuals and downstream corpora.
 - **Complexity:** High
 
 ### 3. Add Asset Inventory and Deduplicated Asset Handling
 
 - **Problem:** Image and asset references are currently rewritten or stripped rather than represented as first-class output artifacts.
-- **Proposed Solution:** Extend `AssetEvent` handling into an optional asset inventory. Copy or reference supported assets under a stable `assets/` tree, deduplicate by checksum, and link assets from generated Markdown when safe.
+- **Implemented:** `AssetEvent` can carry bytes or a safe local path. The compiler writes `assets/manifest.json`, deduplicates copied assets by checksum, rewrites matching Markdown asset references to local paths, and records remote-only assets as references without fetching arbitrary URLs.
 - **Impact:** Improves offline fidelity for documentation that relies on diagrams, screenshots, or local assets.
 - **Complexity:** Medium
 
 ### 4. Add Tokenizer-Aware Chunking
 
 - **Problem:** Chunk export is character-bounded, which is deterministic and dependency-free but not ideal for embedding model limits.
-- **Proposed Solution:** Add optional tokenizer-aware chunking behind an extra or pluggable tokenizer interface. Preserve character chunking as the default fallback and keep manifest schema stable.
+- **Implemented:** Character chunking remains the default. Optional `--chunk-strategy tokens` uses the `tokenizer` extra (`tiktoken`) and adds token offsets/counts to chunk manifest records.
 - **Impact:** Makes RAG exports more predictable for embedding and retrieval workloads.
 - **Complexity:** Medium
 
-### 5. Add Extended Conversion Backends Intentionally
+### 5. Remove Unused Extended Conversion Extras
 
 - **Problem:** Optional dependencies support PDF, DOCX, browser, and document-conversion ambitions, but those paths are not wired into active adapters.
-- **Proposed Solution:** Either wire optional conversion backends under explicit adapters/extras or remove the unused optional capability. Any enabled backend must have fixture coverage and an adapter path that justifies the dependency.
-- **Impact:** Converts ambiguous expansion paths into real capability or a cleaner package.
+- **Implemented:** Removed the unused `conversion-extended` extra and stale `docling`, `mammoth`, and `pypdf` references from active setup guidance. PDF/DOCX/browser conversion should return only with a real adapter path and fixture coverage.
+- **Impact:** Keeps install cost and dependency claims aligned with the active runtime.
 - **Complexity:** High
 
-## Phase 11: Scalability Intelligence and Test Expansion
+## Phase 11: Scalability Intelligence and Test Expansion - Completed
 
 ### 1. Add Adaptive Worker and Backpressure Policy
 
 - **Problem:** Bulk concurrency is static and there is no adaptive worker model, despite historical references to adaptive runtime behavior.
-- **Proposed Solution:** Add an optional adaptive policy that adjusts language concurrency and source runtime limits based on error rates, retry pressure, throughput, memory, and disk queue pressure. Keep static settings as the default until benchmarked.
+- **Implemented:** Added opt-in adaptive bulk scheduling with static as the default. Adaptive mode adjusts new language starts based on failures, retry/source failure pressure, and optional local resource pressure while preserving report order.
 - **Impact:** Improves large bulk runs without sacrificing deterministic defaults.
 - **Complexity:** High
 
 ### 2. Test Source Suggestion Quality
 
 - **Problem:** Source resolution has fuzzy suggestions for missing languages, but suggestion quality is not directly tested.
-- **Proposed Solution:** Add deterministic registry fixtures that verify exact, family, prefix, contains, and fuzzy suggestion ordering across DevDocs, MDN, and Dash-like catalogs.
+- **Implemented:** Added deterministic registry fixtures for exact/family/prefix/contains resolution, source priority, Dash fallback, and deduplicated suggestion ordering across built-in and plugin-like catalogs.
 - **Impact:** Prevents CLI and GUI resolution regressions.
 - **Complexity:** Low
 
 ### 3. Extend Live Probes Toward Extraction Sanity
 
 - **Problem:** Live endpoint probes validate representative link health but intentionally do not validate extraction or conversion correctness.
-- **Proposed Solution:** Add a second opt-in live tier that fetches one bounded source document per source family and runs source-specific parsing/conversion without compiling a full language. Keep it separate from the default live endpoint suite.
+- **Implemented:** Added a separate `DEVDOCS_LIVE_EXTRACTION_TESTS=1` tier for bounded DevDocs conversion, MDN frontmatter/body parsing, and Dash archive-shape plus fixture conversion sanity.
 - **Impact:** Catches upstream shape changes earlier while preserving deterministic routine tests.
 - **Complexity:** Medium
+
+## Post-v0.1.0 Future Work
+
+- Package the local GUI as a desktop distribution if operator usage justifies it.
+- Add cooperative cancellation inside active source runs when safe cancellation boundaries are available.
+- Add deeper semantic validation only where source-specific truth data exists.
+- Reintroduce PDF/DOCX/browser conversion only with a real adapter path and fixture coverage.

@@ -103,6 +103,9 @@ def create_gui_app(
         chunks: bool,
         chunk_max_chars: int,
         chunk_overlap_chars: int,
+        chunk_strategy: str,
+        chunk_max_tokens: int,
+        chunk_overlap_tokens: int,
         cache_policy: CacheFreshnessPolicy,
         cache_ttl_hours: int | None,
     ) -> None:
@@ -121,6 +124,9 @@ def create_gui_app(
             emit_chunks=chunks,
             chunk_max_chars=chunk_max_chars,
             chunk_overlap_chars=chunk_overlap_chars,
+            chunk_strategy=chunk_strategy,  # type: ignore[arg-type]
+            chunk_max_tokens=chunk_max_tokens,
+            chunk_overlap_tokens=chunk_overlap_tokens,
             cache_policy=cache_policy,
             cache_ttl_hours=cache_ttl_hours,
         )
@@ -137,9 +143,15 @@ def create_gui_app(
         chunks: bool,
         chunk_max_chars: int,
         chunk_overlap_chars: int,
+        chunk_strategy: str,
+        chunk_max_tokens: int,
+        chunk_overlap_tokens: int,
         cache_policy: CacheFreshnessPolicy,
         cache_ttl_hours: int | None,
         language_concurrency: int,
+        concurrency_policy: str,
+        adaptive_min_concurrency: int,
+        adaptive_max_concurrency: int,
     ) -> None:
         target = target.strip().lower()
         if target == "all":
@@ -155,12 +167,18 @@ def create_gui_app(
             mode=mode,
             force_refresh=force_refresh,
             language_concurrency=language_concurrency,
+            concurrency_policy=concurrency_policy,  # type: ignore[arg-type]
+            adaptive_min_concurrency=adaptive_min_concurrency,
+            adaptive_max_concurrency=adaptive_max_concurrency,
             include_topics=split_topics(include_topics),
             exclude_topics=split_topics(exclude_topics),
             emit_document_frontmatter=document_frontmatter,
             emit_chunks=chunks,
             chunk_max_chars=chunk_max_chars,
             chunk_overlap_chars=chunk_overlap_chars,
+            chunk_strategy=chunk_strategy,  # type: ignore[arg-type]
+            chunk_max_tokens=chunk_max_tokens,
+            chunk_overlap_tokens=chunk_overlap_tokens,
             cache_policy=cache_policy,
             cache_ttl_hours=cache_ttl_hours,
         )
@@ -229,8 +247,11 @@ def create_gui_app(
                     with ui.row().classes("w-full"):
                         document_frontmatter = ui.checkbox("Document frontmatter", value=False)
                         chunks = ui.checkbox("Chunks", value=False)
+                        chunk_strategy = ui.select(["chars", "tokens"], value="chars", label="Chunk strategy")
                         chunk_max_chars = ui.number("Chunk max chars", value=8000, min=500, step=500)
                         chunk_overlap_chars = ui.number("Chunk overlap chars", value=400, min=0, step=50)
+                        chunk_max_tokens = ui.number("Chunk max tokens", value=1000, min=100, step=100)
+                        chunk_overlap_tokens = ui.number("Chunk overlap tokens", value=100, min=0, step=25)
                     with ui.row().classes("w-full"):
                         cache_policy = ui.select(CACHE_POLICIES, value="use-if-present", label="Cache policy")
                         cache_ttl_hours = ui.number("Cache TTL hours", value=24, min=0, step=1)
@@ -248,6 +269,9 @@ def create_gui_app(
                             chunks.value,
                             int(chunk_max_chars.value or 8000),
                             int(chunk_overlap_chars.value or 0),
+                            chunk_strategy.value,
+                            int(chunk_max_tokens.value or 1000),
+                            int(chunk_overlap_tokens.value or 0),
                             cache_policy.value,
                             int(cache_ttl_hours.value) if cache_ttl_hours.value is not None else None,
                         ),
@@ -259,14 +283,22 @@ def create_gui_app(
                         bulk_mode = ui.select(MODES, value="important", label="Mode")
                         bulk_force = ui.checkbox("Force refresh", value=False)
                         concurrency = ui.number("Language concurrency", value=3, min=1, step=1)
+                        concurrency_policy = ui.select(
+                            ["static", "adaptive"], value="static", label="Concurrency policy"
+                        )
+                        adaptive_min = ui.number("Adaptive min", value=1, min=1, step=1)
+                        adaptive_max = ui.number("Adaptive max", value=6, min=1, step=1)
                     with ui.row().classes("w-full"):
                         bulk_include = ui.input("Include topics, comma-separated").classes("grow")
                         bulk_exclude = ui.input("Exclude topics, comma-separated").classes("grow")
                     with ui.row().classes("w-full"):
                         bulk_frontmatter = ui.checkbox("Document frontmatter", value=False)
                         bulk_chunks = ui.checkbox("Chunks", value=False)
+                        bulk_chunk_strategy = ui.select(["chars", "tokens"], value="chars", label="Chunk strategy")
                         bulk_chunk_max = ui.number("Chunk max chars", value=8000, min=500, step=500)
                         bulk_chunk_overlap = ui.number("Chunk overlap chars", value=400, min=0, step=50)
+                        bulk_chunk_max_tokens = ui.number("Chunk max tokens", value=1000, min=100, step=100)
+                        bulk_chunk_overlap_tokens = ui.number("Chunk overlap tokens", value=100, min=0, step=25)
                     with ui.row().classes("w-full"):
                         bulk_cache_policy = ui.select(CACHE_POLICIES, value="use-if-present", label="Cache policy")
                         bulk_cache_ttl = ui.number("Cache TTL hours", value=24, min=0, step=1)
@@ -282,9 +314,15 @@ def create_gui_app(
                             bulk_chunks.value,
                             int(bulk_chunk_max.value or 8000),
                             int(bulk_chunk_overlap.value or 0),
+                            bulk_chunk_strategy.value,
+                            int(bulk_chunk_max_tokens.value or 1000),
+                            int(bulk_chunk_overlap_tokens.value or 0),
                             bulk_cache_policy.value,
                             int(bulk_cache_ttl.value) if bulk_cache_ttl.value is not None else None,
                             int(concurrency.value or 1),
+                            concurrency_policy.value,
+                            int(adaptive_min.value or 1),
+                            int(adaptive_max.value or 1),
                         ),
                     )
 
