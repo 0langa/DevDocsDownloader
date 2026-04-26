@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pkgutil
-from typing import Any
+from typing import Any, cast
 
 from ..config import AppConfig
 from ..models import CacheFreshnessPolicy, CrawlMode
@@ -16,22 +17,27 @@ MODES: list[CrawlMode] = ["important", "full"]
 SOURCES = ["auto", "devdocs", "mdn", "dash"]
 
 
-def create_gui_app(config: AppConfig) -> Any:
+def create_gui_app(
+    config: AppConfig,
+    *,
+    service: DocumentationService | None = None,
+    queue: GuiJobQueue | None = None,
+) -> Any:
     _install_nicegui_python314_shim()
     try:
         from nicegui import app, ui
     except ImportError as exc:  # pragma: no cover - exercised through CLI error handling.
         raise RuntimeError(INSTALL_MESSAGE) from exc
 
-    service = DocumentationService(config)
-    queue = GuiJobQueue()
+    service = service or DocumentationService(config)
+    queue = queue or GuiJobQueue()
 
     def split_topics(value: str | None) -> list[str] | None:
         topics = [item.strip() for item in (value or "").split(",") if item.strip()]
         return topics or None
 
     def source_value(value: str | None) -> str | None:
-        return None if value in {None, "", "auto"} else value
+        return value if value in {"devdocs", "mdn", "dash"} else None
 
     def render_jobs(container: Any) -> None:
         container.clear()
@@ -60,6 +66,14 @@ def create_gui_app(config: AppConfig) -> Any:
                 row_key="id",
             ).classes("w-full")
             if queue.jobs:
+                with ui.row().classes("items-center gap-2"):
+                    ui.button("Clear finished jobs", on_click=queue.clear_finished).props("flat dense")
+                    for job in queue.jobs:
+                        if job.status in {"pending", "running"}:
+                            ui.button(
+                                f"Cancel {job.id[:8]}",
+                                on_click=lambda job_id=job.id: queue.cancel_job(job_id),
+                            ).props("flat dense color=negative")
                 latest_events = queue.jobs[-1].events[-60:]
                 with ui.expansion("Latest event log", value=True).classes("w-full"):
                     for event in latest_events:
@@ -366,15 +380,35 @@ def create_gui_app(config: AppConfig) -> Any:
                                     service.delete_checkpoint(slug)
                                     refresh_checkpoints()
 
-                                with ui.row().classes("items-center w-full"):
-                                    ui.label(
-                                        f"{item.slug} {item.source}/{item.source_slug} {item.mode} "
-                                        f"{item.phase} emitted={item.emitted_document_count}"
-                                    ).classes("grow mono text-xs")
-                                    ui.button(
-                                        "Delete",
-                                        on_click=delete_and_refresh,
-                                    ).props("color=negative flat dense")
+                                def rerun_from_checkpoint(summary=item) -> None:
+                                    queue.submit_run(
+                                        service,
+                                        RunLanguageRequest(
+                                            language=summary.language,
+                                            mode=cast(CrawlMode, summary.mode),
+                                            source=source_value(summary.source),
+                                        ),
+                                    )
+
+                                with ui.expansion(
+                                    f"{item.slug} {item.source}/{item.source_slug} {item.mode} "
+                                    f"{item.phase} emitted={item.emitted_document_count}"
+                                ).classes("w-full"):
+                                    ui.label(f"Document position: {item.document_inventory_position}").classes(
+                                        "mono text-xs"
+                                    )
+                                    ui.label(f"Output path: {item.output_path or 'none'}").classes("mono text-xs")
+                                    ui.label(f"Failures: {item.failure_count}").classes("mono text-xs")
+                                    ui.textarea(
+                                        "Checkpoint JSON",
+                                        value=json.dumps(service.read_checkpoint(item.slug), indent=2),
+                                    ).classes("w-full mono")
+                                    with ui.row().classes("items-center gap-2"):
+                                        ui.button("Rerun", on_click=rerun_from_checkpoint).props("flat dense")
+                                        ui.button(
+                                            "Delete",
+                                            on_click=delete_and_refresh,
+                                        ).props("color=negative flat dense")
 
                     ui.button("Refresh checkpoints", on_click=refresh_checkpoints)
 
