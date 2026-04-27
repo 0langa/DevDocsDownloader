@@ -43,6 +43,11 @@ The Typer application in `doc_ingest/cli.py` exposes:
 
 The CLI now acts as a presentation adapter over `doc_ingest.services.DocumentationService` for run, bulk, list, audit, refresh, validation-only, and inspection-friendly workflows. The service returns typed models, owns pipeline lifecycle cleanup, and accepts an optional event sink for GUI-ready phase, document, warning, validation, telemetry, and failure events.
 
+The root help page and each command help page are written as an operator reference. They document source resolution,
+modes, cache freshness policies, resume/checkpoint semantics, optional frontmatter and chunk outputs, adaptive bulk
+scheduling, output locations, and representative examples. This keeps scripted usage discoverable without requiring a
+separate manual for basic operation.
+
 For actual ingestion work, the CLI routes into `_execute_run()` for single-language execution and into a custom async runner inside `bulk()` for multi-language execution.
 
 ### 2.1.1 Local GUI operator interface
@@ -59,6 +64,8 @@ The GUI is local/operator-focused and calls `DocumentationService` in-process. I
 - report, validation JSONL, history, and trends views
 - checkpoint listing and safe deletion
 - source cache metadata inspection
+- a Settings/Help tutorial that explains the end-to-end workflow, expected failure behavior, cache/resume semantics,
+  report interpretation, output browsing, and CLI equivalents
 
 All GUI file reads are routed through service methods that resolve paths under configured output, report, cache, or checkpoint roots before reading or deleting.
 

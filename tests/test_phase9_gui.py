@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import doc_ingest.cli as cli
 from doc_ingest.config import load_config
+from doc_ingest.gui.app import NAV_SECTIONS, SETTINGS_HELP_MARKDOWN
 from doc_ingest.gui.state import GuiJobQueue
 from doc_ingest.models import CacheEntryMetadata, LanguageRunCheckpoint, RunSummary
 from doc_ingest.services import BulkRunRequest, DocumentationService, RunLanguageRequest, ServiceEvent
@@ -51,6 +52,29 @@ def test_gui_service_output_reading_and_path_safety(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         service.read_output_file("synthetic", "..\\..\\pyproject.toml")
+
+
+def test_gui_settings_help_is_an_operator_tutorial() -> None:
+    assert "Operator Tutorial" in SETTINGS_HELP_MARKDOWN
+    assert "Basic workflow" in SETTINGS_HELP_MARKDOWN
+    assert "Resume and checkpoints" in SETTINGS_HELP_MARKDOWN
+    assert "Reports and validation" in SETTINGS_HELP_MARKDOWN
+    assert "CLI equivalents" in SETTINGS_HELP_MARKDOWN
+    assert "Expected failure behavior" in SETTINGS_HELP_MARKDOWN
+
+
+def test_gui_nav_sections_cover_all_operator_views() -> None:
+    assert NAV_SECTIONS == [
+        "Run",
+        "Bulk",
+        "Languages",
+        "Presets/Audit",
+        "Reports",
+        "Output Browser",
+        "Checkpoints",
+        "Cache",
+        "Settings/Help",
+    ]
 
 
 def test_gui_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:

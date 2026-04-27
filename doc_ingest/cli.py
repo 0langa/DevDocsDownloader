@@ -17,13 +17,92 @@ from .services import BulkRunRequest, DocumentationService, RunLanguageRequest
 from .sources.presets import PRESETS
 from .sources.registry import SourceRegistry
 
+APP_HELP = """
+Download official programming-language documentation from DevDocs, MDN, Dash/Kapeli, and installed source plugins,
+then compile it into normalized Markdown manuals.
+
+Typical workflows:
+  python DevDocsDownloader.py run python
+  python DevDocsDownloader.py run javascript --source mdn --mode full --chunks
+  python DevDocsDownloader.py bulk webapp --language-concurrency 3
+  python DevDocsDownloader.py validate python
+  python DevDocsDownloader.py gui
+
+Output defaults:
+  Markdown bundles: output/markdown/<language>/
+  Reports:          output/reports/run_summary.json and .md
+  State:            state/<language>.json
+  Checkpoints:      state/checkpoints/<language>.json while a failed or incomplete run can be resumed
+
+Run without arguments to launch the interactive wizard. Use sub-command --help for the full option guide.
+"""
+
+RUN_HELP = """
+Download, convert, validate, and report one language.
+
+Resolution:
+  By default the registry chooses the best matching source across DevDocs, MDN, Dash, and plugins.
+  Use --source devdocs|mdn|dash to force a source. If a language is not found, suggestions are printed.
+
+Modes:
+  important  Builds the source-defined core subset where available.
+  full       Builds the complete available inventory for the selected source/language.
+
+Resume and safety:
+  Runs write strict state/checkpoint files. If a previous run failed at a safe document boundary, the next matching
+  run resumes automatically when checkpoint artifacts are still present. Use --force-refresh to refresh catalogs
+  and cache entries before resolving/fetching.
+
+Outputs:
+  Always writes per-document Markdown, topic sections, an index, a consolidated manual, _meta.json, reports,
+  validation diagnostics, and final state. Optional flags can add YAML frontmatter and retrieval chunks.
+
+Examples:
+  python DevDocsDownloader.py run python
+  python DevDocsDownloader.py run javascript --source mdn --mode full
+  python DevDocsDownloader.py run rust --include-topic std --chunks
+  python DevDocsDownloader.py run python --validate-only
+"""
+
+BULK_HELP = """
+Run multiple languages from a preset or from every configured source catalog.
+
+Targets:
+  Presets are named groups from doc_ingest/sources/presets.py, such as webapp, backend, python-stack, and systems.
+  The special target all resolves every language advertised by every configured source.
+
+Concurrency:
+  --language-concurrency controls how many languages run at once. The default --concurrency-policy static keeps
+  this fixed. The opt-in adaptive policy lowers concurrency when failures/retries/system pressure rise and slowly
+  increases it after healthy windows. Output report order remains deterministic.
+
+Safety:
+  bulk all prints an estimate and asks for confirmation unless --yes is supplied. Each language keeps its own state,
+  checkpoint, report records, and output bundle.
+
+Examples:
+  python DevDocsDownloader.py bulk webapp
+  python DevDocsDownloader.py bulk backend --mode full --chunks
+  python DevDocsDownloader.py bulk all --mode important --yes
+  python DevDocsDownloader.py bulk webapp --concurrency-policy adaptive --adaptive-max-concurrency 4
+"""
+
+GUI_HELP = """
+Launch the optional local NiceGUI operator interface.
+
+Install first:
+  python -m pip install -e ".\\[gui]"
+
+The GUI exposes the same operational surface as the CLI: single runs, bulk/preset runs, language listing, preset
+audit, catalog refresh, validation-only runs, topic filters, cache policy, optional frontmatter/chunks/token chunks,
+job queue progress, event logs, reports, output browsing, checkpoints, and cache metadata.
+
+This is a local operator UI, not a hosted multi-user service. Keep the default host 127.0.0.1 unless you explicitly
+intend to expose it on another interface.
+"""
+
 app = typer.Typer(
-    help=(
-        "Download official programming-language documentation from aggregators "
-        "(DevDocs, MDN, Dash/Kapeli) and compile it into clean, AI-friendly Markdown.\n\n"
-        "Run [bold]without arguments[/bold] to launch the interactive wizard.\n"
-        "Use the [bold]run[/bold] sub-command for scripted or automated invocations."
-    ),
+    help=APP_HELP,
     invoke_without_command=True,
     no_args_is_help=False,
     rich_markup_mode="rich",
@@ -183,47 +262,121 @@ def _wizard() -> None:
     )
 
 
-@app.command(help="Download documentation for a single language.")
+@app.command(help=RUN_HELP)
 def run(
-    language: str = typer.Argument(..., help="Language name (e.g. 'python', 'rust', 'javascript')."),
-    mode: CrawlMode = typer.Option("important", "--mode", help="'important' for core topics, 'full' for everything."),
-    source: str | None = typer.Option(None, "--source", help="Force a specific source: devdocs, mdn, or dash."),
-    force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs before resolving."),
+    language: str = typer.Argument(
+        ...,
+        help=(
+            "Language or documentation family to resolve, for example 'python', 'rust', 'javascript', 'html', "
+            "'css', or a source-specific slug."
+        ),
+    ),
+    mode: CrawlMode = typer.Option(
+        "important",
+        "--mode",
+        help=(
+            "Compilation scope. 'important' uses the source's curated/core subset when available; 'full' emits every "
+            "document in the source inventory."
+        ),
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Force a source instead of automatic resolution. Built-ins are devdocs, mdn, and dash.",
+    ),
+    force_refresh: bool = typer.Option(
+        False,
+        "--force-refresh",
+        help="Ignore reusable source/cache freshness decisions and re-fetch catalogs or archives where supported.",
+    ),
     validate_only: bool = typer.Option(
-        False, "--validate-only", help="Validate an existing output without downloading."
+        False,
+        "--validate-only",
+        help="Validate the existing output bundle and reports for LANGUAGE without downloading or converting documents.",
     ),
     include_topic: list[str] | None = typer.Option(
         None,
         "--include-topic",
-        help="Only include documents whose normalized topic matches this value. Repeat for multiple topics.",
+        help=(
+            "Only emit documents whose normalized topic equals this value. Repeat the option for multiple allowed "
+            "topics. Topic filters are applied after source inventory discovery."
+        ),
     ),
     exclude_topic: list[str] | None = typer.Option(
         None,
         "--exclude-topic",
-        help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics.",
+        help="Skip documents whose normalized topic equals this value. Repeat for multiple excluded topics.",
     ),
-    silent: bool = typer.Option(False, "--silent"),
-    debug: bool = typer.Option(False, "--debug"),
-    verbose: bool = typer.Option(False, "--verbose"),
-    output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
+    silent: bool = typer.Option(False, "--silent", help="Suppress routine console output; errors are still shown."),
+    debug: bool = typer.Option(False, "--debug", help="Write debug-level runtime logging to logs/run.log."),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Write verbose debug logging, including HTTP client details where available, to logs/run.log.",
+    ),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Use an alternate output root. Markdown, reports, state, cache, logs, and tmp dirs are rooted here.",
+    ),
     document_frontmatter: bool = typer.Option(
         False,
         "--document-frontmatter/--no-document-frontmatter",
-        help="Emit YAML frontmatter in each per-document Markdown file.",
+        help=(
+            "Add machine-readable YAML frontmatter to each per-document Markdown file while keeping the existing "
+            "human-readable metadata lines."
+        ),
     ),
-    chunks: bool = typer.Option(False, "--chunks", help="Emit retrieval chunks and chunks/manifest.jsonl."),
-    chunk_max_chars: int = typer.Option(8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk."),
-    chunk_overlap_chars: int = typer.Option(400, "--chunk-overlap-chars", min=0, help="Characters of chunk overlap."),
-    chunk_strategy: str = typer.Option("chars", "--chunk-strategy", help="Chunk strategy: chars or tokens."),
-    chunk_max_tokens: int = typer.Option(1000, "--chunk-max-tokens", min=100, help="Maximum tokens per token chunk."),
-    chunk_overlap_tokens: int = typer.Option(100, "--chunk-overlap-tokens", min=0, help="Token overlap for chunks."),
+    chunks: bool = typer.Option(
+        False,
+        "--chunks",
+        help="Emit retrieval-oriented chunk Markdown files plus chunks/manifest.jsonl for downstream RAG/indexing.",
+    ),
+    chunk_max_chars: int = typer.Option(
+        8000,
+        "--chunk-max-chars",
+        min=500,
+        help="Maximum characters per chunk when --chunks --chunk-strategy chars is used.",
+    ),
+    chunk_overlap_chars: int = typer.Option(
+        400,
+        "--chunk-overlap-chars",
+        min=0,
+        help="Character overlap between adjacent chunks for context preservation.",
+    ),
+    chunk_strategy: str = typer.Option(
+        "chars",
+        "--chunk-strategy",
+        help=(
+            "Chunk sizing strategy: 'chars' works with baseline dependencies; 'tokens' requires installing the "
+            "tokenizer extra."
+        ),
+    ),
+    chunk_max_tokens: int = typer.Option(
+        1000,
+        "--chunk-max-tokens",
+        min=100,
+        help="Maximum tokens per chunk when --chunks --chunk-strategy tokens is used.",
+    ),
+    chunk_overlap_tokens: int = typer.Option(
+        100,
+        "--chunk-overlap-tokens",
+        min=0,
+        help="Token overlap between adjacent token chunks.",
+    ),
     cache_policy: CacheFreshnessPolicy = typer.Option(
         "use-if-present",
         "--cache-policy",
-        help="Cache policy: use-if-present, ttl, always-refresh, or validate-if-possible.",
+        help=(
+            "Cache freshness policy: use-if-present preserves existing cache, ttl refreshes after --cache-ttl-hours, "
+            "always-refresh refetches, validate-if-possible uses validators when the source exposes them."
+        ),
     ),
     cache_ttl_hours: int | None = typer.Option(
-        None, "--cache-ttl-hours", min=0, help="TTL hours for --cache-policy ttl."
+        None,
+        "--cache-ttl-hours",
+        min=0,
+        help="TTL in hours for --cache-policy ttl. If omitted, the configured default is used.",
     ),
 ) -> None:
     """Download and compile documentation for a language.
@@ -287,56 +440,84 @@ def _format_bytes(n: int) -> str:
     return f"{value:.1f} PB"
 
 
-@app.command(help="Download documentation in bulk: a preset or every available language.")
+@app.command(help=BULK_HELP)
 def bulk(
-    target: str = typer.Argument(..., help="Preset name (e.g. 'webapp', 'backend') or 'all' for everything."),
-    mode: CrawlMode = typer.Option("important", "--mode", help="'important' for core topics, 'full' for everything."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt for --bulk all."),
-    force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-download source catalogs first."),
+    target: str = typer.Argument(
+        ...,
+        help="Preset name such as webapp/backend/python-stack/systems, or 'all' for every catalog language.",
+    ),
+    mode: CrawlMode = typer.Option(
+        "important",
+        "--mode",
+        help="Compilation scope for every language: 'important' for curated/core documents, 'full' for all documents.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt for the large 'all' target."),
+    force_refresh: bool = typer.Option(
+        False,
+        "--force-refresh",
+        help="Refresh source catalogs/caches before resolving the bulk target.",
+    ),
     language_concurrency: int = typer.Option(
-        3, "--language-concurrency", min=1, help="Languages to process in parallel during bulk runs."
+        3,
+        "--language-concurrency",
+        min=1,
+        help="Number of languages to process at once. Static mode keeps this fixed.",
     ),
     concurrency_policy: BulkConcurrencyPolicy = typer.Option(
         "static",
         "--concurrency-policy",
-        help="Bulk concurrency policy: static or adaptive.",
+        help="Bulk scheduling policy: static keeps concurrency fixed; adaptive changes it based on failures/retries.",
     ),
     adaptive_min_concurrency: int = typer.Option(
         1,
         "--adaptive-min-concurrency",
         min=1,
-        help="Minimum adaptive language concurrency.",
+        help="Lowest language concurrency adaptive mode may use under pressure.",
     ),
     adaptive_max_concurrency: int = typer.Option(
         6,
         "--adaptive-max-concurrency",
         min=1,
-        help="Maximum adaptive language concurrency.",
+        help="Highest language concurrency adaptive mode may use after healthy windows.",
     ),
     include_topic: list[str] | None = typer.Option(
         None,
         "--include-topic",
-        help="Only include documents whose normalized topic matches this value. Repeat for multiple topics.",
+        help="Only emit matching normalized topics for every language. Repeat for multiple allowed topics.",
     ),
     exclude_topic: list[str] | None = typer.Option(
         None,
         "--exclude-topic",
-        help="Exclude documents whose normalized topic matches this value. Repeat for multiple topics.",
+        help="Skip matching normalized topics for every language. Repeat for multiple excluded topics.",
     ),
-    silent: bool = typer.Option(False, "--silent"),
-    debug: bool = typer.Option(False, "--debug"),
-    verbose: bool = typer.Option(False, "--verbose"),
+    silent: bool = typer.Option(False, "--silent", help="Suppress routine console output; errors are still shown."),
+    debug: bool = typer.Option(False, "--debug", help="Write debug-level runtime logging to logs/run.log."),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Write verbose debug logging, including HTTP client details where available, to logs/run.log.",
+    ),
     document_frontmatter: bool = typer.Option(
         False,
         "--document-frontmatter/--no-document-frontmatter",
-        help="Emit YAML frontmatter in each per-document Markdown file.",
+        help="Add YAML metadata frontmatter to each per-document Markdown file.",
     ),
     chunks: bool = typer.Option(False, "--chunks", help="Emit retrieval chunks and chunks/manifest.jsonl."),
-    chunk_max_chars: int = typer.Option(8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk."),
-    chunk_overlap_chars: int = typer.Option(400, "--chunk-overlap-chars", min=0, help="Characters of chunk overlap."),
-    chunk_strategy: str = typer.Option("chars", "--chunk-strategy", help="Chunk strategy: chars or tokens."),
-    chunk_max_tokens: int = typer.Option(1000, "--chunk-max-tokens", min=100, help="Maximum tokens per token chunk."),
-    chunk_overlap_tokens: int = typer.Option(100, "--chunk-overlap-tokens", min=0, help="Token overlap for chunks."),
+    chunk_max_chars: int = typer.Option(
+        8000, "--chunk-max-chars", min=500, help="Maximum characters per chunk for char-based chunking."
+    ),
+    chunk_overlap_chars: int = typer.Option(
+        400, "--chunk-overlap-chars", min=0, help="Character overlap between adjacent chunks."
+    ),
+    chunk_strategy: str = typer.Option(
+        "chars", "--chunk-strategy", help="Chunk strategy: chars or tokens. Token mode requires the tokenizer extra."
+    ),
+    chunk_max_tokens: int = typer.Option(
+        1000, "--chunk-max-tokens", min=100, help="Maximum tokens per chunk for token-based chunking."
+    ),
+    chunk_overlap_tokens: int = typer.Option(
+        100, "--chunk-overlap-tokens", min=0, help="Token overlap between adjacent token chunks."
+    ),
     cache_policy: CacheFreshnessPolicy = typer.Option(
         "use-if-present",
         "--cache-policy",
@@ -471,17 +652,33 @@ def bulk(
     asyncio.run(_runner())
 
 
-@app.command("list-presets", help="List predefined bulk presets and the languages they contain.")
+@app.command(
+    "list-presets",
+    help=(
+        "List predefined bulk presets and their languages. Presets are convenience groups for repeatable bulk runs; "
+        "use audit-presets before a release or scheduled run to verify all names still resolve."
+    ),
+)
 def list_presets() -> None:
     service = DocumentationService(load_config())
     for name, langs in service.list_presets().items():
         console.print(f"[bold cyan]{name}[/bold cyan]: {', '.join(langs)}")
 
 
-@app.command("audit-presets", help="Check whether preset languages resolve against configured sources.")
+@app.command(
+    "audit-presets",
+    help=(
+        "Resolve one or all presets against the current source catalogs without compiling output. Exits with code 2 "
+        "when any preset language is missing, which makes it suitable for CI or release checks."
+    ),
+)
 def audit_presets(
     preset: str | None = typer.Argument(None, help="Preset name to audit. Omit to audit every preset."),
-    source: str | None = typer.Option(None, "--source", help="Force resolution against a specific source."),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Force resolution against one source instead of the normal source priority.",
+    ),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-fetch catalogs before auditing."),
 ) -> None:
     config = load_config()
@@ -519,9 +716,17 @@ def audit_presets(
     asyncio.run(_runner())
 
 
-@app.command("list-languages", help="List every language available across all configured sources.")
+@app.command(
+    "list-languages",
+    help=(
+        "List every language advertised by configured sources and plugins. Use this before scripted runs to find "
+        "display names, source names, source slugs, and versions."
+    ),
+)
 def list_languages(
-    source: str | None = typer.Option(None, "--source", help="Filter by a single source."),
+    source: str | None = typer.Option(
+        None, "--source", help="Filter by a single source: devdocs, mdn, dash, or plugin name."
+    ),
     force_refresh: bool = typer.Option(False, "--force-refresh", help="Re-fetch catalogs before listing."),
 ) -> None:
     config = load_config()
@@ -544,7 +749,13 @@ def list_languages(
     asyncio.run(_runner())
 
 
-@app.command("refresh-catalogs", help="Force-refresh all source catalogs.")
+@app.command(
+    "refresh-catalogs",
+    help=(
+        "Force-refresh all configured source catalogs and report how many language entries each source exposes. "
+        "This is useful before audits, first-time GUI use, or scheduled bulk runs."
+    ),
+)
 def refresh_catalogs() -> None:
     config = load_config()
 
@@ -557,9 +768,14 @@ def refresh_catalogs() -> None:
     asyncio.run(_runner())
 
 
-@app.command(help="Validate an existing compiled output without downloading.")
+@app.command(
+    help=(
+        "Validate an existing output bundle without network fetches or compilation. Reads local _meta.json when "
+        "available, writes the same report files as a normal run, and is safe for CI checks on generated artifacts."
+    ),
+)
 def validate(
-    language: str = typer.Argument(..., help="Language name."),
+    language: str = typer.Argument(..., help="Language/output bundle to validate."),
     source: str | None = typer.Option(
         None, "--source", help="Resolve against a specific source only if local metadata is unavailable."
     ),
@@ -578,13 +794,21 @@ def validate(
     )
 
 
-@app.command(help="Launch the optional local NiceGUI operator interface.")
+@app.command(help=GUI_HELP)
 def gui(
-    host: str = typer.Option("127.0.0.1", "--host", help="Host interface for the local GUI server."),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Host interface for the local GUI server. Keep 127.0.0.1 for local-only operation.",
+    ),
     port: int = typer.Option(8080, "--port", min=1, max=65535, help="Port for the local GUI server."),
     reload: bool = typer.Option(False, "--reload", help="Enable NiceGUI reload while developing the GUI."),
-    native: bool = typer.Option(False, "--native", help="Launch NiceGUI in native window mode when available."),
-    output_dir: Path | None = typer.Option(None, "--output-dir", help="Alternate output directory root."),
+    native: bool = typer.Option(False, "--native", help="Launch NiceGUI in native desktop-window mode when available."),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Alternate output root used by the GUI for output, reports, state, checkpoints, cache, logs, and tmp.",
+    ),
 ) -> None:
     config = load_config(output_dir=output_dir)
     try:
@@ -596,7 +820,12 @@ def gui(
         raise typer.Exit(code=1) from exc
 
 
-@app.command(help="Create the required project directories.")
+@app.command(
+    help=(
+        "Create the runtime directory tree without downloading anything: output/markdown, output/reports, cache, "
+        "logs, state/checkpoints, and tmp."
+    ),
+)
 def init() -> None:
     config = load_config()
     config.paths.ensure()

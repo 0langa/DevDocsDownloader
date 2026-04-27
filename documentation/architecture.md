@@ -61,6 +61,8 @@ local browser
 - run the interactive wizard when no subcommand is provided
 - initialize config, logging, progress tracking, and service requests
 - render terminal summaries with Rich
+- provide long-form operator help for command behavior, output locations, resume/checkpoint behavior, cache policies,
+  chunking, adaptive bulk scheduling, GUI launch, and examples
 
 **Key behavior:**
 
@@ -90,6 +92,8 @@ The optional `gui` command launches the local NiceGUI operator interface when th
 - the GUI calls `DocumentationService` directly and does not shell out to Typer commands
 - file reads are constrained to configured output/report/cache/state roots
 - destructive checkpoint deletion is limited to `state/checkpoints/*.json`
+- the Settings/Help tab embeds the operator tutorial for workflows, expected behavior, validation output, cache/resume
+  controls, report interpretation, output browsing, and CLI equivalents
 
 ### 2. Configuration and path management
 

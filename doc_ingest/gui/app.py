@@ -15,6 +15,136 @@ INSTALL_MESSAGE = "NiceGUI support is not installed. Run: python -m pip install 
 CACHE_POLICIES: list[CacheFreshnessPolicy] = ["use-if-present", "ttl", "always-refresh", "validate-if-possible"]
 MODES: list[CrawlMode] = ["important", "full"]
 SOURCES = ["auto", "devdocs", "mdn", "dash"]
+NAV_SECTIONS = [
+    "Run",
+    "Bulk",
+    "Languages",
+    "Presets/Audit",
+    "Reports",
+    "Output Browser",
+    "Checkpoints",
+    "Cache",
+    "Settings/Help",
+]
+SETTINGS_HELP_MARKDOWN = """
+## Operator Tutorial
+
+DevDocsDownloader builds local Markdown documentation bundles from official source catalogs. The GUI calls the same
+`DocumentationService` used by the CLI, so GUI runs produce the same output, reports, state files, checkpoints, cache
+metadata, and validation diagnostics.
+
+### Basic workflow
+
+1. Open **Languages** and refresh the catalog if you are unsure how a language is named.
+2. Open **Run** for one language or **Bulk** for a preset/all-languages run.
+3. Choose `important` for curated core documentation or `full` for the complete source inventory.
+4. Leave source as `auto` unless you specifically need `devdocs`, `mdn`, or `dash`.
+5. Queue the job and watch **Run queue** plus **Latest event log** for progress.
+6. Open **Reports** after completion to inspect validation, warnings, telemetry, history, and trends.
+7. Open **Output Browser** to inspect generated Markdown, chunks, `_meta.json`, and asset manifests.
+
+### Run tab
+
+Use **Run** for one language. The language box accepts display names such as `python`, `javascript`, `html`, `css`,
+or source-specific slugs. `Validate only` checks an existing output bundle without downloading or compiling anything.
+`Force refresh` bypasses normal cache reuse where the source supports it.
+
+Topic filters use normalized topic names. `Include topics` keeps only matching topics; `Exclude topics` removes
+matching topics. Separate multiple values with commas.
+
+### Bulk tab
+
+Use **Bulk** for presets or `all`. Bulk jobs run several languages and keep separate state/checkpoint files per
+language. `Language concurrency` controls how many languages run at the same time. `static` keeps that number fixed.
+`adaptive` starts conservatively and lowers concurrency when failures, retries, or system pressure appear; it may
+increase slowly after healthy windows.
+
+### Output options
+
+`Document frontmatter` adds YAML metadata to each per-document Markdown file while preserving the human-readable
+metadata block. `Chunks` writes retrieval-friendly files under `chunks/` and a `chunks/manifest.jsonl`.
+
+Chunk strategy `chars` is dependency-free and is the default. Chunk strategy `tokens` requires:
+
+```powershell
+python -m pip install -e .[tokenizer]
+```
+
+### Cache behavior
+
+`use-if-present` preserves existing cached source files. `ttl` refreshes after the configured TTL. `always-refresh`
+fetches again. `validate-if-possible` uses upstream validators when they exist and falls back safely when they do not.
+`Force refresh` overrides these policies for that job.
+
+Cache metadata is visible in **Cache**. A catalog refresh updates source catalogs without compiling documentation.
+
+### Resume and checkpoints
+
+Failed or interrupted runs can leave checkpoints in `state/checkpoints/`. A matching rerun resumes automatically when
+the checkpoint identity and emitted artifact manifest still match the current output tree. If files are missing or the
+run identity changed, the system falls back to a full replay and records a warning.
+
+Use **Checkpoints** to inspect failures, emitted counts, inventory position, and the stored checkpoint JSON. Deleting a
+checkpoint is explicit and limited to the checkpoints directory.
+
+### Reports and validation
+
+The latest aggregate reports are written to `output/reports/run_summary.json` and `.md`. Historical reports are kept
+under `output/reports/history/`, and quality trend summaries are written to `trends.json` and `.md`.
+
+Validation warnings flag issues such as broken relative links, malformed tables, heading/anchor problems, source
+inventory mismatches, and document-level source warnings. A successful run can still contain warnings; use the score,
+issue codes, and document validation records to decide whether the output is acceptable for your downstream use.
+
+### Output browser
+
+The browser lists language bundles under `output/markdown/<language>/`. Each bundle can include:
+
+- `<language>.md` consolidated manual
+- `index.md`
+- topic folders and `_section.md` files
+- per-document Markdown files
+- `_meta.json`
+- optional `chunks/manifest.jsonl`
+- optional `assets/manifest.json`
+
+The preview is read-only and path-safe; it cannot read outside the configured output root.
+
+### Presets and language resolution
+
+**Presets/Audit** shows preset sizes, audits whether preset languages resolve, and can queue catalog refreshes. Use it
+before scheduled or release-scale bulk runs. Missing preset entries are reported without modifying output.
+
+### CLI equivalents
+
+Every GUI workflow has a CLI equivalent:
+
+```powershell
+python DevDocsDownloader.py run python --mode important
+python DevDocsDownloader.py run javascript --source mdn --mode full --chunks
+python DevDocsDownloader.py bulk webapp --language-concurrency 3
+python DevDocsDownloader.py bulk webapp --concurrency-policy adaptive --adaptive-max-concurrency 4
+python DevDocsDownloader.py validate python
+python DevDocsDownloader.py list-languages
+python DevDocsDownloader.py audit-presets
+python DevDocsDownloader.py refresh-catalogs
+```
+
+Run any command with `--help` for the complete option guide. Install GUI support with:
+
+```powershell
+python -m pip install -e .[gui]
+```
+
+### Expected failure behavior
+
+Network/source failures are recorded in reports and checkpoints. Recoverable source warnings appear in reports and may
+also be tied to individual documents. Routine deterministic tests never require live network access; live endpoint and
+extraction probes are opt-in release checks.
+
+The GUI is local/operator-focused. Keep the default host `127.0.0.1` unless you intentionally want the interface
+available on another network interface.
+"""
 
 
 def create_gui_app(
@@ -90,6 +220,15 @@ def create_gui_app(
             ui.label(f"Latest reports: {len(snapshot.reports)}")
             ui.label(f"History reports: {len(snapshot.history_reports)}")
             ui.label(f"Trend/report detail files: {len(snapshot.trend_reports)}")
+
+    def render_settings_help() -> None:
+        ui.label(f"Project root: {config.paths.root}").classes("mono text-xs")
+        ui.label(f"Output directory: {config.paths.output_dir}").classes("mono text-xs")
+        ui.label(f"State directory: {config.paths.state_dir}").classes("mono text-xs")
+        ui.label(f"Cache directory: {config.paths.cache_dir}").classes("mono text-xs")
+
+        ui.separator()
+        ui.markdown(SETTINGS_HELP_MARKDOWN).classes("w-full")
 
     async def run_single(
         language: str,
@@ -193,6 +332,7 @@ def create_gui_app(
               body { background: #f7f8fa; }
               .dense-panel { border: 1px solid #d8dde6; border-radius: 6px; padding: 12px; background: white; }
               .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+              .nav-button { justify-content: flex-start; width: 100%; text-transform: none; }
               @media (max-width: 700px) {
                 .q-drawer { display: none !important; }
                 .q-page-container { padding-left: 0 !important; }
@@ -204,20 +344,10 @@ def create_gui_app(
         with ui.header().classes("items-center justify-between"):
             ui.label("DevDocsDownloader Operator").classes("text-lg font-semibold")
             status = ui.label("Idle").classes("text-sm")
+        tab_lookup: dict[str, Any] = {}
         with ui.left_drawer(value=True).props("width=220 breakpoint=0").classes("bg-slate-900 text-white"):
             ui.label("Operations").classes("text-sm uppercase tracking-wide opacity-70")
-            for label in [
-                "Run",
-                "Bulk",
-                "Languages",
-                "Presets/Audit",
-                "Reports",
-                "Output Browser",
-                "Checkpoints",
-                "Cache",
-                "Settings/Help",
-            ]:
-                ui.label(label).classes("py-1")
+            nav_column = ui.column().classes("w-full gap-1")
 
         with ui.column().classes("w-full gap-3 p-3"):
             runtime_container = ui.column().classes("dense-panel w-full")
@@ -232,6 +362,25 @@ def create_gui_app(
                 checkpoints_tab = ui.tab("Checkpoints")
                 cache_tab = ui.tab("Cache")
                 settings_tab = ui.tab("Settings/Help")
+            tab_lookup.update(
+                {
+                    "Run": run_tab,
+                    "Bulk": bulk_tab,
+                    "Languages": languages_tab,
+                    "Presets/Audit": presets_tab,
+                    "Reports": reports_tab,
+                    "Output Browser": output_tab,
+                    "Checkpoints": checkpoints_tab,
+                    "Cache": cache_tab,
+                    "Settings/Help": settings_tab,
+                }
+            )
+            with nav_column:
+                for label in NAV_SECTIONS:
+                    ui.button(
+                        label,
+                        on_click=lambda target=label: tabs.set_value(tab_lookup[target]),
+                    ).props("flat color=white align=left").classes("nav-button")
 
             with ui.tab_panels(tabs, value=run_tab).classes("w-full"):
                 with ui.tab_panel(run_tab).classes("dense-panel"):
@@ -472,10 +621,7 @@ def create_gui_app(
                     ui.button("Queue catalog refresh", on_click=lambda: queue.submit_refresh_catalogs(service))
 
                 with ui.tab_panel(settings_tab).classes("dense-panel"):
-                    ui.label(f"Project root: {config.paths.root}").classes("mono text-xs")
-                    ui.label(f"Output directory: {config.paths.output_dir}").classes("mono text-xs")
-                    ui.label("The GUI is local/operator-focused and calls DocumentationService in-process.")
-                    ui.label("Install GUI support with: python -m pip install -e .[gui]").classes("mono")
+                    render_settings_help()
 
         def refresh_status() -> None:
             active = queue.active

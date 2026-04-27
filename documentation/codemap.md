@@ -174,6 +174,8 @@ DevDocsDownloader/
 
 - imported only by the `gui` command or GUI tests
 - exposes run, bulk, languages, presets/audit, reports, output browser, checkpoints, cache, and settings/help views
+- `SETTINGS_HELP_MARKDOWN` contains the in-app operator tutorial for workflows, cache/resume behavior, validation,
+  reports, output browsing, and CLI equivalents
 - does not shell out to CLI commands for core operations
 
 ### `doc_ingest/gui/state.py`

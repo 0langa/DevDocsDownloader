@@ -147,8 +147,15 @@ The CLI is the primary automation interface. It supports one-language runs, pres
 
 ```bash
 python DevDocsDownloader.py --help
+python DevDocsDownloader.py run --help
+python DevDocsDownloader.py bulk --help
+python DevDocsDownloader.py gui --help
 python DevDocsDownloader.py init
 ```
+
+The root and sub-command help pages are intended to be usable as an operator reference. They explain source
+resolution, modes, cache policy, resume/checkpoint behavior, output files, chunking, adaptive bulk scheduling, and
+common examples.
 
 ### Run one language
 
@@ -238,6 +245,7 @@ The GUI is a local operator interface. It calls `DocumentationService` in-proces
 - **Output Browser:** browse generated language bundles, per-document Markdown, consolidated manuals, chunks, manifests, and metadata.
 - **Checkpoints:** inspect failed/active checkpoints and safely delete selected checkpoint files.
 - **Cache:** inspect cache metadata sidecars and refresh catalogs.
+- **Settings/Help:** read the built-in operator tutorial covering the full workflow, expected behavior, failure modes, cache/resume semantics, report interpretation, and CLI equivalents.
 
 ## Live Probe Guide
 

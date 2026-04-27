@@ -13,21 +13,34 @@ runner = CliRunner()
 
 
 def test_cli_help_exposes_scripted_contract_options() -> None:
+    root_result = runner.invoke(cli.app, ["--help"])
     run_result = runner.invoke(cli.app, ["run", "--help"])
     bulk_result = runner.invoke(cli.app, ["bulk", "--help"])
     audit_result = runner.invoke(cli.app, ["audit-presets", "--help"])
 
+    assert root_result.exit_code == 0
+    assert "Typical workflows" in root_result.output
+    assert "Output defaults" in root_result.output
+    assert "state/checkpoints" in root_result.output
+
     assert run_result.exit_code == 0
+    assert "Resolution:" in run_result.output
+    assert "Resume and safety:" in run_result.output
+    assert "Always writes per-document Markdown" in run_result.output
     assert "--include-topic" in run_result.output
     assert "--exclude-topic" in run_result.output
     assert "--output-dir" in run_result.output
     assert "--chunk-strategy" in run_result.output
     assert "Maximum tokens" in run_result.output
+    assert "tokenizer extra" in run_result.output
 
     assert bulk_result.exit_code == 0
+    assert "Targets:" in bulk_result.output
+    assert "Concurrency:" in bulk_result.output
     assert "--language-conc" in bulk_result.output
     assert "static|adaptiv" in bulk_result.output
-    assert "Minimum adaptive" in bulk_result.output
+    assert "--adaptive-min" in bulk_result.output
+    assert "--adaptive-max" in bulk_result.output
     assert "--include-topic" in bulk_result.output
     assert "--exclude-topic" in bulk_result.output
     assert "--chunk-strategy" in bulk_result.output
