@@ -2,7 +2,7 @@
   #define MyAppName "DevDocsDownloader"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.9.1"
+  #define MyAppVersion "1.0.9.2"
 #endif
 #ifndef MyAppPublisher
   #define MyAppPublisher "DevDocsDownloader"
@@ -11,7 +11,7 @@
   #define MyAppExeName "DevDocsDownloader.Desktop.exe"
 #endif
 #ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "DevDocsDownloader-Setup-1.0.9.1"
+  #define MyOutputBaseFilename "DevDocsDownloader-Setup-1.0.9.2"
 #endif
 
 [Setup]

@@ -1,17 +1,15 @@
-# DevDocsDownloader 1.0.9.1
+# DevDocsDownloader 1.0.9.2
 
-Hotfix release — UI state and window icon fixes.
+Hotfix release — bash and single-page DevDocs manuals now download correctly.
 
-Changes since 1.0.9:
+Changes since 1.0.9.1:
 
-- Fixed sidebar not clearing after job completes: cancel button, progress bar, and job label now reset to idle state when a job finishes (completed, failed, or cancelled).
-- Fixed window/taskbar icon missing at runtime: the app now calls AppWindow.SetIcon() on startup so the correct icon appears in the taskbar and title bar (not just the installer).
-- Fixed ActiveJobId property change not triggering sidebar refresh: ApplyShellState was not wired to ActiveJobId, so the cancel button stayed visible after ActiveJobId cleared.
+- Fixed 0 documents emitted for bash and other single-page DevDocs manuals: DevDocs stores the full content under an empty string key in db.json, but index.json entries use fragment-only paths (e.g. #built-ins) so doc_key split to "". The guard `if not doc_key` skipped every entry before the db lookup. Fix: check only for duplicate keys, not empty keys.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.9.1.exe`
-- `DevDocsDownloader-Portable-1.0.9.1.zip`
+- `DevDocsDownloader-Setup-1.0.9.2.exe`
+- `DevDocsDownloader-Portable-1.0.9.2.zip`
 - `SHA256SUMS.txt`
 
 Notes:
