@@ -24,12 +24,12 @@ jobs:
         shell: pwsh
         run: |
           python scripts/check_release_hygiene.py
-          python - <<'PY'
+          @'
           import doc_ingest.cli
           import doc_ingest.desktop_backend
           import doc_ingest.pipeline
           print("imports ok")
-          PY
+          '@ | python -
           python DevDocsDownloader.py --help
           python -m pytest tests/test_version.py tests/test_output_contract.py -q
 
