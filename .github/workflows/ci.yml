@@ -58,6 +58,12 @@ jobs:
           if (-not (Test-Path (Join-Path $publishDir 'DevDocsDownloader.Desktop.exe'))) {
             throw 'Published desktop shell executable was not produced.'
           }
+          $priFile = Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE 'desktop\DevDocsDownloader.Desktop\bin') -Filter 'DevDocsDownloader.Desktop.pri' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($priFile) {
+            Copy-Item $priFile.FullName $publishDir -Force
+          } else {
+            Write-Warning 'DevDocsDownloader.Desktop.pri not found - XAML resources will fail at runtime.'
+          }
 
       - name: Smoke launch WinUI desktop shell
         shell: pwsh
