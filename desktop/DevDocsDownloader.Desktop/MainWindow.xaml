@@ -5,29 +5,4 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="DevDocsDownloader">
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="260" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <Border Grid.Column="0" Padding="16">
-            <StackPanel>
-                <TextBlock Text="DevDocsDownloader" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,8" />
-                <TextBlock x:Name="StatusTextBlock" Opacity="0.7" TextWrapping="Wrap" Margin="0,0,0,16" />
-                <Button Content="Dashboard / Run" Tag="RunPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Bulk" Tag="BulkPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Languages" Tag="LanguagesPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Presets / Audit" Tag="PresetsPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Reports" Tag="ReportsPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Output Browser" Tag="OutputBrowserPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Checkpoints" Tag="CheckpointsPage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Cache" Tag="CachePage" Click="OnNavigateClick" Margin="0,0,0,8" />
-                <Button Content="Settings / Help" Tag="SettingsPage" Click="OnNavigateClick" />
-            </StackPanel>
-        </Border>
-
-        <Frame x:Name="ContentFrame" Grid.Column="1" Margin="16" />
-    </Grid>
-</Window>
+    Title="DevDocsDownloader" />
