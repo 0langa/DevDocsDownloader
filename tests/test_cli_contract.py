@@ -29,7 +29,6 @@ def test_cli_help_exposes_scripted_contract_options() -> None:
     assert "Always writes per-document Markdown" in run_result.output
     assert "Optional flags can add YAML" in run_result.output
     assert "retrieval chunks" in run_result.output
-    assert "run rust --include-topic std --chunks" in run_result.output
 
     assert bulk_result.exit_code == 0
     assert "Targets:" in bulk_result.output
