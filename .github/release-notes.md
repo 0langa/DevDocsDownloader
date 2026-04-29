@@ -1,20 +1,20 @@
-# DevDocsDownloader 1.0.8
+# DevDocsDownloader 1.0.9
 
-Desktop UX and reliability release.
+Reliability and UX polish release.
 
-Changes since 1.0.4:
+Changes since 1.0.8:
 
-- Reworked the WinUI shell into a stateful operator UI with persistent tab/page state across navigation.
-- Added shared live progress tracking, activity history, warning/failure counts, and cancel controls across the shell.
-- Replaced raw JSON-heavy desktop views with structured pages for Languages, Run/Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings/Help.
-- Added searchable source-first and category-first language tree views with cross-tab prefill actions.
-- Changed the desktop default output root to `%UserProfile%\\Documents\\DevDocsDownloader` while keeping `markdown/` and `reports/` under that root.
-- Extended backend service events and desktop settings persistence to support the richer shell behavior.
+- Fixed cancel button: shows "Cancelling..." immediately on click; asyncio cooperative cancellation allows CancelledError to propagate at document boundaries instead of waiting for the entire run.
+- Fixed blank window on backend startup failure: a ContentDialog now shows the error message and desktop log path.
+- Fixed SSE stream dropping silently: the shell reconnects automatically on unexpected stream disconnect using a from_index cursor (up to 5 retries with exponential backoff).
+- Added backend health monitor: polls /health every 30s; marks backend unavailable and shows status text if the backend crashes; recovers automatically if the backend becomes healthy again.
+- Added job history persistence: completed, failed, and cancelled job summaries are written to logs/job_history.jsonl and restored on backend startup.
+- Fixed ruff format violations in registry.py and generate_icon.py (alignment spaces, long boolean conditions).
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.8.exe`
-- `DevDocsDownloader-Portable-1.0.8.zip`
+- `DevDocsDownloader-Setup-1.0.9.exe`
+- `DevDocsDownloader-Portable-1.0.9.zip`
 - `SHA256SUMS.txt`
 
 Notes:

@@ -1,6 +1,6 @@
-# v1.0.6 Release Checklist
+# Release Checklist
 
-This checklist defines the current Windows desktop release line. Version `1.0.6` means the WinUI 3 shell, bundled Python backend, packaging, GitHub Release automation, and the hardened stateful operator UX are all present and validated together.
+This checklist applies to every Windows desktop release. Update the version in `version.json` and `pyproject.toml` before starting.
 
 ## Bootstrap
 
@@ -8,13 +8,7 @@ This checklist defines the current Windows desktop release line. Version `1.0.6`
 python scripts/setup.py --profile dev
 ```
 
-This is the preferred repo bootstrap for release validation because it creates `.venv`, installs the full runtime capability set, installs Playwright Chromium, and adds developer tools in one step.
-
-If package build tooling is missing:
-
-```bash
-python -m pip install build
-```
+Creates `.venv`, installs the full runtime capability set plus developer tools in one step.
 
 ## Required Python Checks
 
@@ -24,6 +18,7 @@ python -m ruff check .
 python -m ruff format --check .
 python -m mypy doc_ingest
 python scripts/check_release_hygiene.py
+python scripts/check_version.py
 ```
 
 PowerShell compile check:
@@ -32,11 +27,10 @@ PowerShell compile check:
 Get-ChildItem doc_ingest,tests,scripts -Recurse -Filter *.py | ForEach-Object { python -m py_compile $_.FullName }
 ```
 
-Package and version sanity:
+Package sanity:
 
 ```bash
 python -m build
-python scripts/check_version.py
 ```
 
 ## Required Desktop Checks
@@ -49,22 +43,32 @@ Local Windows release builds require:
 - Inno Setup 6
 
 ```bash
-dotnet build DevDocsDownloader.Desktop.sln -c Release -p:Platform=x64
 python scripts/build_desktop_backend.py --clean
 ```
 
-If the local machine lacks the Windows PRI packaging task assembly required by WinUI build targets, run the desktop and installer validation on a Windows image with Visual Studio packaging components available, such as the GitHub Actions `windows-latest` runner used by the CI/release workflows.
+```powershell
+$publishDir = "desktop\publish\desktop"
+Remove-Item -Recurse -Force $publishDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
+msbuild desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishDir="$publishDir\"
+```
+
+If the local machine lacks the Windows PRI packaging task assembly required by WinUI build targets, run desktop validation on the GitHub Actions `windows-latest` runner via the CI or release workflow.
 
 ## Release Artifact Checks
 
-- Build the frozen backend into `dist/DevDocsDownloader.Backend/`
-- Publish the desktop shell into `desktop/publish/desktop/`
-- Copy the bundled backend under `desktop/publish/desktop/backend/`
-- Build the installer with `desktop/installer/DevDocsDownloader.iss`
-- Build `DevDocsDownloader-Portable-1.0.6.zip`
+- Build frozen backend into `dist/DevDocsDownloader.Backend/`
+- Publish desktop shell into `desktop/publish/desktop/`
+- Copy bundled backend under `desktop/publish/desktop/backend/`
+- Verify `DevDocsDownloader.Desktop.pri` was copied to publish dir
+- Build installer with `desktop/installer/DevDocsDownloader.iss`
+- Build portable zip
 - Generate `SHA256SUMS.txt`
 - Smoke-check backend startup via `/health` and `/version`
-- Smoke-check first desktop launch against the bundled backend
+- Smoke-launch desktop exe; confirm it does not exit within 8s
+- Confirm startup error dialog shows if backend is missing (rename backend dir, launch, restore)
+- Confirm cancel button shows "Cancelling..." immediately on click
+- Confirm job history survives a backend restart (start job, let it finish, restart backend, check /jobs)
 
 ## Optional Live Checks
 
@@ -80,20 +84,24 @@ Bounded extraction sanity:
 $env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live_extraction_sanity.py -q
 ```
 
-## Legacy NiceGUI Smoke
+## Release Notes
 
-This is migration-only and is no longer release-critical. Run it only when the legacy operator surface is being touched.
+Update `.github/release-notes.md` before tagging. The release workflow reads this file as `body_path` for the GitHub Release.
+
+## Tag and Release
 
 ```bash
-python DevDocsDownloader.py gui --host 127.0.0.1 --port 8080
+git tag v<version>
+git push origin v<version>
 ```
 
-Verify the dashboard loads, bulk/run options are visible, report/output browser views open, and no browser console errors appear during basic navigation.
+The `release.yml` workflow builds the installer and portable zip, writes checksums, and publishes the GitHub Release automatically.
 
-## Known Non-Goals for v1.0.0
+## Known Non-Goals
 
 - No v1 compatibility promise for Python service models.
 - No hosted multi-user GUI mode.
 - No arbitrary crawler mode.
-- No full MDN/Dash live extraction in routine checks.
+- No full MDN/Dash live extraction in routine CI checks.
 - No PDF/DOCX/browser conversion without a future adapter path and fixture coverage.
+- Binary is unsigned — SmartScreen warning expected on first launch.

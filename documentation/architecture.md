@@ -30,7 +30,7 @@ WinUI shell
 	-> same pipeline/state/report/output paths as CLI
 ```
 
-Legacy GUI flow:
+Legacy GUI flow (deprecated, removal target v1.1.0):
 
 ```text
 local browser
@@ -80,7 +80,7 @@ local browser
 - `doc_ingest/cli.py` owns all user-facing commands
 - single-language runs and bulk runs call `DocumentationService`, which owns the pipeline lifecycle
 
-The optional `gui` command launches the older local NiceGUI operator interface when the `gui` extra is installed. It remains useful for migration and internal operator flows, but the `1.0.0` desktop release direction is the WinUI 3 shell plus bundled Python backend worker.
+The optional `gui` command launches the older local NiceGUI operator interface when the `gui` extra is installed. It is deprecated and targeted for removal in v1.1.0. The WinUI 3 shell plus bundled Python backend worker is the supported GUI direction.
 
 ### 1.0 Desktop backend host
 
@@ -99,34 +99,50 @@ The optional `gui` command launches the older local NiceGUI operator interface w
 
 **Key behavior:**
 
-- binds to `127.0.0.1` and a caller-selected port
+- binds to `127.0.0.1` and a caller-selected port (reserved via TCP listener before process start)
 - exposes health/version/shutdown, run/bulk/validate, inspection, reports, checkpoints, cache, and settings endpoints
 - reuses existing Pydantic request/response models where practical
-- is intended to be frozen and bundled into the desktop release
+- single active job at a time; job history persisted to `logs/job_history.jsonl` and reloaded on startup
+- SSE event stream includes 15s heartbeats; `from_index` query parameter enables shell-side reconnect
+- cooperative cancellation: `asyncio.sleep(0)` in event sink between documents allows `CancelledError` to propagate at document boundaries when `task.cancel()` is called
+- frozen and bundled into the desktop release via PyInstaller `--onedir`
 
-### 1.1 Local GUI and operator workflow layer
+### 1.1 Local GUI and operator workflow layer (DEPRECATED)
+
+> **Removal target: v1.1.0.** WinUI desktop shell is the supported GUI. NiceGUI surface is kept only as a migration bridge.
 
 **Files:**
 
 - `doc_ingest/gui/app.py`
 - `doc_ingest/gui/state.py`
 
-**Responsibilities:**
-
-- expose the same meaningful run, bulk, validation, catalog, preset, output, report, checkpoint, and cache workflows available from the CLI
-- keep a local in-process job queue with one active job by default
-- subscribe to `DocumentationService` events for phase, document, warning, validation, telemetry, and failure updates
-- browse generated output bundles, report artifacts, checkpoint manifests, and cache metadata through service methods with strict path checks
-
 **Key behavior:**
 
 - NiceGUI is optional through `.[gui]`
-- the GUI calls `DocumentationService` directly and does not shell out to Typer commands
-- the GUI is retained as a migration and internal operator surface, not the primary `1.0.0` public GUI
+- calls `DocumentationService` directly; does not shell out to Typer commands
 - file reads are constrained to configured output/report/cache/state roots
 - destructive checkpoint deletion is limited to `state/checkpoints/*.json`
-- the Settings/Help tab embeds the operator tutorial for workflows, expected behavior, validation output, cache/resume
-  controls, report interpretation, output browsing, and CLI equivalents
+
+### 1.2 WinUI 3 desktop shell
+
+**Files:**
+
+- `desktop/DevDocsDownloader.Desktop/App.xaml.cs` — app lifecycle, static singletons (`BackendHost`, `MainViewModel`), startup error `ContentDialog`
+- `desktop/DevDocsDownloader.Desktop/MainWindow.xaml.cs` — shell layout, navigation, DPI-aware minimum size
+- `desktop/DevDocsDownloader.Desktop/ViewModels/MainWindowViewModel.cs` — shared observable state: job tracking, cancel feedback, 30s health monitor, dispatcher-safe UI updates
+- `desktop/DevDocsDownloader.Desktop/Services/BackendProcessHost.cs` — starts/stops frozen Python backend, random port reservation, health polling during startup, synchronous `Terminate()` on window close
+- `desktop/DevDocsDownloader.Desktop/Services/DesktopBackendClient.cs` — typed HTTP client; `StreamJobEventsAsync` reconnects on unexpected stream disconnect using `from_index` cursor with exponential backoff
+- `desktop/DevDocsDownloader.Desktop/Pages/*.xaml.cs` — Run, Bulk, Languages, Presets, Reports, Output Browser, Checkpoints, Cache, Settings pages
+
+**Key behavior:**
+
+- shell keeps all page instances in a cache dictionary so navigation does not reset form/loaded state
+- `MainWindowViewModel` fires property-changed events for sidebar shell state (status, job label, progress, warnings)
+- cancel button immediately sets UI to "Cancelling..." state before SSE event arrives
+- 30s health monitor detects backend crash; updates `BackendReady` via `DispatcherQueue.TryEnqueue`
+- SSE stream auto-reconnects from last received `from_index`; up to 5 retries with 2–10s backoff
+- startup failure shows `ContentDialog` with error message and log path; window stays open for diagnostics
+- backend process is killed synchronously on window `Closed` event; `Shutdown()` cancels background tasks
 
 ### 2. Configuration and path management
 

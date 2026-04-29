@@ -187,9 +187,7 @@ Release architecture:
 - local `127.0.0.1` HTTP API with bearer-token auth
 - persistent shell state across navigation, with shared live progress and activity logs
 - structured operator views for languages, presets, reports, output bundles, checkpoints, and cache metadata
-- GitHub Release artifacts:
-  - `DevDocsDownloader-Setup-1.0.6.exe`
-  - `DevDocsDownloader-Portable-1.0.6.zip`
+- GitHub Release artifacts: installer exe and portable zip published per release tag
 
 The backend API host lives in `doc_ingest/desktop_backend.py`. Release packaging scripts, installer definitions, and workflows live under `scripts/`, `desktop/installer/`, and `.github/workflows/`.
 
@@ -286,7 +284,9 @@ python DevDocsDownloader.py
 
 ## Legacy NiceGUI Guide
 
-The older local NiceGUI surface remains in the repo as a migration and internal operator tool. It is no longer the primary public GUI direction for `1.0.0`, which is the WinUI desktop app.
+> **Deprecation notice:** The NiceGUI surface is targeted for removal in v1.1.0. The WinUI desktop app is the supported GUI. Use this only if you need the legacy operator surface for migration purposes.
+
+The older local NiceGUI surface remains in the repo as a migration and internal operator tool.
 
 ### Install and launch
 
@@ -541,15 +541,16 @@ The current tests focus on:
 
 ## Future direction
 
-The most realistic next steps, based on the current repository state, are:
+See `documentation/roadmap.md` for the full prioritized list. Near-term:
 
-1. Finish validating the WinUI release build on a Windows image with the required packaging components available
-2. Remove the legacy NiceGUI surface once WinUI parity and release validation are complete
-3. Reintroduce PDF/DOCX/browser conversion only when a real source adapter path and fixture coverage justify the dependency
+1. Remove the legacy NiceGUI surface (v1.1.0)
+2. Open-folder button, job queue UI, output storage cleanup UI (v1.1.0)
+3. Language normalization hardening, improved validation scoring, Dash acceptance tests (v1.2.0)
+4. Code signing, auto-update notification (long-term)
 
 ## Release readiness
 
-The project now includes the backend host, WinUI shell scaffold, installer definition, and GitHub Actions release automation for the `1.0.0` desktop release track. Use `documentation/release_checklist.md` for the required Python checks, desktop build/package validation, and release artifact smoke tests.
+Use `documentation/release_checklist.md` for the required Python checks, desktop build/package validation, and release artifact smoke tests before tagging a release.
 
 ## Documentation map
 
@@ -559,4 +560,4 @@ The project now includes the backend host, WinUI shell scaffold, installer defin
 - `documentation/full-project-documentation.md` — detailed technical reference
 - `documentation/output_contract.md` — generated output, state, checkpoint, and report contract
 - `documentation/release_checklist.md` — v1.0.0 desktop release validation checklist
-- `documentation/roadmap.md` — completed roadmap and post-v1.0.0 future work
+- `documentation/roadmap.md` — known bugs, limitations, and prioritized roadmap
