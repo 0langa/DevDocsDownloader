@@ -1,6 +1,6 @@
-# v1.0.1 Release Checklist
+# v1.0.2 Release Checklist
 
-This checklist defines the current Windows desktop release line. Version `1.0.1` means the WinUI 3 shell, bundled Python backend, packaging, and GitHub Release automation are all present and validated together.
+This checklist defines the current Windows desktop release line. Version `1.0.2` means the WinUI 3 shell, bundled Python backend, packaging, and GitHub Release automation are all present and validated together.
 
 ## Bootstrap
 
@@ -53,7 +53,7 @@ If the local machine lacks the Windows PRI packaging task assembly required by W
 - Publish the desktop shell into `desktop/publish/desktop/`
 - Copy the bundled backend under `desktop/publish/desktop/backend/`
 - Build the installer with `desktop/installer/DevDocsDownloader.iss`
-- Build `DevDocsDownloader-Portable-1.0.1.zip`
+- Build `DevDocsDownloader-Portable-1.0.2.zip`
 - Generate `SHA256SUMS.txt`
 - Smoke-check backend startup via `/health` and `/version`
 - Smoke-check first desktop launch against the bundled backend

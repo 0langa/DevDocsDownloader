@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using DevDocsDownloader.Desktop.Services;
 
 namespace DevDocsDownloader.Desktop.ViewModels;
 
@@ -20,6 +21,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
         catch (Exception exc)
         {
+            DesktopDiagnostics.Log("Backend startup failed during main window initialization.", exc);
             StatusText = $"Backend startup failed: {exc.Message}";
             BackendReady = false;
         }

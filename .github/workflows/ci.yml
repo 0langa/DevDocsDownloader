@@ -50,4 +50,28 @@ jobs:
 
       - name: Build WinUI desktop shell
         shell: pwsh
-        run: msbuild DevDocsDownloader.Desktop.sln /restore /p:Configuration=Release /p:Platform=x64
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\ci-desktop'
+          Remove-Item -Recurse -Force $publishDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
+          msbuild desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishDir="$publishDir\"
+          if (-not (Test-Path (Join-Path $publishDir 'DevDocsDownloader.Desktop.exe'))) {
+            throw 'Published desktop shell executable was not produced.'
+          }
+
+      - name: Smoke launch WinUI desktop shell
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\ci-desktop'
+          $exe = Join-Path $publishDir 'DevDocsDownloader.Desktop.exe'
+          $logPath = Join-Path $env:LOCALAPPDATA 'DevDocsDownloader\logs\desktop-shell.log'
+          Remove-Item $logPath -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $exe -WorkingDirectory $publishDir -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            if (Test-Path $logPath) {
+              Get-Content $logPath
+            }
+            throw "Desktop shell exited during smoke launch with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force

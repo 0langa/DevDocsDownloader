@@ -36,6 +36,7 @@ public sealed class BackendProcessHost : IAsyncDisposable
             RedirectStandardError = false,
             RedirectStandardOutput = false,
         };
+        DesktopDiagnostics.Log($"Starting bundled backend from {backendPath} on port {Port}.");
         _process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start backend process.");
         _client = new DesktopBackendClient(new HttpClient
         {
@@ -80,6 +81,7 @@ public sealed class BackendProcessHost : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_process is { HasExited: true })
             {
+                DesktopDiagnostics.Log($"Bundled backend exited before health check completed with code {_process.ExitCode}.");
                 throw new InvalidOperationException($"Backend exited with code {_process.ExitCode}.");
             }
             try

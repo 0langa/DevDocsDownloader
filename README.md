@@ -183,10 +183,12 @@ Release architecture:
 - bundled frozen Python backend worker
 - local `127.0.0.1` HTTP API with bearer-token auth
 - GitHub Release artifacts:
-  - `DevDocsDownloader-Setup-1.0.1.exe`
-  - `DevDocsDownloader-Portable-1.0.1.zip`
+  - `DevDocsDownloader-Setup-1.0.2.exe`
+  - `DevDocsDownloader-Portable-1.0.2.zip`
 
 The backend API host lives in `doc_ingest/desktop_backend.py`. Release packaging scripts, installer definitions, and workflows live under `scripts/`, `desktop/installer/`, and `.github/workflows/`.
+
+If the desktop shell fails before showing the window, check `%LocalAppData%\DevDocsDownloader\logs\desktop-shell.log` and `%LocalAppData%\DevDocsDownloader\logs\desktop-backend.log`.
 
 ## CLI Guide
 

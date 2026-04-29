@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_VERSION: 1.0.1
+      RELEASE_VERSION: 1.0.2
     steps:
       - uses: actions/checkout@v4
 
@@ -57,7 +57,7 @@ jobs:
           $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\desktop'
           Remove-Item -Recurse -Force $publishDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
-          msbuild desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:PublishDir="$publishDir\"
+          msbuild desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishDir="$publishDir\"
 
       - name: Assemble release layout
         shell: pwsh
@@ -69,6 +69,23 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path (Join-Path $publishDir 'backend') | Out-Null
           Copy-Item dist/DevDocsDownloader.Backend/* (Join-Path $publishDir 'backend') -Recurse -Force
+
+      - name: Smoke launch bundled desktop app
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\desktop'
+          $exe = Join-Path $publishDir 'DevDocsDownloader.Desktop.exe'
+          $logPath = Join-Path $env:LOCALAPPDATA 'DevDocsDownloader\logs\desktop-shell.log'
+          Remove-Item $logPath -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $exe -WorkingDirectory $publishDir -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            if (Test-Path $logPath) {
+              Get-Content $logPath
+            }
+            throw "Bundled desktop shell exited during smoke launch with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
 
       - name: Build installer
         shell: pwsh

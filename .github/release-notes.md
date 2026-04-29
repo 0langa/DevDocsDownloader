@@ -1,11 +1,11 @@
-# DevDocsDownloader 1.0.1
+# DevDocsDownloader 1.0.2
 
 This release ships the first Windows desktop distribution of DevDocsDownloader.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.1.exe`
-- `DevDocsDownloader-Portable-1.0.1.zip`
+- `DevDocsDownloader-Setup-1.0.2.exe`
+- `DevDocsDownloader-Portable-1.0.2.zip`
 - `SHA256SUMS.txt`
 
 Notes:
