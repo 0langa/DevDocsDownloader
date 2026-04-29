@@ -9,12 +9,12 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "desktop" / "DevDocsDownloader.Desktop" / "Assets" / "DevDocsDownloader.ico"
 
 # Palette
-BG_DARK = (13, 17, 27)        # #0D111B  deep navy
-BG_MID  = (22, 32, 58)        # #16203A  card bg
-BLUE    = (59, 130, 246)      # #3B82F6  primary blue
-BLUE_LT = (147, 197, 253)     # #93C5FD  light blue accent
-WHITE   = (255, 255, 255)
-ARROW   = (96, 165, 250)      # #60A5FA
+BG_DARK = (13, 17, 27)  # #0D111B  deep navy
+BG_MID = (22, 32, 58)  # #16203A  card bg
+BLUE = (59, 130, 246)  # #3B82F6  primary blue
+BLUE_LT = (147, 197, 253)  # #93C5FD  light blue accent
+WHITE = (255, 255, 255)
+ARROW = (96, 165, 250)  # #60A5FA
 
 
 def rounded_rect(draw: ImageDraw.ImageDraw, bbox: tuple[int, int, int, int], radius: int, fill: tuple) -> None:

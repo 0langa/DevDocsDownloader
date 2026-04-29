@@ -225,9 +225,9 @@ def _normalise_lang(s: str) -> str:
     catalogs, e.g. "C++" → "cpp", "C#" → "csharp", "Node.js" → "nodejs".
     """
     s = s.lower().strip()
-    s = s.replace("++", "pp")      # C++ → cpp
-    s = s.replace("#", "sharp")    # C# → csharp
-    s = s.replace(".", "")         # Node.js → nodejs
+    s = s.replace("++", "pp")  # C++ → cpp
+    s = s.replace("#", "sharp")  # C# → csharp
+    s = s.replace(".", "")  # Node.js → nodejs
     s = s.replace(" ", "")
     return s
 

@@ -1,203 +1,195 @@
 # DevDocsDownloader Roadmap
 
-This roadmap is forward-looking. Completed work is summarized briefly so the remaining priorities are clear.
+## Current State (v1.0.8)
 
-## Current Baseline
+The project ships as a Windows-native WinUI3 desktop app backed by a frozen Python FastAPI process. The pipeline supports three source adapters (DevDocs, MDN, Dash), a CLI, a legacy NiceGUI GUI, and a loopback HTTP/SSE desktop API. The WinUI shell covers Languages, Run, Bulk Run, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings pages. CI builds an Inno Setup installer and a portable zip on tag push.
 
-The project is now a tested source-adapter ingestion system for DevDocs, MDN, and Dash/Kapeli.
+### What works
+- Source catalog resolution with normalization for special-char language names (C++, C#, F#, Node.js, .NET)
+- Streaming SSE job progress from Python backend to WinUI shell without UI freeze
+- DPI-aware minimum window size enforcement without infinite resize loop
+- Backend process termination on window close (no orphaned exe)
+- Checkpoint resume on failed runs; stable output contract with optional chunking and frontmatter
+- Adaptive bulk scheduling, cache policies, and per-document validation reports
+- GitHub Actions release pipeline producing installer + portable zip + SHA256SUMS
 
-Completed foundations:
+---
 
-- Production safety: filesystem-safe slugs, atomic writes, safe archive extraction, retry helpers, local-first validation, and active run checkpoints.
-- Core usability: source diagnostics, topic include/exclude filters, preset auditing, generated source-discovery manifests with cached fallback, and opt-in live endpoint probes.
-- Contracts and tooling: stable output contract docs, golden fixtures, fixture-backed integration tests, CLI contract tests, Ruff, mypy, and canonical `pyproject.toml` dependencies.
-- Architecture: shared `SourceRuntime`, pooled HTTP clients, typed adapter events, compiler planning/rendering/writing separation, and archived historical crawler utilities.
-- Performance and scalability: streaming compilation, automatic checkpoint resume with artifact manifests, balanced generated-Markdown durability, source-profile throttling, and metadata-driven MDN extraction reuse.
-- Extraction quality: source-specific DevDocs/Dash HTML cleanup, source-absolute link rewriting, safe MDN YAML frontmatter parsing, and richer validation warnings for links, HTML leftovers, malformed tables, and definition-list artifacts.
-- Output and consumption: collision-safe consolidated anchors, optional per-document YAML frontmatter, optional Markdown+JSONL chunk exports, source-agnostic cache freshness metadata, and service-layer output/report/checkpoint/cache inspection.
-- Operator workflows: legacy local NiceGUI dashboard with CLI-equivalent run controls, in-process job queue, output browser, report drill-down, checkpoint controls, and cache metadata views retained as a migration bridge while the WinUI desktop release track is completed.
-- Source expansion and fidelity: entry-point source plugins, exact local cross-document link rewriting, event-driven asset inventory, optional tokenizer chunking, and removal of unused extended-conversion extras.
-- Release readiness: opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, desktop-safe runtime paths/settings, a local desktop backend API, WinUI desktop shell scaffolding, and GitHub Actions release automation for installer/portable artifacts.
-- Desktop UX hardening: persistent WinUI tab/view state, shared live progress tracking with activity details, searchable language tree views, structured report/output/checkpoint/cache pages, DPI-aware shell defaults, and a desktop default output root at `Documents/DevDocsDownloader`.
+## Known Bugs and Limitations
 
-Current guarantees:
+### Critical
 
-- Routine tests do not require live network access.
-- Successful runs remove active checkpoints after stable state is saved.
-- Failed runs can resume automatically when checkpoint identity and artifact paths are still valid.
-- State, checkpoints, reports, and expensive cache/archive writes remain strict; generated Markdown defaults to balanced atomic writes.
-- DevDocs, Dash, and MDN normalize relative links toward source-absolute URLs where source context is known.
-- Known same-language links are rewritten to generated local Markdown paths when exact targets are available.
-- Optional downstream outputs are disabled by default, so the baseline output contract remains conservative.
-- Asset handling is inventory-first and does not crawl arbitrary image URLs.
-- The GUI calls `doc_ingest.services.DocumentationService` directly instead of shelling out to Typer commands.
-- The active product is a curated source-adapter ingester, not a general crawler.
+**1. Cancel does not stop the active download**
+`BackendJobManager.cancel()` calls `task.cancel()` which raises `CancelledError` into the asyncio task. However, the crawler is blocked inside an `httpx` network request with no internal checkpoint. The `CancelledError` cannot interrupt a blocking `await` inside a C-extension network read. The current crawl request completes before the task notices cancellation. Practically: pressing Cancel has no visible effect until the current document finishes downloading.
 
-## Phase 7: Output and Downstream Consumption - Completed
+Root cause: no cooperative cancellation boundary in `DocumentationPipeline._run_language()` or the source adapters. The task cancel propagates only at the next `await` that actually yields — httpx may not yield until the full request is done.
 
-### 1. Fix Anchor Collision Handling
+**2. Job history lost on backend restart**
+`BackendJobManager.jobs` is in-memory. If the backend process restarts (e.g., crash, kill), the shell still shows the last known job state from the SSE stream (which was also in-memory). On reconnect the shell cannot recover job status. The shell does not currently handle backend restart at all.
 
-- **Problem:** `_anchor()` does not ensure uniqueness, so duplicate titles can create ambiguous table-of-contents links.
-- **Implemented:** Consolidated output now uses a shared unique-anchor registry and explicit heading anchors that match TOC links.
-- **Impact:** Improves navigation correctness in consolidated manuals, including repeated document titles.
-- **Complexity:** Low
+**3. SSE reconnection not implemented**
+`DesktopBackendClient.StreamJobEventsAsync` opens one SSE stream per job. If the stream disconnects mid-job (network hiccup, backend restart), the shell has no reconnect logic. The job may still be running but the shell shows no further progress.
 
-### 2. Add Optional Per-Document Metadata Frontmatter
+**4. Backend startup failure not surfaced in UI**
+`App.OnLaunched` calls `await MainViewModel.InitializeAsync()` which starts the backend. If the backend fails to start (port conflict, missing exe, crash during health check), the exception propagates to `OnLaunched` and is logged but the UI shows a blank window with no user-facing error dialog.
 
-- **Problem:** Per-document Markdown has human-readable metadata but no machine-readable frontmatter.
-- **Implemented:** Optional `--document-frontmatter` emits YAML metadata while preserving existing human-readable metadata.
-- **Impact:** Makes generated output easier to index, diff, and consume.
-- **Complexity:** Medium
+### High
 
-### 3. Add Chunked Export for Retrieval Workloads
+**5. Single-job queue with no queuing UI**
+The backend returns HTTP 409 if a second job is submitted while one is running. The WinUI shell shows an error but provides no queue view, no pending indicator, and no way to see what is blocking. Users must know to wait.
 
-- **Problem:** Output is either many source documents or one large consolidated file. There is no stable chunk manifest for embeddings or retrieval.
-- **Implemented:** Optional `--chunks` writes size-bounded Markdown chunks and `chunks/manifest.jsonl` with stable IDs and source references.
-- **Impact:** Makes the project more directly useful for AI/RAG ingestion.
-- **Complexity:** Medium
+**6. Validation score is not meaningful as a quality signal**
+`validate_output()` applies flat `-0.3` per error and `-0.1` per warning against a `1.0` baseline. Large languages with hundreds of valid documents get the same score penalty as tiny broken ones. The score has no denominator tied to document count or source size, so a 2000-document C++ output with one unbalanced code fence scores identically to a 5-document stub with the same fence issue.
 
-### 4. Add Cache Freshness and Incremental Update Policies
+**7. Dash source is untested end-to-end**
+`DashFeedSource` is included in the registry and listed in the UI, but it has never been exercised in a real desktop release run. The Dash archive format is complex; there may be extraction, slug, or encoding failures that only appear at runtime against real Dash feeds.
 
-- **Problem:** DevDocs and Dash cache behavior is still mostly "use if present" or `--force-refresh`; MDN now has stronger archive metadata but no shared cache policy model.
-- **Implemented:** Source cache artifacts now support source-agnostic metadata and configurable policies: `use-if-present`, `ttl`, `always-refresh`, and `validate-if-possible`.
-- **Impact:** Makes recurring documentation updates auditable and predictable across all sources.
-- **Complexity:** Medium
+**8. Output directory grows unbounded**
+There is no retention policy, cleanup UI, or size limit for the output directory. After many runs the output folder accumulates old language folders, chunk exports, and report history with no way to prune from the app.
 
-## Phase 8: Validation, Diagnostics, and Observability - Completed
+**9. No backend health monitoring after startup**
+The shell polls health once at startup and then assumes the backend is alive forever. If the backend crashes mid-session, the shell silently fails on the next API call with a generic HTTP error rather than prompting the user to restart.
 
-### 1. Deepen Output Validation Beyond Structural Checks
+### Medium
 
-- **Problem:** Validation is still mostly structural. It checks required sections, size, code fences, relative links, and a few conversion artifacts, but it does not verify broken internal links, duplicate topic blocks, repeated documents, malformed heading hierarchy, Markdown renderability, or source completeness against discovered inventory.
-- **Implemented:** `validate_output()` now adds internal-anchor checks, duplicate section/document checks, document heading-count checks, and source-inventory reconciliation using `SourceRunDiagnostics`.
-- **Impact:** Makes validation reports more actionable and catches regressions that current golden tests may miss.
-- **Complexity:** High
+**10. Language normalization edge cases**
+`_normalise_lang()` covers `++→pp`, `#→sharp`, `.→""`. Missing: `&` (e.g., `HTML & CSS`), version suffixes typed without `~` (e.g., `python3.12`), Unicode non-ASCII names. The `_exact_match` prefix and contains buckets compensate for some cases, but ambiguous user input like `"react native"` or `"vue 3"` may resolve to the wrong version.
 
-### 2. Add Per-Document Validation Reports
+**11. Settings changes do not affect in-flight or already-resolved config**
+`DesktopSettings` is read at job submission time. Changes to output dir, cache policy, or chunking while a job is running or while catalogs are cached are silently ignored until the next run. There is no visible indication that settings were applied.
 
-- **Problem:** Validation currently reports language-level issues only. Downstream consumers cannot easily identify which generated document caused a warning, duplicate, broken link, heading issue, or conversion artifact.
-- **Implemented:** `output/reports/validation_documents.jsonl` records document-local validation issues with language/source identity, path, topic, slug, source URL, issues, and context.
-- **Impact:** Improves debugging, GUI report drill-downs, and quality triage for large languages.
-- **Complexity:** Medium
+**12. No UI feedback for catalog refresh failure**
+`/refresh-catalogs` returns a count of refreshed sources. If DevDocs or MDN is unreachable, the endpoint still returns 200 with a partial count. The shell shows a success message even if 0 catalogs refreshed.
 
-### 3. Formalize Per-Document Source Warnings
+**13. Unsigned binary — Windows SmartScreen warning**
+The installer and portable zip ship an unsigned exe. First-run users see a SmartScreen warning. This is a distribution friction issue with no workaround short of EV code signing.
 
-- **Problem:** Typed adapter events support warnings, but diagnostics still mostly aggregate skip counts and report-level warning strings. Recoverable per-document warnings do not have a stable persisted path.
-- **Implemented:** `DocumentWarningEvent` and `SourceWarningRecord` persist structured document warnings on run reports/state while preserving human-readable warnings.
-- **Impact:** Enables better quality reporting, GUI inspection, and source-specific remediation without overloading `Document`.
-- **Complexity:** Medium
+**14. PRI file copy in CI is fragile**
+The release workflow manually greps for `DevDocsDownloader.Desktop.pri` after msbuild and throws if not found. This is a workaround for `EnableMsixTooling=false` with no MSIX packaging. The search path is `bin/**` which is fragile if the build configuration changes output structure.
 
-### 4. Add Runtime Telemetry and GUI Progress Events
+**15. Legacy NiceGUI GUI still present**
+`doc_ingest/gui/` is a full NiceGUI application that duplicates most of the desktop backend API surface. It adds test fixture infrastructure (`tmp/gui-*`) and is exercised in CI. It was explicitly called out as a migration bridge to be removed after WinUI parity — that point has passed.
 
-- **Problem:** `SourceRuntime` has basic counters, and Rich progress shows live terminal state, but there is no stable event stream for GUI progress, throughput, retries, cache hits, bytes, or current phase transitions.
-- **Implemented:** `DocumentationService` accepts an optional event sink and emits phase, document, warning, validation, runtime telemetry, and failure events. Runtime telemetry now includes requests, retries, bytes, failures, cache hits, and cache refreshes.
-- **Impact:** Turns lifecycle and telemetry gaps into a reusable observability surface for both CLI and GUI.
-- **Complexity:** Medium
+### Low
 
-### 5. Add Quality Trend Reports
+**16. No auto-update**
+Users must manually download new releases from GitHub. There is no update check, update notification, or in-app update mechanism.
 
-- **Problem:** Reports are per-run summaries without long-term trend tracking.
-- **Implemented:** Report writes now keep latest summaries, timestamped history files, document validation JSONL, and `trends.json` / `trends.md` summaries.
-- **Impact:** Helps monitor ingestion quality and upstream drift over time.
-- **Complexity:** Medium
+**17. No export / package output feature**
+The Output Browser shows generated Markdown but provides no way to copy, zip, or open the output folder from the UI. Users must navigate to `Documents\DevDocsDownloader\output` manually.
 
-## Phase 9: Visual GUI and Operator Workflows - Completed
+**18. Job event history not paginated**
+`BackendJob.events` accumulates all SSE events in memory for the lifetime of the backend process. Long bulk runs with many documents produce very large event lists. The `/jobs/{id}/events?from_index=N` cursor exists but the shell always streams from 0.
 
-### 1. Build a Local Visual GUI Over the Service Layer
+---
 
-- **Problem:** The CLI is scriptable and complete, but non-technical users need a visual way to configure languages, sources, modes, cache policy, output options, progress, validation, and reports.
-- **Implemented:** Added an optional NiceGUI dashboard launched with `python DevDocsDownloader.py gui`. It calls `DocumentationService`, exposes run/bulk/validate/catalog/preset/output/report/checkpoint/cache workflows, and uses a local in-process job queue over service events. It now serves as a migration and internal operator surface while the supported `1.0.0` GUI direction is the WinUI shell plus bundled backend.
-- **Impact:** Makes the full ingestion system accessible without weakening the CLI contract.
-- **Complexity:** High
+## Roadmap
 
-### 2. Add Output Browser and Report Drill-Down
+### Immediate — v1.0.x patch releases
 
-- **Problem:** Users can generate per-document files, chunks, manifests, diagnostics, and reports, but there is no visual way to inspect them together.
-- **Implemented:** Added service readers and GUI views for language bundles, output trees, Markdown preview, latest reports, document validation JSONL, history/trends, checkpoints, and cache metadata sidecars.
-- **Impact:** Makes shallow validation and conversion issues easier to investigate without manually navigating output trees.
-- **Complexity:** Medium
+These are bugs with clear fix paths and no design uncertainty.
 
-### 3. Add GUI Cache and Resume Controls
+#### P1-A: Cooperative cancellation
+Add cancellation checkpoints inside `DocumentationPipeline._run_language()`. After each document is fetched and compiled (the `_on_document` callback), check a `CancellationToken`-equivalent passed down from `BackendJobManager`. The simplest form: pass the `asyncio.Task` itself and check `asyncio.current_task().cancelled()` at the top of the compile loop, or use a shared `threading.Event` / asyncio `Event` that the cancel endpoint sets before calling `task.cancel()`. Source adapters that use streaming HTTP responses should close the response early.
 
-- **Problem:** Cache policy, force refresh, checkpoints, and resume fallback are production-critical but currently controlled through CLI flags and filesystem inspection.
-- **Implemented:** Added GUI controls for cache policy, TTL, force refresh, catalog refresh, checkpoint listing, checkpoint manifest inspection through service APIs, and safe checkpoint deletion constrained to `state/checkpoints`.
-- **Impact:** Gives operators safe visibility and control over recurring documentation updates.
-- **Complexity:** Medium
+Fix boundary: `pipeline._run_language` compile loop → `compile_from_stream` → per-document callback.
 
-## Phase 10: Source Expansion and Output Fidelity - Completed
+#### P1-B: Backend startup error dialog
+In `App.OnLaunched`, wrap `await MainViewModel.InitializeAsync()` in a try/catch and show a modal `ContentDialog` with the error message and a "Close" button instead of letting the window sit blank.
 
-### 1. Add Plugin-Ready Source Registration
+#### P1-C: Backend crash detection and reconnect prompt
+Add a periodic health ping (every 30s or on next API call failure) in `MainWindowViewModel`. If the backend is unreachable, show a non-blocking banner with a "Restart backend" button.
 
-- **Problem:** New sources require editing `SourceRegistry.__init__()` and shipping code inside the package.
-- **Implemented:** `SourceRegistry` registers DevDocs, MDN, and Dash first, then loads optional source factories from the `devdocsdownloader.sources` entry-point group. Built-ins win name collisions and plugin failures are isolated as warnings.
-- **Impact:** Enables source growth without hard-coding every adapter.
-- **Complexity:** High
+#### P1-D: Catalog refresh failure feedback
+`/refresh-catalogs` should return per-source status (ok/failed) not just a count. The shell should show which sources failed.
 
-### 2. Improve Cross-Document Link Rewriting
+---
 
-- **Problem:** Phase 6 rewrites relative links to source-absolute URLs, but generated bundles still do not rewrite known same-language links to local generated documents.
-- **Implemented:** The compiler builds an exact source-target map from source URLs, normalized source URLs, source paths, slugs, and generated document paths. Known same-bundle links are rewritten to local relative Markdown paths while external, unknown, and fenced-code links are preserved.
-- **Impact:** Produces more useful offline manuals and downstream corpora.
-- **Complexity:** High
+### Near-term — v1.1.0
 
-### 3. Add Asset Inventory and Deduplicated Asset Handling
+#### N1: Remove legacy NiceGUI GUI
+Delete `doc_ingest/gui/`, remove the `gui` CLI subcommand, remove NiceGUI from `pyproject.toml` dependencies, and clean up `tmp/gui-*` test fixtures and their CI coverage. The WinUI shell is the supported GUI.
 
-- **Problem:** Image and asset references are currently rewritten or stripped rather than represented as first-class output artifacts.
-- **Implemented:** `AssetEvent` can carry bytes or a safe local path. The compiler writes `assets/manifest.json`, deduplicates copied assets by checksum, rewrites matching Markdown asset references to local paths, and records remote-only assets as references without fetching arbitrary URLs.
-- **Impact:** Improves offline fidelity for documentation that relies on diagrams, screenshots, or local assets.
-- **Complexity:** Medium
+**Risk:** NiceGUI tests cover some DocumentationService paths not covered elsewhere. Audit test coverage before deleting and add CLI/service-level tests for any uncovered paths.
 
-### 4. Add Tokenizer-Aware Chunking
+#### N2: Open output folder from UI
+Add an "Open folder" button to the Output Browser page that calls `Process.Start("explorer.exe", outputPath)` from the shell.
 
-- **Problem:** Chunk export is character-bounded, which is deterministic and dependency-free but not ideal for embedding model limits.
-- **Implemented:** Character chunking remains the default. Optional `--chunk-strategy tokens` uses the `tokenizer` extra (`tiktoken`) and adds token offsets/counts to chunk manifest records.
-- **Impact:** Makes RAG exports more predictable for embedding and retrieval workloads.
-- **Complexity:** Medium
+#### N3: Job queue UI
+Replace the 409 error toast with a queued-job indicator. When a job is already running, show a pending badge and allow the user to cancel the queued request or wait. If the backend remains single-job, the shell can simulate queuing locally by holding the request until the active job completes.
 
-### 5. Remove Unused Extended Conversion Extras
+#### N4: Output retention / cleanup UI
+Add a "Manage storage" view (or settings section) that lists downloaded languages with disk size and last-run date. Allow deleting individual language output folders from the UI.
 
-- **Problem:** Optional dependencies support PDF, DOCX, browser, and document-conversion ambitions, but those paths are not wired into active adapters.
-- **Implemented:** Removed the unused `conversion-extended` extra and stale `docling`, `mammoth`, and `pypdf` references from active setup guidance. PDF/DOCX/browser conversion should return only with a real adapter path and fixture coverage.
-- **Impact:** Keeps install cost and dependency claims aligned with the active runtime.
-- **Complexity:** High
+#### N5: Settings apply/reload feedback
+Show which settings are in effect for the current run. After saving settings, display a "Settings saved — will apply to next run" confirmation. If output_dir changes, warn that the previous output folder is not moved.
 
-## Phase 11: Scalability Intelligence and Test Expansion - Completed
+---
 
-### 1. Add Adaptive Worker and Backpressure Policy
+### Medium-term — v1.2.0
 
-- **Problem:** Bulk concurrency is static and there is no adaptive worker model, despite historical references to adaptive runtime behavior.
-- **Implemented:** Added opt-in adaptive bulk scheduling with static as the default. Adaptive mode adjusts new language starts based on failures, retry/source failure pressure, and optional local resource pressure while preserving report order.
-- **Impact:** Improves large bulk runs without sacrificing deterministic defaults.
-- **Complexity:** High
+#### M1: Language normalization hardening
+Extend `_normalise_lang()` to cover:
+- Ampersand removal (`HTML & CSS` → `htmlcss`, match `html` family)
+- Version suffix with dot (`python3.12` → `python312` or strip suffix and fall back to base family)
+- Add an explicit alias table for high-traffic ambiguous names (`"react native"`, `"node"`, `"ts"`, `"js"`, `"py"`)
 
-### 2. Test Source Suggestion Quality
+Add regression tests for all new normalizations against the DevDocs/MDN catalog fixtures.
 
-- **Problem:** Source resolution has fuzzy suggestions for missing languages, but suggestion quality is not directly tested.
-- **Implemented:** Added deterministic registry fixtures for exact/family/prefix/contains resolution, source priority, Dash fallback, and deduplicated suggestion ordering across built-in and plugin-like catalogs.
-- **Impact:** Prevents CLI and GUI resolution regressions.
-- **Complexity:** Low
+#### M2: Improved validation scoring
+Replace flat deduction scoring with a document-weighted model:
+- Base score computed per-document (skipped, failed, warnings relative to discovered count)
+- Language-level issues apply to the language score, not per-document score
+- Expose separate `structure_score`, `completeness_score`, and `conversion_score` fields
+- Keep `score` as the composite for backward compatibility
 
-### 3. Extend Live Probes Toward Extraction Sanity
+#### M3: Dash source validation
+Run a scoped acceptance test against at least 3 real Dash feeds (e.g., Python, Go, Swift) in CI behind `DEVDOCS_LIVE_EXTRACTION_TESTS=1`. Fix any extraction, slug normalization, or encoding failures found.
 
-- **Problem:** Live endpoint probes validate representative link health but intentionally do not validate extraction or conversion correctness.
-- **Implemented:** Added a separate `DEVDOCS_LIVE_EXTRACTION_TESTS=1` tier for bounded DevDocs conversion, MDN frontmatter/body parsing, and Dash archive-shape plus fixture conversion sanity.
-- **Impact:** Catches upstream shape changes earlier while preserving deterministic routine tests.
-- **Complexity:** Medium
+#### M4: SSE reconnect in shell
+`DesktopBackendClient.StreamJobEventsAsync` should reconnect on stream close if the job is still running. Use `from_index` to resume from the last received event. Add a max-retry limit with exponential backoff.
 
-## Desktop Release Track - In Progress
+#### M5: PRI packaging fix
+Replace the manual PRI search-and-copy step with a proper MSBuild target or a `Directory.Build.targets` customization that copies the PRI to `PublishDir` as part of the publish step. Remove the grep-and-throw workaround.
 
-- Windows-native desktop shell under `desktop/DevDocsDownloader.Desktop/`
-- loopback desktop backend host in `doc_ingest/desktop_backend.py`
-- desktop-safe settings and storage roots
-- persistent shell viewmodels and cached page instances so navigation does not reset forms or loaded data
-- live SSE job progress, shared activity history, and richer phase/document payloads for the WinUI shell
-- structured operator views replacing raw JSON dumps for Languages, Run/Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings/Help
-- backend freeze, installer, and GitHub Release workflow scaffolding
-- release-facing docs now point to the WinUI desktop path as the supported GUI direction for `1.0.0`
-- remaining practical blocker for full local verification on this machine: missing WinUI PRI packaging task assembly required by the Windows App SDK build targets
+---
 
-## Post-v1.0.0 Future Work
+### Long-term / Post-v1.2.0
 
-- Remove the legacy NiceGUI path completely once WinUI parity and release validation are complete.
-- Add cooperative cancellation inside active source runs when safe cancellation boundaries are available.
-- Add deeper semantic validation only where source-specific truth data exists.
-- Reintroduce PDF/DOCX/browser conversion only with a real adapter path and fixture coverage.
+#### L1: Code signing
+Obtain an EV code signing certificate. Sign the installer and the desktop exe before release. Remove the SmartScreen friction.
+
+#### L2: Auto-update
+Add an update check on startup against the GitHub Releases API. Show an in-app banner when a newer version is available with a link to the release page. Do not implement silent auto-install — just notification.
+
+#### L3: Persistent job history
+Write job summaries and event snapshots to a local SQLite or JSON-lines file in `%LOCALAPPDATA%\DevDocsDownloader\jobs\`. On backend restart, load recent history. The shell can display the last N jobs with their final status without needing the in-memory event queue.
+
+#### L4: Semantic validation per source
+Add source-specific validation rules:
+- DevDocs: verify expected topic names from the known catalog topics list
+- MDN: verify BCD (Browser Compatibility Data) sections parse without error
+- Dash: verify index database entries match emitted documents
+
+#### L5: PDF/DOCX/browser conversion
+Reintroduce only when a real adapter with fixture coverage exists. Do not add dependencies speculatively.
+
+#### L6: macOS/Linux support
+The Python backend is cross-platform. The WinUI shell is Windows-only. Long-term options:
+- Electron or Tauri wrapper around the backend API for macOS/Linux
+- Or: ship the CLI + NiceGUI GUI on non-Windows and keep WinUI for Windows
+
+This is speculative until there is concrete user demand.
+
+---
+
+## Architectural Risks
+
+| Risk | Severity | Notes |
+|------|----------|-------|
+| In-memory job events | Medium | Large bulk runs accumulate all events; no eviction. Mitigated by `from_index` cursor but shell doesn't use it. |
+| Single-job backend | Low | Acceptable for desktop use. Becomes a bottleneck if multi-user or scripted use grows. |
+| PyInstaller frozen backend | Low | uvicorn bundling is fragile. `--collect-all uvicorn` works today; upstream changes may break it silently. |
+| WinUI unpackaged (no MSIX) | Low | No auto-update via Store, no capability sandbox. Reduces distribution options. |
+| Backend token in process args | Low | Token visible in `ps`/Task Manager on the local machine. Acceptable for loopback-only use. |
+| Devdocs.io catalog API | Low | `DevDocsSource` fetches `https://devdocs.io/docs.json` on each catalog refresh. If devdocs.io changes its API, the source fails silently on the cached fallback until TTL expires. |
