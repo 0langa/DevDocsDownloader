@@ -1,0 +1,10 @@
+<Page
+    x:Class="DevDocsDownloader.Desktop.Pages.CachePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Spacing="12" Padding="16">
+        <TextBlock Text="Cache metadata" FontSize="20" FontWeight="SemiBold" />
+        <Button Content="Refresh cache metadata" Click="OnRefresh" />
+        <TextBox x:Name="ContentBox" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" Height="520" />
+    </StackPanel>
+</Page>

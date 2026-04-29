@@ -88,14 +88,13 @@ Examples:
 """
 
 GUI_HELP = """
-Launch the optional local NiceGUI operator interface.
+Launch the legacy local NiceGUI operator interface.
 
 Install first:
   python -m pip install -e ".\\[gui]"
 
-The GUI exposes the same operational surface as the CLI: single runs, bulk/preset runs, language listing, preset
-audit, catalog refresh, validation-only runs, topic filters, cache policy, optional frontmatter/chunks/token chunks,
-job queue progress, event logs, reports, output browsing, checkpoints, and cache metadata.
+This UI remains available for migration and internal operator workflows, but the public 1.0.0 release direction is the
+WinUI 3 desktop shell with a bundled backend.
 
 This is a local operator UI, not a hosted multi-user service. Keep the default host 127.0.0.1 unless you explicitly
 intend to expose it on another interface.

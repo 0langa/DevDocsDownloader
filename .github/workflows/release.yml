@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev,gui,tokenizer,browser,benchmark]
+          python -m pip install pyinstaller build
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Validate version consistency
+        run: python scripts/check_version.py
+
+      - name: Run test and build gates
+        run: python -m pytest -q
+
+      - name: Build frozen desktop backend
+        run: python scripts/build_desktop_backend.py --clean
+
+      - name: Build desktop shell
+        run: dotnet publish desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj -c Release -p:Platform=x64 -o desktop/publish/desktop
+
+      - name: Assemble release layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path desktop/publish/desktop/backend | Out-Null
+          Copy-Item dist/DevDocsDownloader.Backend/* desktop/publish/desktop/backend -Recurse -Force
+
+      - name: Build installer
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "desktop\installer\DevDocsDownloader.iss"'
+
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\portable | Out-Null
+          Compress-Archive -Path desktop/publish/desktop/* -DestinationPath dist/portable/DevDocsDownloader-Portable-1.0.0.zip -Force
+
+      - name: Write checksums
+        shell: pwsh
+        run: |
+          $files = @(
+            "dist\installer\DevDocsDownloader-Setup-1.0.0.exe",
+            "dist\portable\DevDocsDownloader-Portable-1.0.0.zip"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = Get-FileHash $file -Algorithm SHA256
+            "$($hash.Hash)  $(Split-Path $file -Leaf)"
+          }
+          $lines | Set-Content dist\SHA256SUMS.txt
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: .github/release-notes.md
+          files: |
+            dist/installer/DevDocsDownloader-Setup-1.0.0.exe
+            dist/portable/DevDocsDownloader-Portable-1.0.0.zip
+            dist/SHA256SUMS.txt

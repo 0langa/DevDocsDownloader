@@ -1,0 +1,24 @@
+<Page
+    x:Class="DevDocsDownloader.Desktop.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <StackPanel Spacing="12" Padding="16">
+            <TextBlock Text="Settings / Help" FontSize="20" FontWeight="SemiBold" />
+            <TextBox x:Name="OutputDirBox" Header="Output directory" />
+            <ComboBox x:Name="CachePolicyBox" Header="Cache policy" SelectedIndex="0">
+                <x:String>use-if-present</x:String>
+                <x:String>ttl</x:String>
+                <x:String>always-refresh</x:String>
+                <x:String>validate-if-possible</x:String>
+            </ComboBox>
+            <TextBox x:Name="CacheTtlBox" Header="Cache TTL hours" Text="24" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Load settings" Click="OnLoadSettings" />
+                <Button Content="Save settings" Click="OnSaveSettings" />
+            </StackPanel>
+            <TextBlock Text="Operator Help" FontWeight="SemiBold" />
+            <TextBox x:Name="HelpBox" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" Height="420" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -1,15 +1,14 @@
-# v0.1.0 Release Checklist
+# v1.0.0 Release Checklist
 
-This checklist defines release readiness for the current project state. Version `0.1.0` means the project is usable and tested, not a v1 stable API promise.
+This checklist defines the first Windows desktop release. Version `1.0.0` means the WinUI 3 shell, bundled Python backend, packaging, and GitHub Release automation are all present and validated together.
 
-## Install
+## Bootstrap
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -e .[dev,gui,tokenizer]
+python scripts/setup.py --profile dev
 ```
+
+This is the preferred repo bootstrap for release validation because it creates `.venv`, installs the full runtime capability set, installs Playwright Chromium, and adds developer tools in one step.
 
 If package build tooling is missing:
 
@@ -17,7 +16,7 @@ If package build tooling is missing:
 python -m pip install build
 ```
 
-## Required Checks
+## Required Python Checks
 
 ```bash
 python -m pytest -q
@@ -32,11 +31,32 @@ PowerShell compile check:
 Get-ChildItem doc_ingest,tests,scripts -Recurse -Filter *.py | ForEach-Object { python -m py_compile $_.FullName }
 ```
 
-Package build sanity:
+Package and version sanity:
 
 ```bash
 python -m build
+python scripts/check_version.py
 ```
+
+## Required Desktop Checks
+
+```bash
+dotnet build DevDocsDownloader.Desktop.sln -c Release -p:Platform=x64
+python scripts/build_desktop_backend.py --clean
+```
+
+If the local machine lacks the Windows PRI packaging task assembly required by WinUI build targets, run the desktop and installer validation on a Windows image with Visual Studio packaging components available, such as the GitHub Actions `windows-latest` runner used by the CI/release workflows.
+
+## Release Artifact Checks
+
+- Build the frozen backend into `dist/DevDocsDownloader.Backend/`
+- Publish the desktop shell into `desktop/publish/desktop/`
+- Copy the bundled backend under `desktop/publish/desktop/backend/`
+- Build the installer with `desktop/installer/DevDocsDownloader.iss`
+- Build `DevDocsDownloader-Portable-1.0.0.zip`
+- Generate `SHA256SUMS.txt`
+- Smoke-check backend startup via `/health` and `/version`
+- Smoke-check first desktop launch against the bundled backend
 
 ## Optional Live Checks
 
@@ -52,7 +72,7 @@ Bounded extraction sanity:
 $env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live_extraction_sanity.py -q
 ```
 
-## Optional GUI Smoke
+## Legacy NiceGUI Smoke
 
 ```bash
 python DevDocsDownloader.py gui --host 127.0.0.1 --port 8080
@@ -60,7 +80,7 @@ python DevDocsDownloader.py gui --host 127.0.0.1 --port 8080
 
 Verify the dashboard loads, bulk/run options are visible, report/output browser views open, and no browser console errors appear during basic navigation.
 
-## Known Non-Goals for v0.1.0
+## Known Non-Goals for v1.0.0
 
 - No v1 compatibility promise for Python service models.
 - No hosted multi-user GUI mode.

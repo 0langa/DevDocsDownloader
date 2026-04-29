@@ -162,7 +162,7 @@ DevDocsDownloader/
 
 **Purpose**
 
-- Optional NiceGUI operator interface over `DocumentationService`
+- Legacy NiceGUI operator interface over `DocumentationService`, retained as a migration/internal tool
 
 **Key symbols**
 
@@ -177,6 +177,25 @@ DevDocsDownloader/
 - `SETTINGS_HELP_MARKDOWN` contains the in-app operator tutorial for workflows, cache/resume behavior, validation,
   reports, output browsing, and CLI equivalents
 - does not shell out to CLI commands for core operations
+
+### `doc_ingest/desktop_backend.py`
+
+**Purpose**
+
+- Loopback HTTP backend host for the WinUI desktop shell
+
+**Key symbols**
+
+- `create_app()`
+- `BackendJobManager`
+- `run_backend_server()`
+
+**Notable details**
+
+- exposes health/version/shutdown endpoints plus run, validate, bulk, reports, output, checkpoints, cache, and settings APIs
+- enforces bearer-token auth on loopback requests
+- supports one active desktop job at a time with SSE event streaming
+- uses desktop-safe runtime paths through `load_config(runtime_mode="desktop")`
 
 ### `doc_ingest/gui/state.py`
 
@@ -657,8 +676,10 @@ These scripts matter mostly because they show repository history; they are not e
 **Status relative to active app**
 
 - Current local bootstrap helper
-- Creates `.venv`, installs the editable package with the `dev` extra by default, creates runtime directories, and prints current CLI/test/tooling commands
-- Installs Playwright Chromium only when `--with-playwright-browser` is passed
+- Primary recommended setup entrypoint before running the downloader
+- Creates `.venv`, installs a selected setup profile, creates runtime directories, and prints current CLI/test/tooling commands
+- Defaults to the `full` profile, which installs runtime extras for GUI, browser fallback, benchmark telemetry, and tokenizer chunking
+- Installs Playwright Chromium by default whenever browser support is included unless `--skip-playwright-browser` is passed
 
 ## Source documents directory
 

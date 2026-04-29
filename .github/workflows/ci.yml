@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows-ci:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev,gui,tokenizer,browser,benchmark]
+
+      - name: Check version consistency
+        run: python scripts/check_version.py
+
+      - name: Run Python tests
+        run: python -m pytest -q
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Ruff format
+        run: python -m ruff format --check .
+
+      - name: Mypy
+        run: python -m mypy doc_ingest
+
+      - name: Python compile check
+        shell: pwsh
+        run: Get-ChildItem doc_ingest,tests,scripts -Recurse -Filter *.py | ForEach-Object { python -m py_compile $_.FullName }
+
+      - name: Desktop backend smoke
+        run: python -m pytest tests/test_desktop_backend.py -q
+
+      - name: Build WinUI desktop shell
+        run: dotnet build DevDocsDownloader.Desktop.sln -c Release -p:Platform=x64

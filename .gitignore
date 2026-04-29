@@ -23,6 +23,10 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+bin/
+obj/
+**/bin/
+**/obj/
 
 # Generated runtime artifacts
 cache/

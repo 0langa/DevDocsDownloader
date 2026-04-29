@@ -20,7 +20,17 @@ user command
 	-> output/state/reports
 ```
 
-Optional GUI flow:
+Desktop release flow:
+
+```text
+WinUI shell
+	-> local loopback HTTP API
+	-> doc_ingest.desktop_backend
+	-> DocumentationService
+	-> same pipeline/state/report/output paths as CLI
+```
+
+Legacy GUI flow:
 
 ```text
 local browser
@@ -70,7 +80,29 @@ local browser
 - `doc_ingest/cli.py` owns all user-facing commands
 - single-language runs and bulk runs call `DocumentationService`, which owns the pipeline lifecycle
 
-The optional `gui` command launches the local NiceGUI operator interface when the `gui` extra is installed. Missing GUI dependencies produce an actionable install message instead of affecting normal CLI imports.
+The optional `gui` command launches the older local NiceGUI operator interface when the `gui` extra is installed. It remains useful for migration and internal operator flows, but the `1.0.0` desktop release direction is the WinUI 3 shell plus bundled Python backend worker.
+
+### 1.0 Desktop backend host
+
+**Files:**
+
+- `doc_ingest/desktop_backend.py`
+- `doc_ingest/desktop_settings.py`
+
+**Responsibilities:**
+
+- expose `DocumentationService` through a local-only HTTP API for the WinUI shell
+- enforce bearer-token auth on loopback requests
+- own one active desktop job at a time with structured job status and SSE event streaming
+- persist desktop defaults through `%LOCALAPPDATA%\DevDocsDownloader\settings.json`
+- use desktop-safe output/cache/state/log/tmp roots instead of repo-root defaults when running in desktop mode
+
+**Key behavior:**
+
+- binds to `127.0.0.1` and a caller-selected port
+- exposes health/version/shutdown, run/bulk/validate, inspection, reports, checkpoints, cache, and settings endpoints
+- reuses existing Pydantic request/response models where practical
+- is intended to be frozen and bundled into the desktop release
 
 ### 1.1 Local GUI and operator workflow layer
 
@@ -90,6 +122,7 @@ The optional `gui` command launches the local NiceGUI operator interface when th
 
 - NiceGUI is optional through `.[gui]`
 - the GUI calls `DocumentationService` directly and does not shell out to Typer commands
+- the GUI is retained as a migration and internal operator surface, not the primary `1.0.0` public GUI
 - file reads are constrained to configured output/report/cache/state roots
 - destructive checkpoint deletion is limited to `state/checkpoints/*.json`
 - the Settings/Help tab embeds the operator tutorial for workflows, expected behavior, validation output, cache/resume
@@ -116,7 +149,7 @@ The optional `gui` command launches the local NiceGUI operator interface when th
 - `state/checkpoints/`
 - `tmp/`
 
-The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, tokenizer chunk settings, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. Source plugins are discovered from installed Python entry points in the `devdocsdownloader.sources` group; built-in sources are registered first.
+The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, tokenizer chunk settings, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. Source plugins are discovered from installed Python entry points in the `devdocsdownloader.sources` group; built-in sources are registered first. In desktop mode, `PathsConfig.from_desktop()` redirects cache, state, logs, tmp, settings, and default output roots to per-user Windows locations.
 
 ### 3. Source resolution layer
 
@@ -491,6 +524,10 @@ doc_ingest.compiler
 - `psutil` — benchmark support in the `benchmark` extra
 
 `pyproject.toml` is the canonical dependency manifest. The root `requirements.txt` and `source-documents/requirements.txt` files are compatibility shims only.
+
+For local installation, `scripts/setup.py` is the recommended bootstrap entrypoint. Its default `full` profile creates
+`.venv`, installs the runtime extras needed for GUI/browser/tokenizer/benchmark capabilities, installs Playwright
+Chromium, and creates the runtime directory tree before first use.
 
 ## Concurrency model
 

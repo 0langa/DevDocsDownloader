@@ -154,6 +154,6 @@ When optional outputs are enabled, `_meta.json` may include an `outputs` object 
 
 Source cache metadata is written beside source cache artifacts as `*.meta.json` where practical. Metadata records source, cache key, URL, fetched timestamp, source version when known, ETag, Last-Modified, checksum, byte count, cache policy, and whether refresh was forced.
 
-## GUI Consumption
+## GUI and Desktop Consumption
 
-The optional NiceGUI operator interface does not introduce new persisted output files. It reads this contract through `DocumentationService` methods for output bundles, Markdown files, `_meta.json`, reports, document validation JSONL, report history, trend files, checkpoints, and cache metadata. GUI file reads must remain constrained to configured output/report/cache/state roots, and checkpoint deletion must remain limited to `state/checkpoints/*.json`.
+The desktop backend host and the legacy NiceGUI operator interface do not introduce new generated output artifacts. They read this contract through `DocumentationService` methods and, for the WinUI release path, the loopback backend API. Output/report/checkpoint/cache file reads must remain constrained to configured roots, and checkpoint deletion must remain limited to `state/checkpoints/*.json`.

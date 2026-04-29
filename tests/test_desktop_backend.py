@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import httpx
+
+from doc_ingest.config import load_config
+from doc_ingest.desktop_backend import create_app
+from doc_ingest.desktop_settings import DesktopSettings, DesktopSettingsStore
+from doc_ingest.models import RunSummary
+from doc_ingest.services import DocumentationService, LanguageEntry, RunLanguageRequest, ServiceEvent
+
+
+def test_load_config_desktop_mode_uses_per_user_style_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    config = load_config(runtime_mode="desktop")
+
+    assert config.runtime_mode == "desktop"
+    assert config.paths.cache_dir == (tmp_path / "local" / "DevDocsDownloader" / "cache")
+    assert config.paths.state_dir == (tmp_path / "local" / "DevDocsDownloader" / "state")
+    assert config.paths.settings_path == (tmp_path / "local" / "DevDocsDownloader" / "settings.json")
+    assert config.paths.output_dir.name == "output"
+
+
+def test_desktop_settings_store_round_trips(tmp_path: Path) -> None:
+    store = DesktopSettingsStore(tmp_path / "settings.json")
+    settings = DesktopSettings(output_dir=tmp_path / "out", cache_policy="ttl", cache_ttl_hours=24, emit_chunks=True)
+
+    store.save(settings)
+    loaded = store.load()
+
+    assert loaded.output_dir == tmp_path / "out"
+    assert loaded.cache_policy == "ttl"
+    assert loaded.cache_ttl_hours == 24
+    assert loaded.emit_chunks is True
+
+
+def test_desktop_backend_requires_bearer_token(tmp_path: Path) -> None:
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret")
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            denied = await client.get("/health")
+            allowed = await client.get("/health", headers={"Authorization": "Bearer secret"})
+        assert denied.status_code == 401
+        assert allowed.status_code == 200
+        assert allowed.json()["status"] == "ok"
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_run_language_job_and_events(tmp_path: Path, monkeypatch) -> None:
+    async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
+        if event_sink is not None:
+            await event_sink(ServiceEvent(event_type="phase_change", language=request.language, phase="started"))
+            await event_sink(
+                ServiceEvent(event_type="document_emitted", language=request.language, payload={"index": 1, "total": 1})
+            )
+            await event_sink(
+                ServiceEvent(event_type="validation_completed", language=request.language, payload={"score": 1.0})
+            )
+        return RunSummary()
+
+    monkeypatch.setattr(DocumentationService, "run_language", fake_run_language)
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret")
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=5.0) as client:
+            created = await client.post("/jobs/run-language", headers=headers, json={"language": "Python"})
+            assert created.status_code == 202
+            job_id = created.json()["id"]
+
+            for _ in range(50):
+                status = await client.get(f"/jobs/{job_id}", headers=headers)
+                assert status.status_code == 200
+                if status.json()["status"] == "completed":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("job did not complete")
+
+            stream = await client.get(f"/jobs/{job_id}/events", headers=headers)
+            assert stream.status_code == 200
+            body = stream.text
+            assert "phase_change" in body
+            assert "document_emitted" in body
+            assert "validation_completed" in body
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_languages_and_settings_endpoints(tmp_path: Path, monkeypatch) -> None:
+    async def fake_list_languages(self, *, source=None, force_refresh=False):
+        return [LanguageEntry(language="Python", source="devdocs", slug="python", version="3.13")]
+
+    monkeypatch.setattr(DocumentationService, "list_languages", fake_list_languages)
+    settings_store = DesktopSettingsStore(tmp_path / "settings.json")
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret", settings_store=settings_store)
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            languages = await client.get("/languages", headers=headers)
+            assert languages.status_code == 200
+            assert languages.json()[0]["language"] == "Python"
+
+            updated = await client.put(
+                "/settings",
+                headers=headers,
+                json={"cache_policy": "ttl", "cache_ttl_hours": 8, "emit_chunks": True},
+            )
+            assert updated.status_code == 200
+            payload = settings_store.load().model_dump(mode="json")
+            assert payload["cache_policy"] == "ttl"
+            assert payload["cache_ttl_hours"] == 8
+            assert payload["emit_chunks"] is True
+
+            fetched = await client.get("/settings", headers=headers)
+            assert fetched.status_code == 200
+            assert fetched.json()["cache_policy"] == "ttl"
+
+    asyncio.run(scenario())

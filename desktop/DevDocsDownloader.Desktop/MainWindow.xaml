@@ -1,0 +1,33 @@
+<Window
+    x:Class="DevDocsDownloader.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="DevDocsDownloader">
+    <Grid>
+        <NavigationView x:Name="ShellNavigationView"
+                        IsBackButtonVisible="Collapsed"
+                        SelectionChanged="OnSelectionChanged">
+            <NavigationView.Header>
+                <StackPanel>
+                    <TextBlock Text="DevDocsDownloader" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding StatusText}" Opacity="0.7" />
+                </StackPanel>
+            </NavigationView.Header>
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Dashboard / Run" Tag="RunPage" />
+                <NavigationViewItem Content="Bulk" Tag="BulkPage" />
+                <NavigationViewItem Content="Languages" Tag="LanguagesPage" />
+                <NavigationViewItem Content="Presets / Audit" Tag="PresetsPage" />
+                <NavigationViewItem Content="Reports" Tag="ReportsPage" />
+                <NavigationViewItem Content="Output Browser" Tag="OutputBrowserPage" />
+                <NavigationViewItem Content="Checkpoints" Tag="CheckpointsPage" />
+                <NavigationViewItem Content="Cache" Tag="CachePage" />
+                <NavigationViewItem Content="Settings / Help" Tag="SettingsPage" />
+            </NavigationView.MenuItems>
+            <Frame x:Name="ContentFrame" />
+        </NavigationView>
+    </Grid>
+</Window>

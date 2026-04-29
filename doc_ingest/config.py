@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +17,7 @@ class PathsConfig(BaseModel):
     checkpoints_dir: Path
     tmp_dir: Path
     reports_dir: Path
+    settings_path: Path
 
     @classmethod
     def from_root(cls, root: Path) -> PathsConfig:
@@ -30,6 +32,25 @@ class PathsConfig(BaseModel):
             checkpoints_dir=root / "state" / "checkpoints",
             tmp_dir=root / "tmp",
             reports_dir=output_dir / "reports",
+            settings_path=root / "settings.json",
+        )
+
+    @classmethod
+    def from_desktop(cls, *, app_name: str, output_dir: Path | None = None) -> PathsConfig:
+        local_root = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / app_name
+        documents_root = Path.home() / "Documents" / app_name / "output"
+        resolved_output = (output_dir or documents_root).resolve()
+        return cls(
+            root=local_root.resolve(),
+            output_dir=resolved_output,
+            markdown_dir=resolved_output / "markdown",
+            cache_dir=local_root / "cache",
+            logs_dir=local_root / "logs",
+            state_dir=local_root / "state",
+            checkpoints_dir=local_root / "state" / "checkpoints",
+            tmp_dir=local_root / "tmp",
+            reports_dir=resolved_output / "reports",
+            settings_path=local_root / "settings.json",
         )
 
     def ensure(self) -> None:
@@ -48,6 +69,7 @@ class PathsConfig(BaseModel):
 
 class AppConfig(BaseModel):
     paths: PathsConfig
+    runtime_mode: Literal["repo", "desktop"] = "repo"
     language_concurrency: int = 3
     bulk_concurrency_policy: Literal["static", "adaptive"] = "static"
     adaptive_min_concurrency: int = 1
@@ -64,12 +86,22 @@ class AppConfig(BaseModel):
     cache_ttl_hours: int | None = None
 
 
-def load_config(root: Path | None = None, *, output_dir: Path | None = None) -> AppConfig:
-    resolved_root = (root or Path(__file__).resolve().parent.parent).resolve()
-    config = AppConfig(paths=PathsConfig.from_root(resolved_root))
-    if output_dir is not None:
-        config.paths.output_dir = output_dir.resolve()
-        config.paths.markdown_dir = config.paths.output_dir / "markdown"
-        config.paths.reports_dir = config.paths.output_dir / "reports"
+def load_config(
+    root: Path | None = None,
+    *,
+    output_dir: Path | None = None,
+    runtime_mode: Literal["repo", "desktop"] = "repo",
+    app_name: str = "DevDocsDownloader",
+) -> AppConfig:
+    if runtime_mode == "desktop":
+        paths = PathsConfig.from_desktop(app_name=app_name, output_dir=output_dir)
+    else:
+        resolved_root = (root or Path(__file__).resolve().parent.parent).resolve()
+        paths = PathsConfig.from_root(resolved_root)
+        if output_dir is not None:
+            paths.output_dir = output_dir.resolve()
+            paths.markdown_dir = paths.output_dir / "markdown"
+            paths.reports_dir = paths.output_dir / "reports"
+    config = AppConfig(paths=paths, runtime_mode=runtime_mode)
     config.paths.ensure()
     return config

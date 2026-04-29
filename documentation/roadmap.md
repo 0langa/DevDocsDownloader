@@ -15,9 +15,9 @@ Completed foundations:
 - Performance and scalability: streaming compilation, automatic checkpoint resume with artifact manifests, balanced generated-Markdown durability, source-profile throttling, and metadata-driven MDN extraction reuse.
 - Extraction quality: source-specific DevDocs/Dash HTML cleanup, source-absolute link rewriting, safe MDN YAML frontmatter parsing, and richer validation warnings for links, HTML leftovers, malformed tables, and definition-list artifacts.
 - Output and consumption: collision-safe consolidated anchors, optional per-document YAML frontmatter, optional Markdown+JSONL chunk exports, source-agnostic cache freshness metadata, and service-layer output/report/checkpoint/cache inspection.
-- Operator workflows: optional local NiceGUI dashboard with CLI-equivalent run controls, in-process job queue, output browser, report drill-down, checkpoint controls, and cache metadata views.
+- Operator workflows: legacy local NiceGUI dashboard with CLI-equivalent run controls, in-process job queue, output browser, report drill-down, checkpoint controls, and cache metadata views retained as a migration bridge while the WinUI desktop release track is completed.
 - Source expansion and fidelity: entry-point source plugins, exact local cross-document link rewriting, event-driven asset inventory, optional tokenizer chunking, and removal of unused extended-conversion extras.
-- Release readiness: opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, and a v0.1.0 release checklist.
+- Release readiness: opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, desktop-safe runtime paths/settings, a local desktop backend API, WinUI desktop shell scaffolding, and GitHub Actions release automation for installer/portable artifacts.
 
 Current guarantees:
 
@@ -104,7 +104,7 @@ Current guarantees:
 ### 1. Build a Local Visual GUI Over the Service Layer
 
 - **Problem:** The CLI is scriptable and complete, but non-technical users need a visual way to configure languages, sources, modes, cache policy, output options, progress, validation, and reports.
-- **Implemented:** Added an optional NiceGUI dashboard launched with `python DevDocsDownloader.py gui`. It calls `DocumentationService`, exposes run/bulk/validate/catalog/preset/output/report/checkpoint/cache workflows, and uses a local in-process job queue over service events.
+- **Implemented:** Added an optional NiceGUI dashboard launched with `python DevDocsDownloader.py gui`. It calls `DocumentationService`, exposes run/bulk/validate/catalog/preset/output/report/checkpoint/cache workflows, and uses a local in-process job queue over service events. It now serves as a migration and internal operator surface while the supported `1.0.0` GUI direction is the WinUI shell plus bundled backend.
 - **Impact:** Makes the full ingestion system accessible without weakening the CLI contract.
 - **Complexity:** High
 
@@ -182,9 +182,18 @@ Current guarantees:
 - **Impact:** Catches upstream shape changes earlier while preserving deterministic routine tests.
 - **Complexity:** Medium
 
-## Post-v0.1.0 Future Work
+## Desktop Release Track - In Progress
 
-- Package the local GUI as a desktop distribution if operator usage justifies it.
+- Windows-native desktop shell under `desktop/DevDocsDownloader.Desktop/`
+- loopback desktop backend host in `doc_ingest/desktop_backend.py`
+- desktop-safe settings and storage roots
+- backend freeze, installer, and GitHub Release workflow scaffolding
+- release-facing docs now point to the WinUI desktop path as the supported GUI direction for `1.0.0`
+- remaining practical blocker for full local verification on this machine: missing WinUI PRI packaging task assembly required by the Windows App SDK build targets
+
+## Post-v1.0.0 Future Work
+
+- Remove the legacy NiceGUI path completely once WinUI parity and release validation are complete.
 - Add cooperative cancellation inside active source runs when safe cancellation boundaries are available.
 - Add deeper semantic validation only where source-specific truth data exists.
 - Reintroduce PDF/DOCX/browser conversion only with a real adapter path and fixture coverage.

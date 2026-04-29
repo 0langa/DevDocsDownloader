@@ -50,9 +50,15 @@ separate manual for basic operation.
 
 For actual ingestion work, the CLI routes into `_execute_run()` for single-language execution and into a custom async runner inside `bulk()` for multi-language execution.
 
-### 2.1.1 Local GUI operator interface
+### 2.1.1 Desktop backend and local GUI operator interfaces
 
-`python DevDocsDownloader.py gui` launches the optional NiceGUI dashboard when the `gui` extra is installed.
+The `1.0.0` desktop release direction is a WinUI 3 shell with a bundled loopback backend host in `doc_ingest/desktop_backend.py`.
+That backend exposes `DocumentationService` over local HTTP with bearer-token auth, structured job status, and SSE
+event streaming for the desktop shell.
+
+`python DevDocsDownloader.py gui` launches the legacy NiceGUI dashboard when the `gui` extra is installed. The `1.0.0`
+desktop release direction is therefore no longer the NiceGUI surface, which remains in the repo as a migration and
+internal operator tool.
 
 The GUI is local/operator-focused and calls `DocumentationService` in-process. It does not shell out to Typer commands for core workflows. Its first screen is an operational dashboard with:
 
@@ -67,11 +73,11 @@ The GUI is local/operator-focused and calls `DocumentationService` in-process. I
 - a Settings/Help tutorial that explains the end-to-end workflow, expected failure behavior, cache/resume semantics,
   report interpretation, output browsing, and CLI equivalents
 
-All GUI file reads are routed through service methods that resolve paths under configured output, report, cache, or checkpoint roots before reading or deleting.
+All GUI file reads are routed through service methods that resolve paths under configured output, report, cache, or checkpoint roots before reading or deleting. The desktop backend exposes equivalent safe readers over loopback HTTP for the WinUI shell.
 
 ### 2.2 Configuration and path setup
 
-`load_config()` in `doc_ingest/config.py` derives all runtime paths from the repository root unless an alternate `output_dir` is supplied.
+`load_config()` in `doc_ingest/config.py` derives runtime paths from the repository root for CLI/repo mode unless an alternate `output_dir` is supplied. Desktop mode uses per-user Windows-safe locations through `PathsConfig.from_desktop()`.
 
 Generated directories:
 
@@ -720,6 +726,11 @@ The benchmark and state-manifest scripts have been updated for the active runtim
 - optional `tiktoken` through the `tokenizer` extra
 
 Developer tooling lives in the `dev` extra. Support-script, browser, GUI, tokenizer, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
+
+`scripts/setup.py` is the recommended bootstrap path for users and operators. It now defaults to a full runtime setup:
+GUI support, Playwright browser package, Playwright Chromium installation, tokenizer chunking, benchmark telemetry
+support, a local `.venv`, and the current runtime directory tree. The `dev` profile adds test/lint/type tools on top
+of that runtime baseline, while `minimal` keeps only the base runtime.
 
 ## 14.3 Incomplete cleanup boundaries
 

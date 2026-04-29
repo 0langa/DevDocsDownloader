@@ -1,6 +1,6 @@
 # DevDocsDownloader
 
-`DevDocsDownloader` is a Python CLI that downloads official programming-language documentation from curated upstream sources and compiles it into local Markdown bundles. The active implementation resolves a language against catalogs from DevDocs, MDN, and Dash/Kapeli, fetches source data, converts or normalizes content into Markdown, organizes documents by topic, emits a consolidated language file, and writes lightweight validation and run reports.
+`DevDocsDownloader` is a documentation ingestion engine with a Windows desktop release path and a Python automation surface. The active implementation resolves a language against catalogs from DevDocs, MDN, and Dash/Kapeli, fetches source data, converts or normalizes content into Markdown, organizes documents by topic, emits a consolidated language file, and writes validation, diagnostics, and run reports.
 
 The runtime path is usable today for those three source families. The repository also contains older helper scripts that reflect a broader crawler-oriented design no longer present in the active execution path. Those mismatches are called out explicitly below.
 
@@ -58,7 +58,7 @@ Typical generated files:
 
 The stable generated-output contract is documented in `documentation/output_contract.md`.
 
-### CLI capabilities
+### User surfaces
 
 - Interactive wizard when run without a subcommand
 - `run` for single-language ingestion
@@ -69,7 +69,8 @@ The stable generated-output contract is documented in `documentation/output_cont
 - `refresh-catalogs`
 - `validate`
 - `init`
-- `gui` (optional NiceGUI extra)
+- desktop backend worker for the WinUI 3 shell
+- `gui` (legacy NiceGUI operator UI kept for migration/internal use)
 
 ## High-level architecture
 
@@ -101,6 +102,36 @@ CLI
 - Network access to the selected upstream documentation sources
 - Enough disk space for cached source datasets, especially for MDN and Dash docsets
 
+### Recommended full setup
+
+Run the central setup script before first use:
+
+```bash
+python scripts/setup.py
+```
+
+This is the primary installation path. By default it:
+
+- creates `.venv`
+- installs the editable package with full runtime capability extras: `gui`, `browser`, `benchmark`, and `tokenizer`
+- installs Playwright Chromium so browser-backed functionality is actually available
+- creates the runtime directories under `output/`, `cache/`, `logs/`, `state/`, and `tmp/`
+
+Useful variants:
+
+```bash
+python scripts/setup.py --profile minimal
+python scripts/setup.py --profile dev
+python scripts/setup.py --skip-playwright-browser
+python scripts/setup.py --profile full --extras analysis
+```
+
+Profiles:
+
+- `full` — default; installs everything needed for the full user-facing runtime feature set
+- `dev` — full runtime plus developer tools (`pytest`, `ruff`, `mypy`)
+- `minimal` — base runtime only, without optional GUI/browser/tokenizer/benchmark features
+
 ### Install with `pip`
 
 ```bash
@@ -121,23 +152,41 @@ python -m pip install -e .[dev]
 Optional extras:
 
 - `analysis` — support for archived crawler path-analysis utilities
-- `browser` — Playwright package only
+- `browser` — Playwright package
 - `benchmark` — benchmark helper dependencies
-- `gui` — local NiceGUI operator interface
+- `gui` — legacy NiceGUI operator interface retained for migration/internal use
 - `tokenizer` — optional tiktoken-backed retrieval chunking
 
 ### Optional helper setup
 
-The repository includes `scripts/setup.py`, which creates `.venv`, installs the editable package with the `dev` extra, and creates current runtime directories.
+The repository includes `scripts/setup.py`, which is the recommended bootstrap entrypoint. It creates `.venv`,
+installs the selected capability profile, installs Playwright Chromium by default for full setups, and creates current
+runtime directories.
 
 ```bash
 python scripts/setup.py
-python scripts/setup.py --extras dev,analysis,benchmark
-python scripts/setup.py --extras dev,gui
-python scripts/setup.py --extras dev,browser --with-playwright-browser
+python scripts/setup.py --profile dev
+python scripts/setup.py --profile minimal
+python scripts/setup.py --profile full --extras analysis
 ```
 
-Playwright Chromium is not installed by default.
+For manual installs, Playwright Chromium is not installed automatically. Run `python -m playwright install chromium`
+if you install the `browser` extra outside the setup script.
+
+## Windows Desktop Release
+
+The `1.0.0` product direction is a native Windows desktop application in `desktop/DevDocsDownloader.Desktop/`.
+
+Release architecture:
+
+- `WinUI 3 + .NET 8` desktop shell
+- bundled frozen Python backend worker
+- local `127.0.0.1` HTTP API with bearer-token auth
+- GitHub Release artifacts:
+  - `DevDocsDownloader-Setup-1.0.0.exe`
+  - `DevDocsDownloader-Portable-1.0.0.zip`
+
+The backend API host lives in `doc_ingest/desktop_backend.py`. Release packaging scripts, installer definitions, and workflows live under `scripts/`, `desktop/installer/`, and `.github/workflows/`.
 
 ## CLI Guide
 
@@ -220,9 +269,9 @@ python DevDocsDownloader.py audit-presets webapp
 python DevDocsDownloader.py
 ```
 
-## GUI Guide
+## Legacy NiceGUI Guide
 
-The optional GUI exposes the CLI workflows through a local NiceGUI dashboard and adds output browsing, report drill-down, checkpoint inspection/deletion, cache metadata views, and a visual job queue.
+The older local NiceGUI surface remains in the repo as a migration and internal operator tool. It is no longer the primary public GUI direction for `1.0.0`, which is the WinUI desktop app.
 
 ### Install and launch
 
@@ -347,7 +396,7 @@ Generated Markdown files are still written through atomic temp-file replacement,
 
 `SourceRuntime` applies conservative source-profile throttling around HTTP requests and archive downloads. Operational overrides are available through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`.
 
-Bulk runs default to static language concurrency. `--concurrency-policy adaptive` enables conservative adaptive scheduling that reduces new language starts after failures, retry pressure, or local resource pressure, and increases slowly after successful windows. Adaptive mode is opt-in for v0.1.0.
+Bulk runs default to static language concurrency. `--concurrency-policy adaptive` enables conservative adaptive scheduling that reduces new language starts after failures, retry pressure, or local resource pressure, and increases slowly after successful windows. Adaptive mode remains opt-in.
 
 ### Output and downstream consumption behavior
 
@@ -379,11 +428,11 @@ When adapters emit `AssetEvent` records with bytes or safe local files, the comp
 
 `--force-refresh` remains the strongest override. Source cache artifacts write sidecar `*.meta.json` files with fetched timestamp, URL, ETag/Last-Modified when available, checksum, byte count, and policy.
 
-### GUI-ready service boundary
+### Desktop and service boundary
 
-`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, validation-only, runtime inspection, output bundle browsing, report reading, checkpoint inspection/deletion, and cache metadata workflows. The local NiceGUI app calls this service layer directly instead of shelling out to the Typer CLI.
+`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, validation-only, runtime inspection, output bundle browsing, report reading, checkpoint inspection/deletion, and cache metadata workflows. The new desktop backend host in `doc_ingest.desktop_backend` exposes these workflows over a local loopback HTTP API for the WinUI shell, while the older NiceGUI surface remains a migration-only interface.
 
-The service layer also accepts an optional event sink for GUI-ready phase, document, warning, validation, runtime telemetry, and failure events. Existing CLI rendering continues to use Rich progress. The GUI keeps a local in-process queue with one active job by default and shows queued, running, completed, failed, and cancelled jobs.
+The service layer also accepts an optional event sink for phase, document, warning, validation, runtime telemetry, and failure events. The desktop backend uses that signal path for SSE job streams. Existing CLI rendering continues to use Rich progress.
 
 ### Report history and trends
 
@@ -395,6 +444,7 @@ The service layer also accepts an optional event sink for GUI-ready phase, docum
 DevDocsDownloader.py         # top-level entry point
 doc_ingest/                 # active package
 doc_ingest/gui/             # optional NiceGUI operator interface
+desktop/                    # WinUI 3 desktop shell and installer assets
 documentation/              # project documentation files
 scripts/                    # helper and historical support scripts
 tests/                      # focused regression tests
@@ -462,12 +512,13 @@ The current tests focus on:
 
 The most realistic next steps, based on the current repository state, are:
 
-1. Package and distribute the local GUI if operator adoption justifies it
-2. Reintroduce PDF/DOCX/browser conversion only when a real source adapter path and fixture coverage justify the dependency
+1. Finish validating the WinUI release build on a Windows image with the required packaging components available
+2. Remove the legacy NiceGUI surface once WinUI parity and release validation are complete
+3. Reintroduce PDF/DOCX/browser conversion only when a real source adapter path and fixture coverage justify the dependency
 
 ## Release readiness
 
-The project is prepared as a v0.1.0 release candidate. Use `documentation/release_checklist.md` for the required deterministic checks, optional live probes, optional GUI smoke, and package build sanity.
+The project now includes the backend host, WinUI shell scaffold, installer definition, and GitHub Actions release automation for the `1.0.0` desktop release track. Use `documentation/release_checklist.md` for the required Python checks, desktop build/package validation, and release artifact smoke tests.
 
 ## Documentation map
 
@@ -476,5 +527,5 @@ The project is prepared as a v0.1.0 release candidate. Use `documentation/releas
 - `documentation/development_progress.md` — implementation status and known gaps
 - `documentation/full-project-documentation.md` — detailed technical reference
 - `documentation/output_contract.md` — generated output, state, checkpoint, and report contract
-- `documentation/release_checklist.md` — v0.1.0 release validation checklist
-- `documentation/roadmap.md` — completed roadmap and post-v0.1.0 future work
+- `documentation/release_checklist.md` — v1.0.0 desktop release validation checklist
+- `documentation/roadmap.md` — completed roadmap and post-v1.0.0 future work

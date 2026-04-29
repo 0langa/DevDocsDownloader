@@ -2,7 +2,7 @@
 
 ## Current state summary
 
-The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, optional adaptive bulk scheduling, and a local NiceGUI operator interface over the service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
+The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, optional adaptive bulk scheduling, a desktop backend host for a WinUI release shell, and a retained legacy NiceGUI operator interface over the same service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
 
 In short:
 
@@ -22,7 +22,8 @@ In short:
 - Validation-only command path is complete
 - Catalog listing and refresh commands are implemented
 - Output directory initialization command is implemented
-- Optional `gui` command launches the local operator interface when `.[gui]` is installed
+- Optional `gui` command launches the retained legacy operator interface when `.[gui]` is installed
+- Desktop backend host is available for the WinUI shell and uses desktop-safe runtime paths/settings
 
 ### Source registry and resolution
 
@@ -81,13 +82,17 @@ In short:
 - Source diagnostics are persisted with discovered, emitted, and skipped document counts
 - Topic include/exclude filters are available through the CLI and are recorded in diagnostics
 
-### Local GUI and operator workflows
+### Desktop and operator workflows
 
-- NiceGUI-based dashboard is available through `python DevDocsDownloader.py gui`
+- WinUI desktop shell scaffold exists under `desktop/DevDocsDownloader.Desktop/`
+- Desktop backend host exists in `doc_ingest/desktop_backend.py`
+- Desktop settings persist under `%LOCALAPPDATA%\\DevDocsDownloader\\settings.json`
+- Desktop mode uses per-user cache, state, logs, tmp, and output roots instead of repo-root defaults
+- Legacy NiceGUI dashboard is still available through `python DevDocsDownloader.py gui`
 - Single-language, validation-only, and bulk/preset/all runs expose CLI-equivalent options
-- GUI job queue records service events, progress, failures, and completed summaries
+- Desktop/backend and GUI-facing services expose structured jobs, events, progress, failures, and completed summaries
 - Language listing, preset audit, catalog refresh, report inspection, output browsing, checkpoint controls, and cache metadata views are present
-- GUI file reads and checkpoint deletion go through `DocumentationService` path-safety checks
+- Desktop/API and GUI file reads and checkpoint deletion go through `DocumentationService` path-safety checks
 
 ### Tests
 
@@ -104,7 +109,7 @@ The concrete remediation plan for these areas now lives in `documentation/roadma
 - Phase 8 now covers deeper validation, per-document validation reports, structured source warnings, runtime telemetry, and quality trend reporting.
 - Phase 9 delivered the visual GUI and operator workflows over the service layer.
 - Phase 10 delivered source plugins, exact local cross-document links, asset inventory, tokenizer-aware chunks, and dependency cleanup.
-- Phase 11 delivered opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, and v0.1.0 release readiness docs.
+- Phase 11 delivered opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, and the desktop release readiness foundation.
 
 ### Validation quality
 
@@ -155,7 +160,8 @@ These are not promised by the current code, but they are the most obvious gaps f
 
 ### Remaining operational gaps
 
-- no packaged desktop app or hosted multi-user mode; the GUI is local/operator-focused
+- local WinUI release build validation on this machine is blocked by missing Windows PRI packaging components; release CI/workflow scaffolding is in place
+- no hosted multi-user mode; the product remains a local desktop or CLI tool
 
 ### Missing output features
 
@@ -245,7 +251,8 @@ These observations come from code inspection; the benchmark harness now supports
 | Reporting | Working | Summary artifacts generated |
 | State store | Working | Stable final state plus active checkpoint persistence |
 | Progress UI | Working | Presentation layer only |
-| Local GUI | Working | Optional NiceGUI dashboard over `DocumentationService` |
+| Desktop backend | Working | Loopback backend host with auth, jobs, SSE events, and desktop-safe settings/paths |
+| Local GUI | Working as legacy bridge | Optional NiceGUI dashboard over `DocumentationService`; release-facing GUI direction is WinUI |
 | Tests | Working | Contract, integration, CLI, resilience, architecture, and opt-in live endpoint coverage |
 | Benchmarks | Working | Targets current CLI and reports cold/warm cache throughput |
 | Support scripts | Aligned | Setup, benchmark, and state manifest target active runtime; crawler path analyzer is archived |
@@ -254,9 +261,9 @@ These observations come from code inspection; the benchmark harness now supports
 
 ### Highest priority
 
-1. **Refine GUI operations**
+1. **Finish desktop release validation**
+	- verify the WinUI desktop build, backend freeze, installer, and portable bundle on a Windows image with the required packaging components
 	- add cooperative cancellation for active runs when the pipeline exposes safe cancellation boundaries
-	- consider packaged local desktop distribution if operator adoption justifies it
 
 ### Medium priority
 
