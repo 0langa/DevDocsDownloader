@@ -19,6 +19,8 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - uses: microsoft/setup-msbuild@v2
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -47,4 +49,5 @@ jobs:
         run: python -m pytest tests/test_desktop_backend.py -q
 
       - name: Build WinUI desktop shell
-        run: dotnet build DevDocsDownloader.Desktop.sln -c Release -p:Platform=x64
+        shell: pwsh
+        run: msbuild DevDocsDownloader.Desktop.sln /restore /p:Configuration=Release /p:Platform=x64
