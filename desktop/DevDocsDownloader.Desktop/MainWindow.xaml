@@ -7,27 +7,31 @@
     mc:Ignorable="d"
     Title="DevDocsDownloader">
     <Grid>
-        <NavigationView x:Name="ShellNavigationView"
-                        IsBackButtonVisible="Collapsed"
-                        SelectionChanged="OnSelectionChanged">
-            <NavigationView.Header>
-                <StackPanel>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="260" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Padding="16" Background="#F3F4F6">
+            <StackPanel Spacing="12">
+                <StackPanel Spacing="4">
                     <TextBlock Text="DevDocsDownloader" FontSize="20" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding StatusText}" Opacity="0.7" />
+                    <TextBlock Text="{Binding StatusText}" Opacity="0.7" TextWrapping="WrapWholeWords" />
                 </StackPanel>
-            </NavigationView.Header>
-            <NavigationView.MenuItems>
-                <NavigationViewItem Content="Dashboard / Run" Tag="RunPage" />
-                <NavigationViewItem Content="Bulk" Tag="BulkPage" />
-                <NavigationViewItem Content="Languages" Tag="LanguagesPage" />
-                <NavigationViewItem Content="Presets / Audit" Tag="PresetsPage" />
-                <NavigationViewItem Content="Reports" Tag="ReportsPage" />
-                <NavigationViewItem Content="Output Browser" Tag="OutputBrowserPage" />
-                <NavigationViewItem Content="Checkpoints" Tag="CheckpointsPage" />
-                <NavigationViewItem Content="Cache" Tag="CachePage" />
-                <NavigationViewItem Content="Settings / Help" Tag="SettingsPage" />
-            </NavigationView.MenuItems>
-            <Frame x:Name="ContentFrame" />
-        </NavigationView>
+                <ListBox x:Name="NavigationList" SelectionChanged="OnSelectionChanged">
+                    <ListBoxItem Content="Dashboard / Run" Tag="RunPage" />
+                    <ListBoxItem Content="Bulk" Tag="BulkPage" />
+                    <ListBoxItem Content="Languages" Tag="LanguagesPage" />
+                    <ListBoxItem Content="Presets / Audit" Tag="PresetsPage" />
+                    <ListBoxItem Content="Reports" Tag="ReportsPage" />
+                    <ListBoxItem Content="Output Browser" Tag="OutputBrowserPage" />
+                    <ListBoxItem Content="Checkpoints" Tag="CheckpointsPage" />
+                    <ListBoxItem Content="Cache" Tag="CachePage" />
+                    <ListBoxItem Content="Settings / Help" Tag="SettingsPage" />
+                </ListBox>
+            </StackPanel>
+        </Border>
+
+        <Frame x:Name="ContentFrame" Grid.Column="1" />
     </Grid>
 </Window>

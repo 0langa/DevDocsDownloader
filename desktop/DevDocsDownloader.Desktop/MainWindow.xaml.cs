@@ -26,13 +26,13 @@ public sealed partial class MainWindow : Window
         {
             root.DataContext = App.MainViewModel;
         }
-        ShellNavigationView.SelectedItem = ShellNavigationView.MenuItems[0];
+        NavigationList.SelectedIndex = 0;
         ContentFrame.Navigate(typeof(RunPage));
     }
 
-    private void OnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    private void OnSelectionChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (args.SelectedItemContainer?.Tag is not string tag)
+        if ((sender as ListBox)?.SelectedItem is not ListBoxItem item || item.Tag is not string tag)
         {
             return;
         }
