@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
+        InitializeComponent();
         Title = "DevDocsDownloader";
         var root = new Grid();
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
