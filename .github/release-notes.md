@@ -1,11 +1,17 @@
-# DevDocsDownloader 1.0.2
+# DevDocsDownloader 1.0.3
 
-This release ships the first Windows desktop distribution of DevDocsDownloader.
+Bug-fix release.
+
+Changes since 1.0.2:
+
+- Fixed sidebar rendering: hardcoded light-grey sidebar background made nav buttons invisible in dark mode.
+- Increased backend startup timeout from 20 s to 60 s to accommodate antivirus scanning on first launch.
+- Switched PyInstaller bundling to `--collect-all uvicorn` to ensure all protocol modules are included.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.2.exe`
-- `DevDocsDownloader-Portable-1.0.2.zip`
+- `DevDocsDownloader-Setup-1.0.3.exe`
+- `DevDocsDownloader-Portable-1.0.3.zip`
 - `SHA256SUMS.txt`
 
 Notes:

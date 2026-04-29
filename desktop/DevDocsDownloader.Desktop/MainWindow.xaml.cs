@@ -35,7 +35,7 @@ public sealed partial class MainWindow : Window
         var sidebarBorder = new Border
         {
             Padding = new Thickness(16),
-            Background = new SolidColorBrush(ColorHelper.FromArgb(255, 243, 244, 246)),
+            Background = new SolidColorBrush(ColorHelper.FromArgb(255, 32, 32, 32)),
         };
         Grid.SetColumn(sidebarBorder, 0);
 

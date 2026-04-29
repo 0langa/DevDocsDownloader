@@ -75,7 +75,7 @@ public sealed class BackendProcessHost : IAsyncDisposable
 
     private async Task WaitForHealthyAsync(CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(20);
+        var deadline = DateTime.UtcNow.AddSeconds(60);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();

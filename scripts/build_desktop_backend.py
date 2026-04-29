@@ -33,14 +33,8 @@ def main() -> None:
         "--console",
         "--collect-data",
         "doc_ingest.sources",
-        "--hidden-import",
-        "uvicorn.logging",
-        "--hidden-import",
-        "uvicorn.loops.auto",
-        "--hidden-import",
-        "uvicorn.protocols.http.auto",
-        "--hidden-import",
-        "uvicorn.lifespan.on",
+        "--collect-all",
+        "uvicorn",
         str(ROOT / "scripts" / "run_desktop_backend.py"),
     ]
     subprocess.run(command, cwd=ROOT, check=True)
