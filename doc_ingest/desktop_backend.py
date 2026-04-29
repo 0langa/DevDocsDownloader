@@ -100,11 +100,43 @@ class BackendJob:
 
 
 class BackendJobManager:
-    def __init__(self, service: DocumentationService) -> None:
+    def __init__(self, service: DocumentationService, *, history_path: Path | None = None) -> None:
         self.service = service
         self.jobs: dict[str, BackendJob] = {}
         self.active_job_id: str | None = None
         self._lock = asyncio.Lock()
+        self._history_path = history_path
+        self._historical_summaries: list[BackendJobSummary] = []
+        if history_path is not None:
+            self._load_history()
+
+    def _load_history(self) -> None:
+        if self._history_path is None or not self._history_path.exists():
+            return
+        try:
+            for line in self._history_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    self._historical_summaries.append(BackendJobSummary.model_validate(json.loads(line)))
+                except Exception as exc:
+                    LOGGER.warning("Skipping malformed job history entry: %s", exc)
+        except Exception as exc:
+            LOGGER.warning("Failed to load job history from %s: %s", self._history_path, exc)
+        self._historical_summaries = self._historical_summaries[-50:]
+
+    def _persist_summary(self, summary: BackendJobSummary) -> None:
+        if self._history_path is None:
+            return
+        try:
+            self._history_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._history_path.open("a", encoding="utf-8") as f:
+                f.write(summary.model_dump_json() + "\n")
+            self._historical_summaries.append(summary)
+            self._historical_summaries = self._historical_summaries[-50:]
+        except Exception as exc:
+            LOGGER.warning("Failed to persist job summary: %s", exc)
 
     async def submit_run_language(self, request: RunLanguageRequest) -> BackendJobSummary:
         kind = "validate" if request.validate_only else "run_language"
@@ -126,7 +158,10 @@ class BackendJobManager:
         )
 
     def list_jobs(self) -> list[BackendJobSummary]:
-        return [job.snapshot() for job in sorted(self.jobs.values(), key=lambda item: item.created_at, reverse=True)]
+        active = [job.snapshot() for job in sorted(self.jobs.values(), key=lambda item: item.created_at, reverse=True)]
+        active_ids = {s.id for s in active}
+        historical = [s for s in reversed(self._historical_summaries) if s.id not in active_ids]
+        return (active + historical)[:100]
 
     def get(self, job_id: str) -> BackendJob:
         try:
@@ -172,6 +207,9 @@ class BackendJobManager:
 
         async def event_sink(event: ServiceEvent) -> None:
             await job.publish(event)
+            # Yield to the event loop between events so asyncio.CancelledError can
+            # propagate through the pipeline when task.cancel() is called.
+            await asyncio.sleep(0)
 
         try:
             result = await runner(event_sink)
@@ -196,6 +234,7 @@ class BackendJobManager:
         finally:
             self.active_job_id = None
             await job.close_stream()
+            self._persist_summary(job.snapshot())
 
     def _active_job(self) -> BackendJob | None:
         if self.active_job_id is None:
@@ -216,7 +255,7 @@ def create_app(
     app = FastAPI(title="DevDocsDownloader Desktop Backend", version=BACKEND_API_VERSION)
     settings_store = settings_store or DesktopSettingsStore(config.paths.settings_path)
     service = DocumentationService(config)
-    jobs = BackendJobManager(service)
+    jobs = BackendJobManager(service, history_path=config.paths.logs_dir / "job_history.jsonl")
 
     async def require_auth(authorization: str | None = Header(default=None)) -> None:
         expected = f"Bearer {token}"

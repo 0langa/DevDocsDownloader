@@ -75,58 +75,146 @@ public sealed class DesktopBackendClient
         string jobId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/jobs/{jobId}/events");
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            var error = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"Backend request failed ({(int)response.StatusCode}): {error}");
-        }
+        // fromIndex tracks how many events we've received; used to resume after reconnect.
+        int fromIndex = 0;
+        int retries = 0;
+        const int maxRetries = 5;
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-
-        string currentEvent = "message";
-        var dataBuilder = new StringBuilder();
         while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is null)
+            // --- Connect ---
+            HttpResponseMessage? response = null;
+            StreamReader? reader = null;
+            bool connectFailed = false;
+            bool connectCancelled = false;
+            try
             {
-                break; // stream ended
-            }
-            if (line.Length == 0)
-            {
-                if (dataBuilder.Length > 0)
+                var request = new HttpRequestMessage(HttpMethod.Get, $"/jobs/{jobId}/events?from_index={fromIndex}");
+                response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                request.Dispose();
+                if (!response.IsSuccessStatusCode)
                 {
-                    var payload = JsonNode.Parse(dataBuilder.ToString()) as JsonObject ?? new JsonObject();
-                    yield return (currentEvent, payload);
-                    currentEvent = "message";
-                    dataBuilder.Clear();
+                    var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new InvalidOperationException($"Backend returned {(int)response.StatusCode}: {error}");
                 }
+                var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                reader = new StreamReader(stream);
+            }
+            catch (OperationCanceledException)
+            {
+                connectCancelled = true;
+                response?.Dispose();
+            }
+            catch (Exception exc)
+            {
+                connectFailed = true;
+                response?.Dispose();
+                DesktopDiagnostics.Log($"SSE connect failed for job {jobId} (attempt {retries + 1}): {exc.Message}");
+            }
+
+            if (connectCancelled)
+            {
+                yield break;
+            }
+            if (connectFailed)
+            {
+                if (++retries > maxRetries)
+                {
+                    yield break;
+                }
+                var backoff = TimeSpan.FromSeconds(Math.Min(retries * 2, 10));
+                await Task.Delay(backoff, cancellationToken);
                 continue;
             }
-            if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+
+            // --- Read stream ---
+            string currentEvent = "message";
+            var dataBuilder = new StringBuilder();
+            bool completedNormally = false;
+            bool streamDone = false;
+
+            while (!streamDone && !cancellationToken.IsCancellationRequested)
             {
-                currentEvent = line["event:".Length..].Trim();
-                continue;
-            }
-            if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-            {
-                if (dataBuilder.Length > 0)
+                string? line = null;
+                bool readCancelled = false;
+                bool readFailed = false;
+                try
                 {
-                    dataBuilder.AppendLine();
+                    line = await reader!.ReadLineAsync(cancellationToken);
                 }
-                dataBuilder.Append(line["data:".Length..].Trim());
+                catch (OperationCanceledException)
+                {
+                    readCancelled = true;
+                }
+                catch
+                {
+                    readFailed = true;
+                }
+
+                if (readCancelled)
+                {
+                    streamDone = true;
+                    connectCancelled = true;
+                    break;
+                }
+                if (readFailed || line is null)
+                {
+                    streamDone = true;
+                    break;
+                }
+
+                if (line.Length == 0)
+                {
+                    if (dataBuilder.Length > 0)
+                    {
+                        var payload = JsonNode.Parse(dataBuilder.ToString()) as JsonObject ?? new JsonObject();
+                        dataBuilder.Clear();
+                        fromIndex++;
+                        retries = 0;
+                        bool isComplete = string.Equals(currentEvent, "complete", StringComparison.Ordinal);
+                        string evtName = currentEvent;
+                        currentEvent = "message";
+                        yield return (evtName, payload);
+                        if (isComplete)
+                        {
+                            completedNormally = true;
+                            streamDone = true;
+                        }
+                    }
+                    continue;
+                }
+
+                if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentEvent = line["event:".Length..].Trim();
+                }
+                else if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (dataBuilder.Length > 0)
+                    {
+                        dataBuilder.AppendLine();
+                    }
+                    dataBuilder.Append(line["data:".Length..].Trim());
+                }
+                // keep-alive lines (":" prefix) are silently ignored
             }
-        }
-        if (dataBuilder.Length > 0)
-        {
-            var payload = JsonNode.Parse(dataBuilder.ToString()) as JsonObject ?? new JsonObject();
-            yield return (currentEvent, payload);
+
+            reader?.Dispose();
+            response?.Dispose();
+
+            if (connectCancelled || completedNormally)
+            {
+                yield break;
+            }
+
+            // Unexpected disconnect — reconnect with backoff
+            if (++retries > maxRetries)
+            {
+                yield break;
+            }
+            var delay = TimeSpan.FromSeconds(Math.Min(retries * 2, 10));
+            DesktopDiagnostics.Log($"SSE for job {jobId} disconnected; reconnecting (attempt {retries}/{maxRetries}) in {delay.TotalSeconds}s from event index {fromIndex}.");
+            await Task.Delay(delay, cancellationToken);
         }
     }
 

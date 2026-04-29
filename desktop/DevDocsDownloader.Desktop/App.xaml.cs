@@ -1,6 +1,7 @@
 using DevDocsDownloader.Desktop.Services;
 using DevDocsDownloader.Desktop.ViewModels;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 
 namespace DevDocsDownloader.Desktop;
 
@@ -22,14 +23,41 @@ public partial class App : Application
         try
         {
             MainWindow = new MainWindow();
-            MainWindow.Closed += (_, _) => BackendHost.Terminate();
+            MainWindow.Closed += (_, _) =>
+            {
+                MainViewModel.Shutdown();
+                BackendHost.Terminate();
+            };
             MainWindow.Activate();
             await MainViewModel.InitializeAsync();
+            if (!MainViewModel.BackendReady)
+            {
+                await ShowBackendErrorDialogAsync(MainViewModel.StatusText);
+            }
         }
         catch (Exception exc)
         {
             DesktopDiagnostics.Log("Desktop shell launch failed.", exc);
             throw;
+        }
+    }
+
+    private static async Task ShowBackendErrorDialogAsync(string message)
+    {
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Backend failed to start",
+                Content = $"{message}\n\nMost features are unavailable. Check the desktop log for details.\n\n{MainViewModel.BackendLogPath}",
+                CloseButtonText = "OK",
+                XamlRoot = MainWindow.Content?.XamlRoot,
+            };
+            await dialog.ShowAsync();
+        }
+        catch (Exception exc)
+        {
+            DesktopDiagnostics.Log("Could not show backend error dialog.", exc);
         }
     }
 

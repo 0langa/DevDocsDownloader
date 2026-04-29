@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DevDocsDownloader.Desktop.Services;
+using Microsoft.UI.Dispatching;
 
 namespace DevDocsDownloader.Desktop.ViewModels;
 
@@ -9,6 +10,8 @@ public partial class MainWindowViewModel : ObservableObject
 {
     private CancellationTokenSource? _jobMonitorCts;
     private Task? _jobMonitorTask;
+    private CancellationTokenSource? _healthMonitorCts;
+    private DispatcherQueue? _dispatcher;
 
     [ObservableProperty]
     private string _statusText = "Starting backend...";
@@ -111,6 +114,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        _dispatcher = DispatcherQueue.GetForCurrentThread();
         try
         {
             await App.BackendHost.StartAsync();
@@ -118,6 +122,8 @@ public partial class MainWindowViewModel : ObservableObject
             StatusText = "Ready";
             await LoadSettingsAsync();
             await RecoverActiveJobAsync();
+            _healthMonitorCts = new CancellationTokenSource();
+            _ = MonitorHealthAsync(_healthMonitorCts.Token);
         }
         catch (Exception exc)
         {
@@ -126,6 +132,14 @@ public partial class MainWindowViewModel : ObservableObject
             LastErrorHint = $"See desktop log: {BackendLogPath}";
             BackendReady = false;
         }
+    }
+
+    public void Shutdown()
+    {
+        _healthMonitorCts?.Cancel();
+        _healthMonitorCts?.Dispose();
+        _healthMonitorCts = null;
+        CancelTracking();
     }
 
     public async Task LoadSettingsAsync()
@@ -165,14 +179,17 @@ public partial class MainWindowViewModel : ObservableObject
         {
             return;
         }
+        // Update UI immediately — visible feedback before SSE event arrives
+        LatestActivity = $"Cancelling {ActiveJobLabel} — waiting for current operation to finish...";
+        AppendActivity(LatestActivity);
+        ProgressIndeterminate = true;
         try
         {
             await App.BackendHost.Client.CancelJobAsync(ActiveJobId);
-            AppendActivity($"Cancellation requested for {ActiveJobLabel}.");
         }
         catch (Exception exc)
         {
-            AppendActivity($"Cancel failed: {exc.Message}");
+            AppendActivity($"Cancel request failed: {exc.Message}");
         }
     }
 
@@ -226,6 +243,71 @@ public partial class MainWindowViewModel : ObservableObject
     public void RecordPresetSelection(string preset)
     {
         LastSelectedPreset = preset;
+    }
+
+    private async Task MonitorHealthAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                try
+                {
+                    var health = await App.BackendHost.Client.GetHealthAsync(cancellationToken) as JsonObject;
+                    if (health?["status"]?.GetValue<string>() != "ok")
+                    {
+                        throw new InvalidOperationException("Unexpected health response.");
+                    }
+                    if (!BackendReady)
+                    {
+                        EnqueueUIUpdate(() =>
+                        {
+                            BackendReady = true;
+                            StatusText = "Ready";
+                        });
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception exc)
+                {
+                    DesktopDiagnostics.Log("Backend health check failed.", exc);
+                    EnqueueUIUpdate(() =>
+                    {
+                        if (BackendReady)
+                        {
+                            BackendReady = false;
+                            StatusText = $"Backend unavailable: {exc.Message}";
+                            LastErrorHint = "The backend process may have crashed. Restart the app to reconnect.";
+                            LatestActivity = "Backend connection lost.";
+                            AppendActivity(LatestActivity);
+                        }
+                    });
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void EnqueueUIUpdate(Action action)
+    {
+        if (_dispatcher is not null)
+        {
+            _dispatcher.TryEnqueue(() => action());
+        }
+        else
+        {
+            action();
+        }
     }
 
     private async Task MonitorJobAsync(string jobId, CancellationToken cancellationToken)
