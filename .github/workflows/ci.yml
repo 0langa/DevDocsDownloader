@@ -31,7 +31,7 @@ jobs:
           print("imports ok")
           '@ | python -
           python DevDocsDownloader.py --help
-          python -m pytest tests/test_version.py tests/test_output_contract.py -q
+          python scripts/minimal_smoke.py
 
   windows-ci:
     runs-on: windows-latest
