@@ -202,8 +202,7 @@ class DevDocsSource:
             raw_path = entry.get("path") or ""
             doc_key = raw_path.split("#", 1)[0]
             if resume_boundary is not None and order <= resume_boundary.document_inventory_position:
-                if doc_key:
-                    seen_doc_keys.add(doc_key)
+                seen_doc_keys.add(doc_key)
                 if diagnostics is not None:
                     diagnostics.skip("checkpoint_resume_skip")
                 continue
@@ -214,9 +213,9 @@ class DevDocsSource:
                     diagnostics.skip("filtered_mode")
                 continue
 
-            if not doc_key or doc_key in seen_doc_keys:
+            if doc_key in seen_doc_keys:
                 if diagnostics is not None:
-                    diagnostics.skip("duplicate_or_empty_path")
+                    diagnostics.skip("duplicate_path")
                 continue
             seen_doc_keys.add(doc_key)
 
@@ -226,7 +225,7 @@ class DevDocsSource:
                     diagnostics.skip("missing_content")
                 continue
 
-            source_url = f"https://devdocs.io/{language.slug}/{doc_key}"
+            source_url = f"https://devdocs.io/{language.slug}/{doc_key}" if doc_key else f"https://devdocs.io/{language.slug}/"
             markdown = await asyncio.to_thread(_convert_html, html, source_url)
             markdown = _append_fragment_reference_notes(markdown, fragment_refs.get(doc_key, []))
             if not markdown.strip():
@@ -239,7 +238,7 @@ class DevDocsSource:
             yield Document(
                 topic=entry_type,
                 slug=_slug(doc_key),
-                title=entry.get("name") or doc_key,
+                title=entry.get("name") or doc_key or language.display_name,
                 markdown=markdown,
                 source_url=source_url,
                 order_hint=order,
