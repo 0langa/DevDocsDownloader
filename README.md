@@ -1,4 +1,5 @@
-# DevDocsDownloader
+# DevDocsDownloader	
+## Public Version: 1.1.1
 
 `DevDocsDownloader` is a documentation ingestion engine with a Windows desktop release path and a Python automation surface. The active implementation resolves a language against catalogs from DevDocs, MDN, and Dash/Kapeli, fetches source data, converts or normalizes content into Markdown, organizes documents by topic, emits a consolidated language file, and writes validation, diagnostics, and run reports.
 
