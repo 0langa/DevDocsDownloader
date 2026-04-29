@@ -13,15 +13,23 @@ def main() -> None:
     desktop_project = (ROOT / "desktop" / "DevDocsDownloader.Desktop" / "DevDocsDownloader.Desktop.csproj").read_text(
         encoding="utf-8"
     )
+    installer_script = (ROOT / "desktop" / "installer" / "DevDocsDownloader.iss").read_text(encoding="utf-8")
+    app_manifest = (ROOT / "desktop" / "DevDocsDownloader.Desktop" / "app.manifest").read_text(encoding="utf-8")
 
     pyproject_version = _match(pyproject, r'^version = "([^"]+)"$')
     desktop_version = _match(desktop_project, r"<Version>([^<]+)</Version>")
+    installer_version = _match(installer_script, r'#define MyAppVersion "([^"]+)"')
+    manifest_version = _match(app_manifest, r'<assemblyIdentity version="([^"]+)"')
 
     mismatches: list[str] = []
     if pyproject_version != version:
         mismatches.append(f"pyproject.toml={pyproject_version}")
     if desktop_version != version:
         mismatches.append(f"desktop csproj={desktop_version}")
+    if installer_version != version:
+        mismatches.append(f"installer iss={installer_version}")
+    if manifest_version != f"{version}.0":
+        mismatches.append(f"app manifest={manifest_version}")
     if mismatches:
         joined = ", ".join(mismatches)
         raise SystemExit(f"Version mismatch for {version}: {joined}")

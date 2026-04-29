@@ -1,7 +1,18 @@
-#define MyAppName "DevDocsDownloader"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "DevDocsDownloader"
-#define MyAppExeName "DevDocsDownloader.Desktop.exe"
+#ifndef MyAppName
+  #define MyAppName "DevDocsDownloader"
+#endif
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.1"
+#endif
+#ifndef MyAppPublisher
+  #define MyAppPublisher "DevDocsDownloader"
+#endif
+#ifndef MyAppExeName
+  #define MyAppExeName "DevDocsDownloader.Desktop.exe"
+#endif
+#ifndef MyOutputBaseFilename
+  #define MyOutputBaseFilename "DevDocsDownloader-Setup-1.0.1"
+#endif
 
 [Setup]
 AppId={{80A92745-DF95-47D4-BB4D-98E67DABAA1B}
@@ -12,7 +23,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist\installer
-OutputBaseFilename=DevDocsDownloader-Setup-1.0.0
+OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64

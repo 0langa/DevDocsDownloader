@@ -11,7 +11,7 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         HelpBox.Text = """
-            DevDocsDownloader 1.0.0 desktop shell
+            DevDocsDownloader 1.0.1 desktop shell
 
             1. Start in Dashboard / Run for a single language or Bulk for multiple languages.
             2. Use Languages to discover available source catalog entries.

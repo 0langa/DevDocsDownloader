@@ -11,6 +11,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: 1.0.1
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +39,12 @@ jobs:
       - name: Validate version consistency
         run: python scripts/check_version.py
 
+      - name: Load release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content version.json | ConvertFrom-Json).version
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run test and build gates
         run: python -m pytest -q
 
@@ -45,30 +53,41 @@ jobs:
 
       - name: Build desktop shell
         shell: pwsh
-        run: msbuild desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:PublishDir=desktop/publish/desktop/
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\desktop'
+          Remove-Item -Recurse -Force $publishDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
+          msbuild desktop/DevDocsDownloader.Desktop/DevDocsDownloader.Desktop.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:PublishDir="$publishDir\"
 
       - name: Assemble release layout
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path desktop/publish/desktop/backend | Out-Null
-          Copy-Item dist/DevDocsDownloader.Backend/* desktop/publish/desktop/backend -Recurse -Force
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\desktop'
+          $desktopExe = Join-Path $publishDir 'DevDocsDownloader.Desktop.exe'
+          if (-not (Test-Path $desktopExe)) {
+            throw "Published desktop shell not found at $desktopExe"
+          }
+          New-Item -ItemType Directory -Force -Path (Join-Path $publishDir 'backend') | Out-Null
+          Copy-Item dist/DevDocsDownloader.Backend/* (Join-Path $publishDir 'backend') -Recurse -Force
 
       - name: Build installer
         shell: pwsh
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "desktop\installer\DevDocsDownloader.iss"'
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$env:RELEASE_VERSION /DMyOutputBaseFilename=DevDocsDownloader-Setup-$env:RELEASE_VERSION "desktop\installer\DevDocsDownloader.iss"
 
       - name: Build portable zip
         shell: pwsh
         run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'desktop\publish\desktop'
           New-Item -ItemType Directory -Force -Path dist\portable | Out-Null
-          Compress-Archive -Path desktop/publish/desktop/* -DestinationPath dist/portable/DevDocsDownloader-Portable-1.0.0.zip -Force
+          Compress-Archive -Path "$publishDir\*" -DestinationPath "dist/portable/DevDocsDownloader-Portable-$env:RELEASE_VERSION.zip" -Force
 
       - name: Write checksums
         shell: pwsh
         run: |
           $files = @(
-            "dist\installer\DevDocsDownloader-Setup-1.0.0.exe",
-            "dist\portable\DevDocsDownloader-Portable-1.0.0.zip"
+            "dist\installer\DevDocsDownloader-Setup-$env:RELEASE_VERSION.exe",
+            "dist\portable\DevDocsDownloader-Portable-$env:RELEASE_VERSION.zip"
           )
           $lines = foreach ($file in $files) {
             $hash = Get-FileHash $file -Algorithm SHA256
@@ -81,6 +100,6 @@ jobs:
         with:
           body_path: .github/release-notes.md
           files: |
-            dist/installer/DevDocsDownloader-Setup-1.0.0.exe
-            dist/portable/DevDocsDownloader-Portable-1.0.0.zip
+            dist/installer/DevDocsDownloader-Setup-*.exe
+            dist/portable/DevDocsDownloader-Portable-*.zip
             dist/SHA256SUMS.txt
