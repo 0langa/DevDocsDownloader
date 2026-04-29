@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import sqlite3
@@ -10,18 +9,22 @@ import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from bs4 import BeautifulSoup  # type: ignore[import-untyped]
+
 from ..cache import decide_cache_refresh, write_cache_metadata, write_cache_metadata_for_bytes
 from ..conversion import DASH_PROFILE, convert_html_to_markdown
 from ..models import ResumeBoundary, SourceRunDiagnostics
 from ..runtime import SourceRuntime
 from ..utils.archive import safe_extract_tar
-from ..utils.filesystem import write_json
 from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
+from .catalog_manifest import DiscoveryManifest, load_manifest, manifest_languages, save_manifest
 
 LOGGER = logging.getLogger("doc_ingest.sources.dash")
 
 USER_AGENT = "Mozilla/5.0 (compatible; DocIngestBot/1.0)"
 FEED_BASE = "https://kapeli.com/feeds"
+SOURCE_ROOT_URL = "https://kapeli.com"
+CHEATSHEETS_URL = "https://kapeli.com/cheatsheets"
 
 
 CORE_TYPES = {
@@ -57,7 +60,6 @@ class DashFeedSource:
         self.cache_dir = cache_dir
         self.catalog_path = cache_dir / "catalogs" / "dash.json"
         self.docsets_dir = cache_dir / "dash"
-        self._catalog_seed = catalog_seed
         self.runtime = runtime or SourceRuntime(user_agent=USER_AGENT)
 
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]:
@@ -71,39 +73,81 @@ class DashFeedSource:
         )
         self.runtime.record_cache_decision(decision)
         if not decision.should_refresh and self.catalog_path.exists():
-            try:
-                payload = json.loads(self.catalog_path.read_text(encoding="utf-8"))
-                return [self._catalog_from_entry(entry) for entry in payload.get("entries", [])]
-            except Exception:
-                LOGGER.debug("Falling back to seed catalog", exc_info=True)
+            cached = manifest_languages(self.catalog_path)
+            if cached:
+                return cached
 
-        # Dash does not publish an easily-consumable JSON index; use a bundled seed.
-        if self._catalog_seed and self._catalog_seed.exists():
-            entries = json.loads(self._catalog_seed.read_text(encoding="utf-8"))
-        else:
-            entries = _DEFAULT_DASH_SEED
+        try:
+            response = await self.runtime.request("GET", CHEATSHEETS_URL, profile="default")
+            response.raise_for_status()
+            catalogs = self._discover_catalog_entries(response.text)
+            if not catalogs:
+                raise ValueError("Kapeli cheat sheets page did not expose any docset entries")
+            save_manifest(
+                self.catalog_path,
+                DiscoveryManifest(
+                    source=self.name,
+                    source_root_url=SOURCE_ROOT_URL,
+                    discovery_strategy="kapeli-cheatsheets-page/v1",
+                    entries=catalogs,
+                    diagnostics={"entry_count": len(catalogs)},
+                ),
+            )
+            write_cache_metadata(
+                self.catalog_path,
+                source=self.name,
+                cache_key="catalog",
+                url=CHEATSHEETS_URL,
+                policy=self.runtime.cache_policy,
+                response=response,
+                refreshed_by_force=force_refresh,
+            )
+            return catalogs
+        except Exception as exc:
+            cached_manifest = load_manifest(self.catalog_path)
+            if cached_manifest is not None and cached_manifest.entries:
+                LOGGER.warning("Falling back to cached Dash catalog after live discovery failure: %s", exc)
+                cached_manifest.fallback_used = True
+                cached_manifest.fallback_reason = f"{type(exc).__name__}: {exc}"
+                save_manifest(self.catalog_path, cached_manifest)
+                return [entry for entry in cached_manifest.entries if entry.support_level != "ignored"]
+            raise
 
-        write_json(self.catalog_path, {"entries": entries})
-        write_cache_metadata(
-            self.catalog_path,
-            source=self.name,
-            cache_key="catalog",
-            url=str(self._catalog_seed or "bundled-dash-seed"),
-            policy=self.runtime.cache_policy,
-            refreshed_by_force=force_refresh,
-        )
-        return [self._catalog_from_entry(entry) for entry in entries]
-
-    def _catalog_from_entry(self, entry: dict) -> LanguageCatalog:
-        return LanguageCatalog(
-            source=self.name,
-            slug=entry["slug"],
-            display_name=entry.get("display_name") or entry["slug"],
-            version=entry.get("version", ""),
-            core_topics=entry.get("core_topics") or sorted(CORE_TYPES),
-            all_topics=[],
-            homepage=entry.get("homepage", ""),
-        )
+    def _discover_catalog_entries(self, html: str) -> list[LanguageCatalog]:
+        soup = BeautifulSoup(html, "lxml")
+        seen: set[str] = set()
+        catalogs: list[LanguageCatalog] = []
+        for anchor in soup.select('a[href*="/cheat_sheets/"]'):
+            href_value = anchor.get("href")
+            href = href_value if isinstance(href_value, str) else ""
+            match = re.search(r"/cheat_sheets/([^/]+)\.docset", href)
+            if not match:
+                continue
+            slug = match.group(1).strip()
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            display_name = (anchor.get_text(" ", strip=True) or slug).strip()
+            clean_display = re.sub(r"\s+", " ", display_name)
+            catalogs.append(
+                LanguageCatalog(
+                    source=self.name,
+                    slug=slug,
+                    display_name=clean_display,
+                    version="live",
+                    core_topics=sorted(CORE_TYPES),
+                    all_topics=[],
+                    homepage=f"{SOURCE_ROOT_URL}{href if href.startswith('/') else '/' + href}",
+                    aliases=[clean_display.lower(), slug.replace("_", " ")],
+                    support_level="supported",
+                    discovery_reason="Discovered from Kapeli cheat sheets index",
+                    discovery_metadata={
+                        "feed_url": f"{FEED_BASE}/{slug}.tgz",
+                        "cheatsheet_url": f"{SOURCE_ROOT_URL}{href if href.startswith('/') else '/' + href}",
+                    },
+                )
+            )
+        return sorted(catalogs, key=lambda entry: entry.display_name.lower())
 
     async def _download_docset(self, slug: str, *, force_refresh: bool = False) -> Path:
         target_dir = self.docsets_dir / slug
@@ -180,9 +224,12 @@ class DashFeedSource:
             connection.close()
         if diagnostics is not None:
             diagnostics.discovered += len(rows)
+        fragment_refs = _dash_fragment_references(rows)
 
         seen_paths: set[str] = set()
         for order, (name, entry_type, path) in enumerate(rows):
+            if order and order % 50 == 0:
+                await asyncio.sleep(0)
             doc_key = str(path).split("#", 1)[0] if path else ""
             if resume_boundary is not None and order <= resume_boundary.document_inventory_position:
                 if doc_key:
@@ -216,6 +263,7 @@ class DashFeedSource:
             html = await asyncio.to_thread(html_file.read_text, "utf-8", "ignore")
             source_url = f"dash://{language.slug}/{doc_key}"
             markdown = await asyncio.to_thread(_convert_html, html, source_url)
+            markdown = _append_fragment_reference_notes(markdown, fragment_refs.get(doc_key, []))
             if not markdown.strip():
                 if diagnostics is not None:
                     diagnostics.skip("empty_markdown")
@@ -252,27 +300,26 @@ def _slug(path: str) -> str:
     return cleaned.lower() or "index"
 
 
-_DEFAULT_DASH_SEED: list[dict] = [
-    {"slug": "Swift", "display_name": "Swift"},
-    {"slug": "Kotlin", "display_name": "Kotlin"},
-    {"slug": "Elixir", "display_name": "Elixir"},
-    {"slug": "Erlang", "display_name": "Erlang"},
-    {"slug": "Julia", "display_name": "Julia"},
-    {"slug": "Haskell", "display_name": "Haskell"},
-    {"slug": "OCaml", "display_name": "OCaml"},
-    {"slug": "Scala", "display_name": "Scala"},
-    {"slug": "Clojure", "display_name": "Clojure"},
-    {"slug": "Dart", "display_name": "Dart"},
-    {"slug": "Groovy", "display_name": "Groovy"},
-    {"slug": "Lua", "display_name": "Lua"},
-    {"slug": "Perl", "display_name": "Perl"},
-    {"slug": "R", "display_name": "R"},
-    {"slug": "Crystal", "display_name": "Crystal"},
-    {"slug": "Nim", "display_name": "Nim"},
-    {"slug": "Raku", "display_name": "Raku"},
-    {"slug": "FSharp", "display_name": "F#"},
-    {"slug": "Racket", "display_name": "Racket"},
-    {"slug": "Common_Lisp", "display_name": "Common Lisp"},
-    {"slug": "Fortran", "display_name": "Fortran"},
-    {"slug": "Zig", "display_name": "Zig"},
-]
+def _dash_fragment_references(rows: list[tuple[str, str, str]]) -> dict[str, list[tuple[str, str]]]:
+    refs: dict[str, list[tuple[str, str]]] = {}
+    for name, _entry_type, path in rows:
+        doc_key, fragment = str(path).split("#", 1) if path and "#" in str(path) else (str(path), "")
+        if not doc_key or not fragment:
+            continue
+        refs.setdefault(doc_key, []).append((str(name), fragment))
+    return refs
+
+
+def _append_fragment_reference_notes(markdown: str, fragment_refs: list[tuple[str, str]]) -> str:
+    if not fragment_refs:
+        return markdown
+    lines = [markdown.rstrip(), "", "## Merged Upstream Fragment References", ""]
+    seen: set[tuple[str, str]] = set()
+    for title, fragment in fragment_refs:
+        key = (title, fragment)
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {title} (`#{fragment}`)")
+    lines.append("")
+    return "\n".join(lines)

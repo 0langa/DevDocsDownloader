@@ -10,14 +10,16 @@ from ..cache import decide_cache_refresh, write_cache_metadata
 from ..conversion import DEVDOCS_PROFILE, convert_html_to_markdown
 from ..models import ResumeBoundary, SourceRunDiagnostics
 from ..runtime import SourceRuntime
-from ..utils.filesystem import write_bytes, write_json
+from ..utils.filesystem import write_bytes
 from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
+from .catalog_manifest import DiscoveryManifest, load_manifest, manifest_languages, save_manifest
 
 LOGGER = logging.getLogger("doc_ingest.sources.devdocs")
 
 USER_AGENT = "Mozilla/5.0 (compatible; DocIngestBot/1.0; +https://devdocs.io)"
 DOCS_INDEX_URL = "https://devdocs.io/docs.json"
 DOCUMENTS_BASE = "https://documents.devdocs.io"
+SOURCE_ROOT_URL = "https://devdocs.io"
 
 
 class DevDocsSource:
@@ -51,27 +53,48 @@ class DevDocsSource:
         )
         self.runtime.record_cache_decision(decision)
         if not decision.should_refresh and self.catalog_path.exists():
-            try:
-                payload = json.loads(self.catalog_path.read_text(encoding="utf-8"))
-                return [self._catalog_from_entry(entry) for entry in payload.get("entries", [])]
-            except Exception:
-                LOGGER.debug("Re-fetching devdocs catalog due to cache read failure", exc_info=True)
+            cached = manifest_languages(self.catalog_path)
+            if cached:
+                return cached
 
-        response = await self.runtime.request("GET", DOCS_INDEX_URL, profile="default")
-        response.raise_for_status()
-        entries = response.json()
-
-        write_json(self.catalog_path, {"entries": entries})
-        write_cache_metadata(
-            self.catalog_path,
-            source=self.name,
-            cache_key="catalog",
-            url=DOCS_INDEX_URL,
-            policy=self.runtime.cache_policy,
-            response=response,
-            refreshed_by_force=force_refresh,
-        )
-        return [self._catalog_from_entry(entry) for entry in entries]
+        try:
+            response = await self.runtime.request("GET", DOCS_INDEX_URL, profile="default")
+            response.raise_for_status()
+            entries = response.json()
+            if not isinstance(entries, list):
+                raise ValueError("DevDocs catalog did not return a list")
+            catalogs = [self._catalog_from_entry(entry) for entry in entries if isinstance(entry, dict)]
+            if not catalogs:
+                raise ValueError("DevDocs catalog returned no valid entries")
+            save_manifest(
+                self.catalog_path,
+                DiscoveryManifest(
+                    source=self.name,
+                    source_root_url=SOURCE_ROOT_URL,
+                    discovery_strategy="docs.json/v1",
+                    entries=catalogs,
+                    diagnostics={"entry_count": len(catalogs)},
+                ),
+            )
+            write_cache_metadata(
+                self.catalog_path,
+                source=self.name,
+                cache_key="catalog",
+                url=DOCS_INDEX_URL,
+                policy=self.runtime.cache_policy,
+                response=response,
+                refreshed_by_force=force_refresh,
+            )
+            return catalogs
+        except Exception as exc:
+            cached_manifest = load_manifest(self.catalog_path)
+            if cached_manifest is not None and cached_manifest.entries:
+                LOGGER.warning("Falling back to cached DevDocs catalog after live discovery failure: %s", exc)
+                cached_manifest.fallback_used = True
+                cached_manifest.fallback_reason = f"{type(exc).__name__}: {exc}"
+                save_manifest(self.catalog_path, cached_manifest)
+                return [entry for entry in cached_manifest.entries if entry.support_level != "ignored"]
+            raise
 
     def _catalog_from_entry(self, entry: dict) -> LanguageCatalog:
         slug = entry.get("slug") or entry.get("name", "").lower()
@@ -86,6 +109,10 @@ class DevDocsSource:
             all_topics=[],
             size_hint=int(entry.get("db_size") or 0),
             homepage=entry.get("links", {}).get("home", "") if isinstance(entry.get("links"), dict) else "",
+            aliases=[family] if family and family != slug else [],
+            support_level="supported",
+            discovery_reason="Listed in DevDocs docs.json catalog",
+            discovery_metadata={"family": family, "index_url": DOCS_INDEX_URL},
         )
 
     async def _download_dataset(self, slug: str, *, force_refresh: bool = False) -> tuple[dict, dict]:
@@ -166,9 +193,12 @@ class DevDocsSource:
         if diagnostics is not None:
             diagnostics.discovered += len(entries)
         core_topics = {topic.lower() for topic in language.core_topics}
+        fragment_refs = _fragment_references(entries)
 
         seen_doc_keys: set[str] = set()
         for order, entry in enumerate(entries):
+            if order and order % 50 == 0:
+                await asyncio.sleep(0)
             raw_path = entry.get("path") or ""
             doc_key = raw_path.split("#", 1)[0]
             if resume_boundary is not None and order <= resume_boundary.document_inventory_position:
@@ -198,6 +228,7 @@ class DevDocsSource:
 
             source_url = f"https://devdocs.io/{language.slug}/{doc_key}"
             markdown = await asyncio.to_thread(_convert_html, html, source_url)
+            markdown = _append_fragment_reference_notes(markdown, fragment_refs.get(doc_key, []))
             if not markdown.strip():
                 if diagnostics is not None:
                     diagnostics.skip("empty_markdown")
@@ -232,3 +263,29 @@ def _convert_html(html: str, base_url: str = "https://devdocs.io/") -> str:
 def _slug(path: str) -> str:
     cleaned = path.replace("/", "-").strip("-") or "index"
     return cleaned
+
+
+def _fragment_references(entries: list[dict]) -> dict[str, list[tuple[str, str]]]:
+    refs: dict[str, list[tuple[str, str]]] = {}
+    for entry in entries:
+        raw_path = str(entry.get("path") or "")
+        doc_key, fragment = raw_path.split("#", 1) if "#" in raw_path else (raw_path, "")
+        if not doc_key or not fragment:
+            continue
+        refs.setdefault(doc_key, []).append((str(entry.get("name") or fragment), fragment))
+    return refs
+
+
+def _append_fragment_reference_notes(markdown: str, fragment_refs: list[tuple[str, str]]) -> str:
+    if not fragment_refs:
+        return markdown
+    lines = [markdown.rstrip(), "", "## Merged Upstream Fragment References", ""]
+    seen: set[tuple[str, str]] = set()
+    for title, fragment in fragment_refs:
+        key = (title, fragment)
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {title} (`#{fragment}`)")
+    lines.append("")
+    return "\n".join(lines)

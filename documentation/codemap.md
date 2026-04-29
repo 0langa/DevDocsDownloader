@@ -37,8 +37,8 @@ DevDocsDownloader/
 │   ├── sources/
 │   │   ├── __init__.py
 │   │   ├── base.py
+│   │   ├── catalog_manifest.py
 │   │   ├── dash.py
-│   │   ├── dash_seed.json
 │   │   ├── devdocs.py
 │   │   ├── devdocs_core.json
 │   │   ├── mdn.py
@@ -120,6 +120,7 @@ DevDocsDownloader/
 - `audit_presets()`
 - `list_languages()`
 - `refresh_catalogs()`
+- `audit_catalogs()`
 - `validate()`
 - `gui()`
 - `init()`
@@ -152,6 +153,7 @@ DevDocsDownloader/
 - `ReportBundle`
 - `CheckpointSummary`
 - `CacheMetadataSummary`
+- `CatalogAuditResult`
 
 **Used by**
 
@@ -434,6 +436,23 @@ DevDocsDownloader/
 - `DocumentWarningEvent`
 - `DocumentationSource`
 
+**Notable details**
+
+- `LanguageCatalog` now carries discovery aliases, support level, discovery reason, and adapter-specific metadata
+
+### `doc_ingest/sources/catalog_manifest.py`
+
+**Purpose**
+
+- Shared read/write helpers for generated source-discovery manifests
+
+**Key symbols**
+
+- `DiscoveryManifest`
+- `load_manifest()`
+- `save_manifest()`
+- `manifest_languages()`
+
 ### `doc_ingest/sources/registry.py`
 
 **Purpose**
@@ -476,6 +495,7 @@ DevDocsDownloader/
 **Notable details**
 
 - caches catalog and per-language datasets
+- writes generated discovery manifests rather than raw seed mirrors
 - uses `markdownify` on HTML blobs
 - filters by `entry.type` when `important` mode is active
 
@@ -498,7 +518,8 @@ DevDocsDownloader/
 
 **Notable details**
 
-- exposes a fixed catalog, not a remote-discovered one
+- discovers catalog entries from the extracted MDN content tree and persists a generated manifest
+- falls back to the last valid manifest if live discovery fails
 - reads source Markdown directly from the MDN repo export
 - parses frontmatter with safe YAML and preserves nested/list metadata for filtering and future reporting
 
@@ -516,12 +537,12 @@ DevDocsDownloader/
 	- `_download_docset()`
 - `_convert_html()`
 - `_slug()`
-- `_DEFAULT_DASH_SEED`
 
 **Notable details**
 
 - depends on `.docset` archive shape and SQLite metadata
-- uses a built-in seed list instead of runtime feed discovery
+- discovers entries from Kapeli’s cheat-sheet index and persists a generated manifest
+- falls back to the last valid manifest if live discovery fails
 
 ### `doc_ingest/conversion.py`
 
@@ -550,10 +571,6 @@ DevDocsDownloader/
 ### `doc_ingest/sources/devdocs_core.json`
 
 - Static mapping of DevDocs slugs/families to “important mode” topic names
-
-### `doc_ingest/sources/dash_seed.json`
-
-- Maintained seed catalog for Dash/Kapeli docsets loaded by `SourceRegistry`
 
 ## Utilities package
 

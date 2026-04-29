@@ -1,0 +1,61 @@
+name: live-drift
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  live-drift:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install probe dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+
+      - name: Run live endpoint probes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          @'
+          import asyncio, json
+          from pathlib import Path
+          from doc_ingest.live_probe import probe_live_endpoints
+
+          results = asyncio.run(probe_live_endpoints(concurrency=3, timeout_seconds=30, limit=3))
+          payload = [result.__dict__ for result in results]
+          Path("artifacts/live-probe-endpoints.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+          failed = [item for item in payload if not item["ok"]]
+          if failed:
+              raise SystemExit(f"endpoint drift failures: {len(failed)}")
+          '@ | python -
+
+      - name: Run live extraction sanity probes
+        shell: pwsh
+        run: |
+          @'
+          import asyncio, json
+          from pathlib import Path
+          from doc_ingest.live_probe import probe_live_extraction_sanity
+
+          results = asyncio.run(probe_live_extraction_sanity(concurrency=2, timeout_seconds=45, limit=3))
+          payload = [result.__dict__ for result in results]
+          Path("artifacts/live-probe-extraction.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+          failed = [item for item in payload if not item["ok"]]
+          if failed:
+              raise SystemExit(f"extraction drift failures: {len(failed)}")
+          '@ | python -
+
+      - name: Upload drift artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-drift-artifacts
+          path: artifacts/*.json

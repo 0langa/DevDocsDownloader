@@ -185,6 +185,7 @@ class LanguageOutputBuilder:
             self._topic_order.append(topic)
             self._used_slugs[topic] = set()
         self._used_slugs[topic].add(artifact.slug)
+        fragment_path = Path(artifact.fragment_path)
         self._topic_docs[topic].append(
             CompilationDocument(
                 title=artifact.title,
@@ -192,7 +193,7 @@ class LanguageOutputBuilder:
                 source_url=artifact.source_url,
                 order_hint=artifact.order_hint,
                 path=Path(artifact.path),
-                fragment_path=Path(artifact.fragment_path),
+                fragment_path=fragment_path if fragment_path.exists() else None,
                 document=None,
             )
         )
@@ -254,7 +255,7 @@ def render_compilation(plan: CompilationPlan) -> RenderedCompilation:
                 topic=topic.name,
                 slug=item.slug,
                 title=item.title,
-                markdown=item.fragment_path.read_text(encoding="utf-8") if item.fragment_path is not None else "",
+                markdown=_artifact_fragment_text(item),
                 source_url=item.source_url,
                 order_hint=item.order_hint,
             )
@@ -440,8 +441,7 @@ def iter_consolidated_parts(plan: CompilationPlan) -> Iterable[str]:
         yield f"### {topic.name}\n\n"
         for planned_doc in topic.documents:
             yield f'<a id="{anchors.document_anchors[(topic.name, planned_doc.order_hint, planned_doc.slug)]}"></a>\n\n'
-            if planned_doc.fragment_path is not None:
-                yield planned_doc.fragment_path.read_text(encoding="utf-8")
+            yield _artifact_fragment_text(planned_doc)
 
 
 def _render_meta(
@@ -612,6 +612,41 @@ def render_consolidated_document_fragment(doc: Document) -> str:
     lines.append(_normalize_markdown(doc.markdown).rstrip())
     lines.append("")
     return "\n".join(lines) + "\n"
+
+
+def _artifact_fragment_text(document: CompilationDocument) -> str:
+    if document.fragment_path is not None and document.fragment_path.exists():
+        return document.fragment_path.read_text(encoding="utf-8")
+    if document.path.exists():
+        return _rebuild_fragment_from_document_file(document)
+    return ""
+
+
+def _rebuild_fragment_from_document_file(document: CompilationDocument) -> str:
+    text = document.path.read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        parts = text.split("\n---\n", 1)
+        if len(parts) == 2:
+            text = parts[1].lstrip()
+    lines = text.splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+    while lines and not lines[0].strip():
+        lines = lines[1:]
+    while lines and lines[0].startswith("_") and lines[0].endswith("_"):
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+    body = "\n".join(lines).strip()
+    rebuilt = Document(
+        topic="",
+        slug=document.slug,
+        title=document.title,
+        markdown=body,
+        source_url=document.source_url,
+        order_hint=document.order_hint,
+    )
+    return render_consolidated_document_fragment(rebuilt)
 
 
 def _render_index(

@@ -27,11 +27,10 @@ class SourceRegistry:
         self.runtime = runtime or SourceRuntime()
         source_root = package_root or Path(__file__).parent
         core_topics_path = source_root / "devdocs_core.json"
-        dash_seed_path = source_root / "dash_seed.json"
         self.sources: list[DocumentationSource] = [
             DevDocsSource(cache_dir=cache_dir, core_topics_path=core_topics_path, runtime=self.runtime),
             MdnContentSource(cache_dir=cache_dir, runtime=self.runtime),
-            DashFeedSource(cache_dir=cache_dir, catalog_seed=dash_seed_path, runtime=self.runtime),
+            DashFeedSource(cache_dir=cache_dir, runtime=self.runtime),
         ]
         self._load_entry_point_sources()
 
@@ -163,8 +162,9 @@ class SourceRegistry:
                 display = entry.display_name.lower()
                 slug = entry.slug.lower()
                 family = slug.split("~", 1)[0]
+                aliases = [alias.lower() for alias in entry.aliases]
                 pool.append((display, slug, family, source_name, entry))
-                bucket = _suggestion_bucket(needle=needle, display=display, slug=slug, family=family)
+                bucket = _suggestion_bucket(needle=needle, display=display, slug=slug, family=family, aliases=aliases)
                 if bucket is not None:
                     scored.append(
                         (
@@ -228,11 +228,16 @@ def _exact_match(entries: list[LanguageCatalog], needle: str) -> LanguageCatalog
         display = entry.display_name.lower()
         slug = entry.slug.lower()
         family = slug.split("~", 1)[0]
-        if display == needle or slug == needle or family == needle:
+        aliases = {alias.lower() for alias in entry.aliases}
+        if display == needle or slug == needle or family == needle or needle in aliases:
             exact.append(entry)
-        elif display.startswith(needle) or family.startswith(needle):
+        elif (
+            display.startswith(needle)
+            or family.startswith(needle)
+            or any(alias.startswith(needle) for alias in aliases)
+        ):
             prefix.append(entry)
-        elif needle in display or needle in slug:
+        elif needle in display or needle in slug or any(needle in alias for alias in aliases):
             contains.append(entry)
 
     def _best(bucket: list[LanguageCatalog]) -> LanguageCatalog | None:
@@ -243,12 +248,12 @@ def _exact_match(entries: list[LanguageCatalog], needle: str) -> LanguageCatalog
     return _best(exact) or _best(prefix) or _best(contains)
 
 
-def _suggestion_bucket(*, needle: str, display: str, slug: str, family: str) -> int | None:
-    if display == needle or slug == needle or family == needle:
+def _suggestion_bucket(*, needle: str, display: str, slug: str, family: str, aliases: list[str]) -> int | None:
+    if display == needle or slug == needle or family == needle or needle in aliases:
         return 0
-    if display.startswith(needle) or family.startswith(needle):
+    if display.startswith(needle) or family.startswith(needle) or any(alias.startswith(needle) for alias in aliases):
         return 1
-    if needle in display or needle in slug:
+    if needle in display or needle in slug or any(needle in alias for alias in aliases):
         return 2
     return None
 

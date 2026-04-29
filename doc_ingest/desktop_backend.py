@@ -28,7 +28,7 @@ BACKEND_API_VERSION = app_version()
 class BackendJobSummary(BaseModel):
     id: str
     kind: Literal["run_language", "run_bulk", "validate"]
-    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    status: Literal["pending", "running", "cancelling", "completed", "failed", "cancelled"]
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -44,7 +44,7 @@ class BackendJob:
         self.kind = kind
         self.language = language
         self.detail = detail
-        self.status: Literal["pending", "running", "completed", "failed", "cancelled"] = "pending"
+        self.status: Literal["pending", "running", "cancelling", "completed", "failed", "cancelled"] = "pending"
         self.created_at = datetime.now(UTC)
         self.started_at: datetime | None = None
         self.completed_at: datetime | None = None
@@ -140,6 +140,18 @@ class BackendJobManager:
             return job.snapshot()
         if job.task is None:
             raise HTTPException(status_code=409, detail="Job is not running")
+        if job.status == "pending":
+            job.status = "cancelled"
+            job.completed_at = datetime.now(UTC)
+            job.error = "Cancelled"
+            if self.active_job_id == job.id:
+                self.active_job_id = None
+            job.task.cancel()
+            await job.publish(ServiceEvent(event_type="phase_change", language=job.language, phase="cancelled"))
+            await job.close_stream()
+            return job.snapshot()
+        job.status = "cancelling"
+        await job.publish(ServiceEvent(event_type="phase_change", language=job.language, phase="cancelling"))
         job.task.cancel()
         return job.snapshot()
 

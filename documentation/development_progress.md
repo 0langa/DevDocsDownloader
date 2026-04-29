@@ -2,7 +2,7 @@
 
 ## Current state summary
 
-The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, optional adaptive bulk scheduling, a desktop backend host for a WinUI release shell, and a retained legacy NiceGUI operator interface over the same service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
+The repository has a solid curated documentation ingestion pipeline built around three source adapters: DevDocs, MDN, and Dash. The active runtime path now has shared source-runtime ownership, typed adapter events, generated source-discovery manifests with cached fallback, deterministic output contract tests, dependency/tooling hygiene, streaming compilation, checkpoint resume, conversion cleanup, optional downstream outputs, cache freshness policy, deep validation/observability, optional adaptive bulk scheduling, a desktop backend host for a WinUI release shell, and a retained legacy NiceGUI operator interface over the same service boundary. Historical crawler-oriented utilities are archived outside the active runtime.
 
 In short:
 

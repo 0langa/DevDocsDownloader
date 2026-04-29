@@ -217,7 +217,7 @@ Each adapter implements the same external contract but uses a different internal
 
 - fast to ingest because DevDocs already ships structured datasets
 - topic semantics are only as good as DevDocs `type` fields
-- fragment-level granularity is discarded by deduplicating on path without `#fragment`
+- canonical documents are still deduplicated by base path, but upstream `#fragment` references are now preserved in emitted Markdown instead of being silently discarded
 
 #### 4.2 MDN adapter
 
@@ -228,7 +228,7 @@ Each adapter implements the same external contract but uses a different internal
 
 **Pipeline:**
 
-1. expose a static catalog for selected MDN areas
+1. discover MDN families by scanning the extracted `files/en-us/...` tree and persist the generated manifest under `cache/catalogs/mdn.json`
 2. ensure the tarball is downloaded to `cache/mdn/mdn-content-main.tar.gz`
 3. check `cache/mdn/cache_meta.json` for archive checksum, size, mtime, and ready areas
 4. extract only relevant `files/en-us` trees into cache when metadata or area readiness is stale
@@ -240,6 +240,7 @@ Each adapter implements the same external contract but uses a different internal
 **Tradeoffs:**
 
 - preserves Markdown source directly from MDN rather than converting rendered HTML
+- live discovery is now the steady-state path, with cached-manifest fallback when upstream discovery fails
 - extraction and storage cost are significantly larger than simple API-backed sources
 - rich frontmatter is preserved for filtering and future metadata work, but only selected fields are used today
 
@@ -254,7 +255,7 @@ Each adapter implements the same external contract but uses a different internal
 
 **Pipeline:**
 
-1. expose a seeded catalog of docset slugs
+1. discover docset slugs from Kapeli’s official cheat-sheet index and persist the generated manifest under `cache/catalogs/dash.json`
 2. download and extract the docset tarball if not cached
 3. open the SQLite search index
 4. iterate `(name, type, path)` rows ordered by type and name
@@ -266,7 +267,7 @@ Each adapter implements the same external contract but uses a different internal
 **Tradeoffs:**
 
 - broad language coverage through existing Dash docsets
-- depends on a seeded catalog rather than discovery
+- depends on live discovery from Kapeli’s public pages plus cached-manifest fallback
 - assumes docset internals follow the standard structure
 
 ### 5. Compilation and formatting layer
@@ -367,7 +368,7 @@ This subsystem is intentionally lightweight. It validates output structure, not 
 - emitted document artifact manifest with per-document path and consolidated fragment path
 - failure records with phase, error type, message, and document position
 
-Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection and automatic resume. A matching rerun resumes only when the checkpoint identity matches the current language/source/mode/output path and every artifact path in the manifest still exists; otherwise the pipeline warns and replays from the start.
+Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection and automatic resume. A matching rerun resumes only when the checkpoint identity matches the current language/source/mode/output path and the durable per-document artifact files still exist. Missing temporary consolidated fragments are rebuilt from those durable document files; missing durable artifacts still force a safe replay from the start.
 
 **Source diagnostics contents:**
 

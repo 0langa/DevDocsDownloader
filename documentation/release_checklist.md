@@ -1,6 +1,6 @@
-# v1.0.5 Release Checklist
+# v1.0.6 Release Checklist
 
-This checklist defines the current Windows desktop release line. Version `1.0.5` means the WinUI 3 shell, bundled Python backend, packaging, GitHub Release automation, and the hardened stateful operator UX are all present and validated together.
+This checklist defines the current Windows desktop release line. Version `1.0.6` means the WinUI 3 shell, bundled Python backend, packaging, GitHub Release automation, and the hardened stateful operator UX are all present and validated together.
 
 ## Bootstrap
 
@@ -23,6 +23,7 @@ python -m pytest -q
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy doc_ingest
+python scripts/check_release_hygiene.py
 ```
 
 PowerShell compile check:
@@ -40,6 +41,13 @@ python scripts/check_version.py
 
 ## Required Desktop Checks
 
+Local Windows release builds require:
+
+- Visual Studio 2022 Build Tools or full Visual Studio with MSBuild
+- Windows App SDK packaging components
+- .NET 8 SDK
+- Inno Setup 6
+
 ```bash
 dotnet build DevDocsDownloader.Desktop.sln -c Release -p:Platform=x64
 python scripts/build_desktop_backend.py --clean
@@ -53,7 +61,7 @@ If the local machine lacks the Windows PRI packaging task assembly required by W
 - Publish the desktop shell into `desktop/publish/desktop/`
 - Copy the bundled backend under `desktop/publish/desktop/backend/`
 - Build the installer with `desktop/installer/DevDocsDownloader.iss`
-- Build `DevDocsDownloader-Portable-1.0.5.zip`
+- Build `DevDocsDownloader-Portable-1.0.6.zip`
 - Generate `SHA256SUMS.txt`
 - Smoke-check backend startup via `/health` and `/version`
 - Smoke-check first desktop launch against the bundled backend
@@ -73,6 +81,8 @@ $env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live
 ```
 
 ## Legacy NiceGUI Smoke
+
+This is migration-only and is no longer release-critical. Run it only when the legacy operator surface is being touched.
 
 ```bash
 python DevDocsDownloader.py gui --host 127.0.0.1 --port 8080

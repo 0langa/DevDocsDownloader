@@ -768,6 +768,43 @@ def refresh_catalogs() -> None:
 
 
 @app.command(
+    "audit-catalogs",
+    help=(
+        "Inspect the generated discovery manifests used for built-in source resolution. This shows live-discovery "
+        "strategy, cache fallback state, and how many supported versus experimental entries each source exposed."
+    ),
+)
+def audit_catalogs() -> None:
+    config = load_config()
+    service = DocumentationService(config)
+    rows = service.audit_source_catalogs()
+    table = Table(title="Source discovery audit")
+    table.add_column("Source", style="bold cyan")
+    table.add_column("Strategy")
+    table.add_column("Fetched")
+    table.add_column("Supported")
+    table.add_column("Experimental")
+    table.add_column("Ignored")
+    table.add_column("Fallback")
+    for row in rows:
+        fallback = row.fallback_reason if row.fallback_used else ""
+        table.add_row(
+            row.source,
+            row.discovery_strategy,
+            row.fetched_at,
+            str(row.supported_entries),
+            str(row.experimental_entries),
+            str(row.ignored_entries),
+            fallback,
+        )
+    console.print(table)
+    if not rows:
+        console.print(
+            "[dim]No cached discovery manifests found yet. Run list-languages or refresh-catalogs first.[/dim]"
+        )
+
+
+@app.command(
     help=(
         "Validate an existing output bundle without network fetches or compilation. Reads local _meta.json when "
         "available, writes the same report files as a normal run, and is safe for CI checks on generated artifacts."

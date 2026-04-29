@@ -98,6 +98,22 @@ class AuditPresetResult(BaseModel):
     slug: str = ""
 
 
+class CatalogAuditResult(BaseModel):
+    source: str
+    path: Path | None = None
+    source_root_url: str = ""
+    discovery_strategy: str = ""
+    fetched_at: str = ""
+    total_entries: int = 0
+    supported_entries: int = 0
+    experimental_entries: int = 0
+    ignored_entries: int = 0
+    fallback_used: bool = False
+    fallback_reason: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class RuntimeSnapshot(BaseModel):
     states: list[Path] = Field(default_factory=list)
     checkpoints: list[Path] = Field(default_factory=list)
@@ -285,6 +301,36 @@ class DocumentationService:
         finally:
             await registry.runtime.close()
         return {source: len(entries) for source, entries in catalogs.items()}
+
+    def audit_source_catalogs(self) -> list[CatalogAuditResult]:
+        results: list[CatalogAuditResult] = []
+        catalogs_root = self.config.paths.cache_dir / "catalogs"
+        for path in sorted(catalogs_root.glob("*.json")):
+            payload = read_json(path, {})
+            entries = payload.get("entries") if isinstance(payload, dict) else []
+            if not isinstance(entries, list):
+                entries = []
+            support_levels = [
+                str(entry.get("support_level") or "supported") for entry in entries if isinstance(entry, dict)
+            ]
+            results.append(
+                CatalogAuditResult(
+                    source=str(payload.get("source") or path.stem),
+                    path=path,
+                    source_root_url=str(payload.get("source_root_url") or ""),
+                    discovery_strategy=str(payload.get("discovery_strategy") or ""),
+                    fetched_at=str(payload.get("fetched_at") or ""),
+                    total_entries=len(entries),
+                    supported_entries=sum(1 for level in support_levels if level == "supported"),
+                    experimental_entries=sum(1 for level in support_levels if level == "experimental"),
+                    ignored_entries=sum(1 for level in support_levels if level == "ignored"),
+                    fallback_used=bool(payload.get("fallback_used", False)),
+                    fallback_reason=str(payload.get("fallback_reason") or ""),
+                    warnings=[str(item) for item in payload.get("warnings") or []],
+                    errors=[str(item) for item in payload.get("errors") or []],
+                )
+            )
+        return results
 
     async def audit_presets(
         self,

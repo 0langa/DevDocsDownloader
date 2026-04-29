@@ -106,7 +106,7 @@ When a checkpoint has a valid emitted artifact manifest, each `emitted_documents
 - `source_url`
 - `order_hint`
 - `path`, pointing to the emitted per-document Markdown file
-- `fragment_path`, pointing to the temporary consolidated fragment used for resume
+- `fragment_path`, pointing to the temporary consolidated fragment used for resume when it still exists
 
 On the next matching run, the pipeline may automatically resume after `document_inventory_position` if language, source, source slug, mode, output path, and all manifest artifact paths are still valid. Missing or stale artifacts must cause a full replay rather than a partial final output.
 
@@ -121,6 +121,8 @@ When available, `SourceRunDiagnostics` must report:
 - `skipped`: reason-count map
 
 Standard skip reasons currently include `filtered_mode`, `filtered_topic_include`, `filtered_topic_exclude`, `checkpoint_resume_skip`, `malformed_frontmatter`, `duplicate_or_empty_path`, `missing_content`, `empty_markdown`, `missing_path_or_type`, `duplicate_path`, and `missing_file`.
+
+Resume is conservative but no longer all-or-nothing on temporary fragments. If a checkpoint identity matches and the durable per-document artifact files still exist, the compiler may rebuild missing temporary consolidated fragments from those durable documents during resume. Missing durable document artifacts still force a replay from the start.
 
 Validation results must include `score`, `quality_score`, `issues`, language, and output path. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.
 

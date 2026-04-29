@@ -103,7 +103,7 @@ def test_failed_run_manifest_allows_complete_adapter_level_resume(tmp_path: Path
     assert not (config.paths.checkpoints_dir / "resume-lang.json").exists()
 
 
-def test_missing_resume_artifact_falls_back_to_full_replay(tmp_path: Path) -> None:
+def test_missing_resume_fragment_rebuilds_from_durable_document(tmp_path: Path) -> None:
     config = load_config(root=tmp_path)
     catalog = LanguageCatalog(source="devdocs", slug="resume-lang", display_name="Resume Lang")
     pipeline = DocumentationPipeline(config)
@@ -118,6 +118,38 @@ def test_missing_resume_artifact_falls_back_to_full_replay(tmp_path: Path) -> No
     )
     checkpoint = read_json(config.paths.checkpoints_dir / "resume-lang.json", {})
     Path(checkpoint["emitted_documents"][0]["fragment_path"]).unlink()
+
+    source = ResumeFixtureSource(catalog, _resume_docs())
+    report = asyncio.run(
+        pipeline._run_language(
+            source=source,
+            catalog=catalog,
+            mode="full",
+            progress_tracker=None,
+            validate_only=False,
+        )
+    )
+
+    assert report.failures == []
+    assert source.seen_boundaries == [1]
+    assert not any("replaying from the start" in warning for warning in report.warnings)
+
+
+def test_missing_resume_document_still_falls_back_to_full_replay(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    catalog = LanguageCatalog(source="devdocs", slug="resume-lang", display_name="Resume Lang")
+    pipeline = DocumentationPipeline(config)
+    asyncio.run(
+        pipeline._run_language(
+            source=ResumeFixtureSource(catalog, _resume_docs(), fail_after=1),
+            catalog=catalog,
+            mode="full",
+            progress_tracker=None,
+            validate_only=False,
+        )
+    )
+    checkpoint = read_json(config.paths.checkpoints_dir / "resume-lang.json", {})
+    Path(checkpoint["emitted_documents"][0]["path"]).unlink()
 
     source = ResumeFixtureSource(catalog, _resume_docs())
     report = asyncio.run(

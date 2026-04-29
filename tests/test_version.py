@@ -17,7 +17,19 @@ def restore_sys_flags(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_app_version_reads_repo_version_file() -> None:
     payload = json.loads((Path(__file__).resolve().parents[1] / "version.json").read_text(encoding="utf-8"))
-    assert version_module.app_version() == payload["version"]
+    original = version_module.metadata.version
+    version_module.metadata.version = lambda _name: (_ for _ in ()).throw(
+        version_module.metadata.PackageNotFoundError()
+    )  # type: ignore[assignment]
+    try:
+        assert version_module.app_version() == payload["version"]
+    finally:
+        version_module.metadata.version = original  # type: ignore[assignment]
+
+
+def test_app_version_prefers_installed_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(version_module.metadata, "version", lambda _name: "7.7.7")
+    assert version_module.app_version() == "7.7.7"
 
 
 def test_app_version_uses_pyinstaller_meipass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -30,6 +42,11 @@ def test_app_version_uses_pyinstaller_meipass(monkeypatch: pytest.MonkeyPatch, t
     fake_module_file.write_text("# synthetic", encoding="utf-8")
 
     monkeypatch.setattr(version_module, "__file__", str(fake_module_file))
+    monkeypatch.setattr(
+        version_module.metadata,
+        "version",
+        lambda _name: (_ for _ in ()).throw(version_module.metadata.PackageNotFoundError()),
+    )
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
 
@@ -43,6 +60,11 @@ def test_app_version_raises_clear_error_when_missing(monkeypatch: pytest.MonkeyP
     fake_module_file.write_text("# synthetic", encoding="utf-8")
 
     monkeypatch.setattr(version_module, "__file__", str(fake_module_file))
+    monkeypatch.setattr(
+        version_module.metadata,
+        "version",
+        lambda _name: (_ for _ in ()).throw(version_module.metadata.PackageNotFoundError()),
+    )
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "missing_meipass"), raising=False)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "backend" / "DevDocsDownloader.Backend.exe"), raising=False)

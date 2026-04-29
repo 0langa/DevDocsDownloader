@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 import sys
+from importlib import metadata
 from pathlib import Path
 
 
 def app_version() -> str:
+    try:
+        return metadata.version("devdocsdownloader")
+    except metadata.PackageNotFoundError:
+        pass
     for version_file in _version_file_candidates():
         if version_file.is_file():
             payload = json.loads(version_file.read_text(encoding="utf-8"))

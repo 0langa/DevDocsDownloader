@@ -179,3 +179,44 @@ def test_desktop_backend_languages_and_settings_endpoints(tmp_path: Path, monkey
             assert fetched.json()["language_tree_mode"] == "category"
 
     asyncio.run(scenario())
+
+
+def test_desktop_backend_cancel_sets_cancelling_then_cancelled(tmp_path: Path, monkeypatch) -> None:
+    async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
+        if event_sink is not None:
+            await event_sink(ServiceEvent(event_type="phase_change", language=request.language, phase="fetching"))
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            raise
+        return RunSummary()
+
+    monkeypatch.setattr(DocumentationService, "run_language", fake_run_language)
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret")
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=5.0) as client:
+            created = await client.post("/jobs/run-language", headers=headers, json={"language": "Python"})
+            assert created.status_code == 202
+            job_id = created.json()["id"]
+
+            cancelled = await client.post(f"/jobs/{job_id}/cancel", headers=headers)
+            assert cancelled.status_code == 200
+            assert cancelled.json()["status"] in {"cancelling", "cancelled"}
+
+            for _ in range(50):
+                status = await client.get(f"/jobs/{job_id}", headers=headers)
+                assert status.status_code == 200
+                if status.json()["status"] == "cancelled":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("job did not cancel")
+
+            stream = await client.get(f"/jobs/{job_id}/events", headers=headers)
+            assert stream.status_code == 200
+            assert '"phase": "cancelling"' in stream.text or '"phase": "cancelled"' in stream.text
+
+    asyncio.run(scenario())

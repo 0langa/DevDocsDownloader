@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
 
 from ..models import ResumeBoundary, SourceRunDiagnostics
 
@@ -19,6 +19,10 @@ class LanguageCatalog:
     all_topics: list[str] = field(default_factory=list)
     size_hint: int = 0
     homepage: str = ""
+    aliases: list[str] = field(default_factory=list)
+    support_level: Literal["supported", "experimental", "ignored"] = "supported"
+    discovery_reason: str = ""
+    discovery_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
@@ -10,14 +10,13 @@ from pathlib import Path
 import httpx
 
 from .conversion import DASH_PROFILE, DEVDOCS_PROFILE, convert_html_to_markdown, rewrite_markdown_links
-from .sources.dash import FEED_BASE
+from .sources.dash import CHEATSHEETS_URL, FEED_BASE, DashFeedSource
 from .sources.devdocs import DOCS_INDEX_URL, DOCUMENTS_BASE
-from .sources.mdn import AREAS, _parse_frontmatter
+from .sources.mdn import CONTENT_ROOT_URL, _parse_frontmatter
 
 DEFAULT_PROBE_BYTES = 4096
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
-MDN_RAW_BASE = "https://raw.githubusercontent.com/mdn/content/main/files/en-us"
 ProbeCallable = Callable[[httpx.AsyncClient], Awaitable["LiveProbeResult"]]
 
 
@@ -105,15 +104,16 @@ async def _build_probes(*, client: httpx.AsyncClient, dash_seed_path: Path | Non
     except Exception as exc:
         probes.append(partial(_catalog_failure, source="devdocs", url=DOCS_INDEX_URL, exc=exc))
 
-    for slug, (display, area) in AREAS.items():
-        probes.append(partial(_probe_mdn, language=display, slug=slug, area=area))
+    probes.append(partial(_probe_mdn, language="HTML", slug="html", area="web/html"))
 
-    for entry in _load_dash_seed(dash_seed_path):
-        slug = str(entry.get("slug") or "").strip()
-        if not slug:
-            continue
-        language = str(entry.get("display_name") or slug)
-        probes.append(partial(_probe_dash, language=language, slug=slug))
+    try:
+        response = await client.get(CHEATSHEETS_URL)
+        response.raise_for_status()
+        entries = DashFeedSource(cache_dir=Path(tempfile.mkdtemp()))._discover_catalog_entries(response.text)
+        for entry in entries[:64]:
+            probes.append(partial(_probe_dash, language=entry.display_name, slug=entry.slug))
+    except Exception as exc:
+        probes.append(partial(_catalog_failure, source="dash", url=CHEATSHEETS_URL, exc=exc))
 
     return probes
 
@@ -131,7 +131,7 @@ async def _probe_devdocs(client: httpx.AsyncClient, language: str, slug: str) ->
 
 
 async def _probe_mdn(client: httpx.AsyncClient, language: str, slug: str, area: str) -> LiveProbeResult:
-    url = f"{MDN_RAW_BASE}/{area}/index.md"
+    url = f"{CONTENT_ROOT_URL}/{area}/index.md"
     return await _probe_capped_get(
         client,
         source="mdn",
@@ -210,8 +210,8 @@ async def _probe_devdocs_extraction(client: httpx.AsyncClient) -> LiveProbeResul
 async def _probe_mdn_extraction(client: httpx.AsyncClient) -> LiveProbeResult:
     source = "mdn"
     slug = "html"
-    display, area = AREAS[slug]
-    url = f"{MDN_RAW_BASE}/{area}/index.md"
+    display, area = "HTML", "web/html"
+    url = f"{CONTENT_ROOT_URL}/{area}/index.md"
     downloaded = 0
     try:
         response = await client.get(url)
@@ -234,17 +234,22 @@ async def _probe_mdn_extraction(client: httpx.AsyncClient) -> LiveProbeResult:
 
 async def _probe_dash_extraction(client: httpx.AsyncClient, *, dash_seed_path: Path | None = None) -> LiveProbeResult:
     source = "dash"
-    entry = next(iter(_load_dash_seed(dash_seed_path)), {"slug": "Swift", "display_name": "Swift"})
-    slug = str(entry.get("slug") or "Swift")
-    language = str(entry.get("display_name") or slug)
+    try:
+        response = await client.get(CHEATSHEETS_URL)
+        response.raise_for_status()
+        entry = next(
+            iter(DashFeedSource(cache_dir=Path(tempfile.mkdtemp()))._discover_catalog_entries(response.text)),
+            None,
+        )
+    except Exception as exc:
+        return LiveProbeResult(source, "Dash", "", CHEATSHEETS_URL, None, 0, False, f"{type(exc).__name__}: {exc}")
+    if entry is None:
+        return LiveProbeResult(source, "Dash", "", CHEATSHEETS_URL, None, 0, False, "no Dash catalog entries")
+    slug = entry.slug
+    language = entry.display_name
     url = f"{FEED_BASE}/{slug}.tgz"
     archive_probe = await _probe_capped_get(
-        client,
-        source=source,
-        language=language,
-        source_slug=slug,
-        url=url,
-        require_gzip=True,
+        client, source=source, language=language, source_slug=slug, url=url, require_gzip=True
     )
     if not archive_probe.ok:
         return archive_probe
@@ -334,14 +339,3 @@ async def _catalog_failure(client: httpx.AsyncClient, *, source: str, url: str, 
         ok=False,
         message=f"{type(exc).__name__}: {exc}",
     )
-
-
-def _load_dash_seed(seed_path: Path | None) -> list[dict]:
-    path = seed_path or Path(__file__).parent / "sources" / "dash_seed.json"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, list):
-            return [entry for entry in payload if isinstance(entry, dict)]
-    except Exception:
-        return []
-    return []

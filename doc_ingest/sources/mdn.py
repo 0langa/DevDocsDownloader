@@ -8,7 +8,7 @@ import tarfile
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 
@@ -19,18 +19,28 @@ from ..runtime import SourceRuntime
 from ..utils.archive import safe_extract_tar
 from ..utils.filesystem import read_json, write_json
 from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
+from .catalog_manifest import DiscoveryManifest, load_manifest, manifest_languages, save_manifest
 
 LOGGER = logging.getLogger("doc_ingest.sources.mdn")
 
 TARBALL_URL = "https://codeload.github.com/mdn/content/tar.gz/refs/heads/main"
-
-AREAS = {
-    "javascript": ("JavaScript", "web/javascript"),
-    "html": ("HTML", "web/html"),
-    "css": ("CSS", "web/css"),
-    "web-apis": ("Web APIs", "web/api"),
-    "http": ("HTTP", "web/http"),
-    "webassembly": ("WebAssembly", "webassembly"),
+SOURCE_ROOT_URL = "https://developer.mozilla.org/en-US/docs"
+CONTENT_ROOT_URL = "https://raw.githubusercontent.com/mdn/content/main/files/en-us"
+SUPPORTED_MDN_AREAS = {
+    "web/javascript",
+    "web/html",
+    "web/css",
+    "web/http",
+    "web/api",
+    "webassembly",
+}
+AREA_SLUG_ALIASES = {
+    "web/javascript": ["javascript", "js"],
+    "web/html": ["html"],
+    "web/css": ["css"],
+    "web/http": ["http"],
+    "web/api": ["web-apis", "web api", "api"],
+    "webassembly": ["webassembly", "wasm"],
 }
 
 CORE_PAGE_TYPES = {
@@ -70,20 +80,56 @@ class MdnContentSource:
 
     async def list_languages(self, *, force_refresh: bool = False) -> list[LanguageCatalog]:
         self.catalog_path.parent.mkdir(parents=True, exist_ok=True)
-        entries = [{"slug": slug, "display_name": display, "area": area} for slug, (display, area) in AREAS.items()]
-        write_json(self.catalog_path, {"entries": entries})
-        return [
-            LanguageCatalog(
-                source=self.name,
-                slug=slug,
-                display_name=display,
-                version="main",
-                core_topics=sorted(CORE_PAGE_TYPES),
-                all_topics=[],
-                homepage=f"https://developer.mozilla.org/en-US/docs/{area.title().replace('/', '/')}",
+        decision = decide_cache_refresh(
+            self.catalog_path,
+            source=self.name,
+            cache_key="catalog",
+            policy=self.runtime.cache_policy,
+            ttl_hours=self.runtime.cache_ttl_hours,
+            force_refresh=force_refresh,
+        )
+        self.runtime.record_cache_decision(decision)
+        if not decision.should_refresh and self.catalog_path.exists():
+            cached = manifest_languages(self.catalog_path)
+            if cached:
+                return cached
+
+        try:
+            root = await self._ensure_content(force_refresh=force_refresh)
+            catalogs = await asyncio.to_thread(self._discover_catalog_entries, root)
+            if not catalogs:
+                raise RuntimeError("MDN discovery found no documentation areas")
+            save_manifest(
+                self.catalog_path,
+                DiscoveryManifest(
+                    source=self.name,
+                    source_root_url=SOURCE_ROOT_URL,
+                    discovery_strategy="content-archive-scan/v1",
+                    entries=catalogs,
+                    diagnostics={
+                        "entry_count": len(catalogs),
+                        "supported_count": sum(1 for entry in catalogs if entry.support_level == "supported"),
+                    },
+                ),
             )
-            for slug, (display, area) in AREAS.items()
-        ]
+            write_cache_metadata(
+                self.catalog_path,
+                source=self.name,
+                cache_key="catalog",
+                url=TARBALL_URL,
+                policy=self.runtime.cache_policy,
+                refreshed_by_force=force_refresh,
+            )
+            return [entry for entry in catalogs if entry.support_level != "ignored"]
+        except Exception as exc:
+            cached_manifest = load_manifest(self.catalog_path)
+            if cached_manifest is not None and cached_manifest.entries:
+                LOGGER.warning("Falling back to cached MDN catalog after live discovery failure: %s", exc)
+                cached_manifest.fallback_used = True
+                cached_manifest.fallback_reason = f"{type(exc).__name__}: {exc}"
+                save_manifest(self.catalog_path, cached_manifest)
+                return [entry for entry in cached_manifest.entries if entry.support_level != "ignored"]
+            raise
 
     async def _ensure_content(self, *, area: str | None = None, force_refresh: bool = False) -> Path:
         decision = decide_cache_refresh(
@@ -129,7 +175,7 @@ class MdnContentSource:
         if metadata.get("archive_sha256") != _sha256_file(self.archive_path):
             return False
         ready_areas = set(metadata.get("ready_areas") or [])
-        required = {area} if area else {area_value for _display, area_value in AREAS.values()}
+        required = {area} if area else set(SUPPORTED_MDN_AREAS)
         if not required.issubset(ready_areas):
             return False
         top = self._find_content_root(self.extracted_root)
@@ -142,7 +188,7 @@ class MdnContentSource:
         top = self._find_content_root(self.extracted_root)
         ready_areas = []
         if top is not None:
-            ready_areas = [area for _display, area in AREAS.values() if (top / "files" / "en-us" / area).exists()]
+            ready_areas = [area for area in SUPPORTED_MDN_AREAS if (top / "files" / "en-us" / area).exists()]
         checksum = _sha256_file(self.archive_path)
         write_json(
             self.metadata_path,
@@ -172,7 +218,7 @@ class MdnContentSource:
         top = self._find_content_root(root)
         if top is None:
             return False
-        return any((top / "files" / "en-us" / area).exists() for _display, area in AREAS.values())
+        return any((top / "files" / "en-us" / area).exists() for area in SUPPORTED_MDN_AREAS)
 
     def _find_content_root(self, root: Path) -> Path | None:
         direct = root / "files" / "en-us"
@@ -191,7 +237,9 @@ class MdnContentSource:
         resume_boundary: ResumeBoundary | None = None,
         force_refresh: bool = False,
     ) -> AsyncIterator[Document]:
-        _display, area = AREAS[language.slug]
+        area = str(language.discovery_metadata.get("area") or "")
+        if not area:
+            raise RuntimeError(f"MDN catalog entry for {language.slug} is missing discovery area metadata")
         root = await self._ensure_content(area=area, force_refresh=force_refresh)
         top = self._find_content_root(root)
         if top is None:
@@ -206,6 +254,8 @@ class MdnContentSource:
             diagnostics.discovered += len(files)
 
         for order, md_path in enumerate(files):
+            if order and order % 50 == 0:
+                await asyncio.sleep(0)
             if resume_boundary is not None and order <= resume_boundary.document_inventory_position:
                 if diagnostics is not None:
                     diagnostics.skip("checkpoint_resume_skip")
@@ -258,6 +308,65 @@ class MdnContentSource:
             )
         )
 
+    def _discover_catalog_entries(self, root: Path) -> list[LanguageCatalog]:
+        top = self._find_content_root(root)
+        if top is None:
+            raise RuntimeError("MDN content archive extraction produced no files")
+        en_us_root = top / "files" / "en-us"
+        candidates = sorted(self._iter_area_roots(en_us_root), key=lambda path: path.as_posix())
+        catalogs: list[LanguageCatalog] = []
+        for area_root in candidates:
+            catalog = self._catalog_for_area_root(area_root, en_us_root=en_us_root)
+            if catalog is not None:
+                catalogs.append(catalog)
+        return catalogs
+
+    def _iter_area_roots(self, en_us_root: Path) -> set[Path]:
+        candidates: set[Path] = set()
+        for index_path in en_us_root.glob("*/index.md"):
+            candidates.add(index_path.parent)
+        web_root = en_us_root / "web"
+        if web_root.exists():
+            for index_path in web_root.glob("*/index.md"):
+                candidates.add(index_path.parent)
+        return candidates
+
+    def _catalog_for_area_root(self, area_root: Path, *, en_us_root: Path) -> LanguageCatalog | None:
+        index_path = area_root / "index.md"
+        if not index_path.exists():
+            return None
+        relative_area = area_root.relative_to(en_us_root).as_posix()
+        raw = index_path.read_text(encoding="utf-8", errors="ignore")
+        meta, _body, _warning = _parse_frontmatter(raw)
+        title = _metadata_text(meta.get("title")) or _display_from_area(relative_area)
+        slug = _slug_for_area(relative_area)
+        aliases = AREA_SLUG_ALIASES.get(relative_area, [slug])
+        support_level: Literal["supported", "experimental", "ignored"]
+        support_level = "supported" if relative_area in SUPPORTED_MDN_AREAS else "experimental"
+        reason = (
+            "Recognized stable MDN documentation family"
+            if support_level == "supported"
+            else "Discovered from MDN content tree; not yet part of the stable quality set"
+        )
+        source_slug = _metadata_text(meta.get("slug")) or relative_area
+        return LanguageCatalog(
+            source=self.name,
+            slug=slug,
+            display_name=title,
+            version="main",
+            core_topics=sorted(CORE_PAGE_TYPES),
+            all_topics=[],
+            homepage=f"{SOURCE_ROOT_URL}/{source_slug}",
+            aliases=aliases,
+            support_level=support_level,
+            discovery_reason=reason,
+            discovery_metadata={
+                "area": relative_area,
+                "mdn_slug": source_slug,
+                "content_url": f"{CONTENT_ROOT_URL}/{relative_area}/index.md",
+            },
+        )
+
 
 def _extract_tarball(archive: Path, dest: Path) -> None:
     with tarfile.open(archive, "r:gz") as tar:
@@ -265,7 +374,7 @@ def _extract_tarball(archive: Path, dest: Path) -> None:
         def _keep_member(member: tarfile.TarInfo) -> bool:
             name = member.name
             normalized = name.rstrip("/")
-            if not any(f"/files/en-us/{area}" in normalized for area in {a[1] for a in AREAS.values()}):
+            if not any(f"/files/en-us/{area}" in normalized for area in SUPPORTED_MDN_AREAS):
                 if not (
                     normalized.endswith("/files") or normalized.endswith("/files/en-us") or normalized.count("/") <= 3
                 ):
@@ -313,6 +422,23 @@ def _metadata_strings(value: Any) -> list[str]:
 def _slug(path: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", path).strip("-").lower()
     return cleaned or "index"
+
+
+def _slug_for_area(area: str) -> str:
+    if area == "web/api":
+        return "web-apis"
+    parts = area.split("/")
+    if parts[:1] == ["web"] and len(parts) == 2:
+        return parts[1]
+    return _slug(area)
+
+
+def _display_from_area(area: str) -> str:
+    if area == "web/api":
+        return "Web APIs"
+    parts = area.split("/")
+    label = parts[-1].replace("_", " ").replace("-", " ").strip()
+    return " ".join(piece.capitalize() for piece in label.split()) or area
 
 
 def _sha256_file(path: Path) -> str:

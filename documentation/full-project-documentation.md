@@ -37,6 +37,7 @@ The Typer application in `doc_ingest/cli.py` exposes:
 - `list-presets`
 - `list-languages`
 - `refresh-catalogs`
+- `audit-catalogs`
 - `validate`
 - `init`
 - `gui`
@@ -126,6 +127,10 @@ Fields:
 - `all_topics`
 - `size_hint`
 - `homepage`
+- `aliases`
+- `support_level`
+- `discovery_reason`
+- `discovery_metadata`
 
 ### `Document`
 
@@ -270,14 +275,10 @@ During `fetch()`:
 
 ### Catalog model
 
-Unlike DevDocs and Dash, MDN does not discover languages dynamically here. `AREAS` is a fixed mapping:
-
-- `javascript`
-- `html`
-- `css`
-- `web-apis`
-- `http`
-- `webassembly`
+MDN discovery is now live-first. The adapter scans the extracted content tree, derives a generated catalog manifest in
+`cache/catalogs/mdn.json`, and falls back to the last valid manifest if a later refresh fails. Stable-quality families
+such as JavaScript, HTML, CSS, Web APIs, HTTP, and WebAssembly are marked `supported`; newly discovered families stay
+visible as `experimental` through discovery audits.
 
 ### Archive retrieval
 
@@ -316,9 +317,10 @@ For each `index.md` under the selected area:
 
 ## 5.3 Dash adapter
 
-### Catalog seeding
+### Catalog discovery
 
-Dash catalog entries come from `_DEFAULT_DASH_SEED` unless an optional seed file is supplied. This means available Dash languages are limited to the embedded list in the current repository.
+Dash catalog entries are discovered from Kapeli’s official cheat-sheet index and persisted to
+`cache/catalogs/dash.json`. If a later live refresh fails, the adapter falls back to the last valid generated manifest.
 
 ### Docset retrieval
 
@@ -478,7 +480,7 @@ Behavior:
 - successful runs save the stable `LanguageRunState` and remove the active checkpoint
 - failed runs leave the checkpoint on disk for inspection and for automatic resume on the next matching run
 
-Resume is conservative. The pipeline only resumes when language slug, source, source slug, mode, output path, and all saved artifact paths still match. DevDocs and Dash skip ordered inventory rows before the boundary; MDN skips sorted `index.md` paths before the boundary. If the manifest is stale, the run replays from the beginning.
+Resume is conservative. The pipeline only resumes when language slug, source, source slug, mode, output path, and durable per-document artifact paths still match. DevDocs and Dash skip ordered inventory rows before the boundary; MDN skips sorted `index.md` paths before the boundary. Missing temporary consolidated fragments are rebuilt from the durable per-document files. If durable artifacts are stale, the run replays from the beginning.
 
 Source diagnostics are saved in final language state and reports. Adapters record source-level inventory and skip reasons, while the pipeline records topic include/exclude skips after documents are normalized.
 

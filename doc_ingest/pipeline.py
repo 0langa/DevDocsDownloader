@@ -572,8 +572,16 @@ def _validated_resume(
 
     artifacts = checkpoint.emitted_documents
     for artifact in artifacts:
-        if not Path(artifact.path).exists() or not Path(artifact.fragment_path).exists():
+        if not Path(artifact.path).exists():
             return [], None
+        fragment_path = Path(artifact.fragment_path)
+        if not fragment_path.exists():
+            LOGGER.warning(
+                "Checkpoint fragment missing for %s/%s; rebuilding from durable document file %s",
+                source,
+                artifact.slug,
+                artifact.path,
+            )
 
     return artifacts, ResumeBoundary(
         document_inventory_position=checkpoint.document_inventory_position,

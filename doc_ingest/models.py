@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 CrawlMode = Literal["important", "full"]
-CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "completed", "failed"]
+CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "cancelling", "completed", "failed"]
 CacheFreshnessPolicy = Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"]
 BulkConcurrencyPolicy = Literal["static", "adaptive"]
 

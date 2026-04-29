@@ -34,11 +34,13 @@ The runtime path is usable today for those three source families. The repository
 	- Downloads `index.json` and `db.json` for a resolved slug from `https://documents.devdocs.io`
 	- Filters to configured “core” topic types in `important` mode using `doc_ingest/sources/devdocs_core.json`
 - **MDN**
-	- Treats supported MDN areas as a fixed catalog: JavaScript, HTML, CSS, Web APIs, HTTP, and WebAssembly
+	- Discovers documentation families by scanning the MDN content tree and writes a generated manifest under `cache/catalogs/mdn.json`
+	- Uses live discovery plus cached-manifest fallback; supported families currently include JavaScript, HTML, CSS, Web APIs, HTTP, and WebAssembly, while newly discovered families remain visible as experimental entries in catalog audits
 	- Downloads the MDN content repository tarball from GitHub and extracts only the relevant `files/en-us/...` trees into cache, guarded by checksum and area-readiness metadata
 	- Reads frontmatter from `index.md` files and filters by `page-type` in `important` mode
 - **Dash / Kapeli**
-	- Uses `doc_ingest/sources/dash_seed.json` because Dash does not expose a clean JSON catalog in this codebase
+	- Discovers docsets from Kapeli’s official cheat-sheet index and writes a generated manifest under `cache/catalogs/dash.json`
+	- Uses live discovery plus cached-manifest fallback instead of a hand-maintained built-in seed catalog
 	- Downloads `.tgz` docsets, extracts them, reads the SQLite `docSet.dsidx` index, and converts HTML files from the embedded `Documents/` tree
 
 ### Output layout
@@ -67,6 +69,7 @@ The stable generated-output contract is documented in `documentation/output_cont
 - `audit-presets`
 - `list-languages`
 - `refresh-catalogs`
+- `audit-catalogs`
 - `validate`
 - `init`
 - desktop backend worker for the WinUI 3 shell
@@ -185,8 +188,8 @@ Release architecture:
 - persistent shell state across navigation, with shared live progress and activity logs
 - structured operator views for languages, presets, reports, output bundles, checkpoints, and cache metadata
 - GitHub Release artifacts:
-  - `DevDocsDownloader-Setup-1.0.5.exe`
-  - `DevDocsDownloader-Portable-1.0.5.zip`
+  - `DevDocsDownloader-Setup-1.0.6.exe`
+  - `DevDocsDownloader-Portable-1.0.6.zip`
 
 The backend API host lives in `doc_ingest/desktop_backend.py`. Release packaging scripts, installer definitions, and workflows live under `scripts/`, `desktop/installer/`, and `.github/workflows/`.
 
@@ -269,6 +272,7 @@ python DevDocsDownloader.py validate python
 python DevDocsDownloader.py list-languages
 python DevDocsDownloader.py list-languages --source mdn
 python DevDocsDownloader.py refresh-catalogs
+python DevDocsDownloader.py audit-catalogs
 python DevDocsDownloader.py list-presets
 python DevDocsDownloader.py audit-presets
 python DevDocsDownloader.py audit-presets webapp
@@ -332,7 +336,7 @@ Optional controls:
 - `DEVDOCS_LIVE_TIMEOUT` — request timeout in seconds, default `20`
 - `DEVDOCS_LIVE_LIMIT` — maximum number of probes, useful while debugging
 
-The live probes check one representative endpoint per configured language/source entry. DevDocs probes each language `index.json`, MDN probes one raw `index.md` for each configured area, and Dash probes each configured `.tgz` feed with a capped ranged request. They validate link health only; they do not compile output or verify extraction quality.
+The live probes check one representative endpoint per configured language/source entry. DevDocs probes each language `index.json`, MDN probes a representative discovered family, and Dash probes discovered `.tgz` feeds with capped ranged requests. They validate link health only; they do not compile output or verify extraction quality.
 
 For a bounded extraction sanity tier that checks one representative source-family conversion path without compiling full languages:
 
@@ -341,6 +345,8 @@ $env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live
 ```
 
 This fetches a DevDocs document payload, one MDN raw `index.md`, and a capped Dash archive probe plus local Dash conversion fixture. It catches upstream shape drift but is not a full extraction correctness check.
+
+GitHub Actions also runs a separate scheduled `live-drift` workflow that writes machine-readable JSON artifacts for endpoint and bounded extraction drift triage.
 
 ## Developer Checks
 
@@ -361,6 +367,7 @@ python -m mypy doc_ingest
 	- DevDocs first for everything else
 	- Dash as a fallback
 - Resolution uses exact, family, prefix, and contains matching against display name and slug
+- Resolution also considers source-provided aliases from discovery manifests, such as MDN `web-apis` resolving from `api` or `web api`
 
 ### Mode behavior
 
@@ -400,7 +407,7 @@ The validation score is heuristic. It does not verify semantic correctness or so
 
 ### Checkpoint behavior
 
-During an active language run, the pipeline writes `state/checkpoints/<language>.json` with the source slug, mode, current phase, emitted document count, last document metadata, emitted artifact manifest, and any failure records. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the next matching run can automatically resume after the last safe document boundary when the saved per-document files and consolidated fragments are still present. If those artifacts are missing or stale, the pipeline warns and safely replays from the start.
+During an active language run, the pipeline writes `state/checkpoints/<language>.json` with the source slug, mode, current phase, emitted document count, last document metadata, emitted artifact manifest, and any failure records. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the next matching run can automatically resume after the last safe document boundary when the saved per-document files are still present. Missing temporary consolidated fragments are rebuilt from durable per-document files during resume; missing durable documents still trigger a safe replay from the start.
 
 ### Source diagnostics behavior
 
@@ -491,16 +498,17 @@ source-documents/           # legacy support requirements and inputs
 ### Source-specific limitations
 
 - **DevDocs**
-	- Deduplicates by path without fragment, so fragment-level sections are dropped
+	- Deduplicates by base path, but now preserves upstream fragment references in the emitted canonical document instead of silently dropping them
 	- Treats DevDocs entry `type` as the topic label
 - **MDN**
-	- Only six MDN areas are exposed in the catalog
+	- Discovery is dynamic, but only the stable quality-set families are treated as fully supported by default
 	- Frontmatter is parsed with safe YAML, but downstream metadata usage is still limited
 	- Archive extraction is still large, but unchanged archives with ready area trees are not re-extracted
 - **Dash**
-	- Catalog coverage is limited to `doc_ingest/sources/dash_seed.json` unless the seed is extended
+	- Discovery comes from Kapeli’s public cheat-sheet index and assumes the matching `/feeds/<slug>.tgz` archives remain valid
 	- SQLite index structure is assumed to match the expected `searchIndex` schema
 	- HTML conversion removes common navigation noise but still depends on docset HTML quality
+	- Fragment-level references are preserved as notes on the canonical emitted document; section-precise extraction is still conservative
 
 ### Repository consistency notes
 
@@ -529,6 +537,7 @@ The current tests focus on:
 - GUI-safe service artifact readers, checkpoint/cache inspection, job queue transitions, CLI GUI launcher wiring, and optional NiceGUI app-factory smoke coverage
 - source plugin registration, exact cross-document link rewriting, asset inventory, and optional tokenizer chunking
 - adaptive bulk scheduling, deterministic source suggestions, and opt-in live extraction sanity hooks
+- dynamic DevDocs/MDN/Dash catalog discovery manifests, alias-aware resolution, cached-manifest fallback, and fragment-reference preservation
 
 ## Future direction
 

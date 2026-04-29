@@ -9,7 +9,7 @@ The project is now a tested source-adapter ingestion system for DevDocs, MDN, an
 Completed foundations:
 
 - Production safety: filesystem-safe slugs, atomic writes, safe archive extraction, retry helpers, local-first validation, and active run checkpoints.
-- Core usability: source diagnostics, topic include/exclude filters, preset auditing, maintained Dash seed data, and opt-in live endpoint probes.
+- Core usability: source diagnostics, topic include/exclude filters, preset auditing, generated source-discovery manifests with cached fallback, and opt-in live endpoint probes.
 - Contracts and tooling: stable output contract docs, golden fixtures, fixture-backed integration tests, CLI contract tests, Ruff, mypy, and canonical `pyproject.toml` dependencies.
 - Architecture: shared `SourceRuntime`, pooled HTTP clients, typed adapter events, compiler planning/rendering/writing separation, and archived historical crawler utilities.
 - Performance and scalability: streaming compilation, automatic checkpoint resume with artifact manifests, balanced generated-Markdown durability, source-profile throttling, and metadata-driven MDN extraction reuse.
