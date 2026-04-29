@@ -615,10 +615,17 @@ class DocumentationService:
         entries = payload.get("entries") if isinstance(payload, dict) else []
         if not isinstance(entries, list):
             entries = []
-        support_levels = [str(entry.get("support_level") or "supported") for entry in entries if isinstance(entry, dict)]
-        combined_errors = [*([str(item) for item in payload.get("errors") or []] if isinstance(payload, dict) else []), *(errors or [])]
+        support_levels = [
+            str(entry.get("support_level") or "supported") for entry in entries if isinstance(entry, dict)
+        ]
+        combined_errors = [
+            *([str(item) for item in payload.get("errors") or []] if isinstance(payload, dict) else []),
+            *(errors or []),
+        ]
         fallback_used = bool(payload.get("fallback_used", False)) if isinstance(payload, dict) else False
-        status: Literal["refreshed", "fallback", "failed"] = "failed" if combined_errors and entry_count == 0 else "refreshed"
+        status: Literal["refreshed", "fallback", "failed"] = (
+            "failed" if combined_errors and entry_count == 0 else "refreshed"
+        )
         if fallback_used and status != "failed":
             status = "fallback"
         return CatalogRefreshResult(

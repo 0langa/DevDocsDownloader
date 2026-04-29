@@ -109,7 +109,9 @@ def test_refresh_catalogs_returns_structured_statuses(tmp_path: Path) -> None:
             "source": "devdocs",
             "discovery_strategy": "live",
             "fetched_at": "2026-04-29T00:00:00Z",
-            "entries": [{"source": "devdocs", "slug": "python", "display_name": "Python", "support_level": "supported"}],
+            "entries": [
+                {"source": "devdocs", "slug": "python", "display_name": "Python", "support_level": "supported"}
+            ],
             "fallback_used": True,
             "fallback_reason": "network failed",
             "warnings": ["used cached manifest"],
