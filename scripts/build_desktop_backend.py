@@ -31,6 +31,8 @@ def main() -> None:
         "--name",
         BACKEND_NAME,
         "--console",
+        "--add-data",
+        f"{ROOT / 'version.json'};.",
         "--collect-data",
         "doc_ingest.sources",
         "--collect-all",

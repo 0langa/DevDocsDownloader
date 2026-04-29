@@ -33,11 +33,15 @@ public sealed class BackendProcessHost : IAsyncDisposable
             WorkingDirectory = Path.GetDirectoryName(backendPath) ?? AppContext.BaseDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardError = false,
-            RedirectStandardOutput = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
         };
         DesktopDiagnostics.Log($"Starting bundled backend from {backendPath} on port {Port}.");
         _process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start backend process.");
+        _process.OutputDataReceived += (_, args) => LogBackendLine("stdout", args.Data);
+        _process.ErrorDataReceived += (_, args) => LogBackendLine("stderr", args.Data);
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
         _client = new DesktopBackendClient(new HttpClient
         {
             BaseAddress = new Uri($"http://127.0.0.1:{Port}"),
@@ -115,5 +119,14 @@ public sealed class BackendProcessHost : IAsyncDisposable
             throw new FileNotFoundException("Bundled backend executable not found.", backendExe);
         }
         return backendExe;
+    }
+
+    private static void LogBackendLine(string stream, string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return;
+        }
+        DesktopDiagnostics.Log($"Bundled backend {stream}: {line}");
     }
 }
