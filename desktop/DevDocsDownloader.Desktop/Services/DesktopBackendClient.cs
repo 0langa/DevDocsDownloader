@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -68,6 +69,65 @@ public sealed class DesktopBackendClient
         response.EnsureSuccessStatusCode();
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         return text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    public async IAsyncEnumerable<(string EventName, JsonObject Payload)> StreamJobEventsAsync(
+        string jobId,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/jobs/{jobId}/events");
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException($"Backend request failed ({(int)response.StatusCode}): {error}");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        string currentEvent = "message";
+        var dataBuilder = new StringBuilder();
+        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+            if (line.Length == 0)
+            {
+                if (dataBuilder.Length > 0)
+                {
+                    var payload = JsonNode.Parse(dataBuilder.ToString()) as JsonObject ?? new JsonObject();
+                    yield return (currentEvent, payload);
+                    currentEvent = "message";
+                    dataBuilder.Clear();
+                }
+                continue;
+            }
+            if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+            {
+                currentEvent = line["event:".Length..].Trim();
+                continue;
+            }
+            if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                if (dataBuilder.Length > 0)
+                {
+                    dataBuilder.AppendLine();
+                }
+                dataBuilder.Append(line["data:".Length..].Trim());
+            }
+        }
+        if (dataBuilder.Length > 0)
+        {
+            var payload = JsonNode.Parse(dataBuilder.ToString()) as JsonObject ?? new JsonObject();
+            yield return (currentEvent, payload);
+        }
     }
 
     public Task<JsonNode?> GetRuntimeSnapshotAsync(CancellationToken cancellationToken = default) =>

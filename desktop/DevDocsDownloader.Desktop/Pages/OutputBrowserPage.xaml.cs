@@ -1,52 +1,188 @@
+using System.Text.Json.Nodes;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 
 namespace DevDocsDownloader.Desktop.Pages;
 
 public sealed partial class OutputBrowserPage : Page
 {
+    private sealed class BundleItem
+    {
+        public required string LanguageSlug { get; init; }
+        public required string Language { get; init; }
+        public required string Source { get; init; }
+        public int TotalDocuments { get; init; }
+
+        public override string ToString() => $"{Language} ({Source}, {TotalDocuments} docs)";
+    }
+
+    private sealed class OutputNode
+    {
+        public required string Name { get; init; }
+        public required string RelativePath { get; init; }
+        public bool IsDir { get; init; }
+
+        public override string ToString() => Name;
+    }
+
+    private readonly List<BundleItem> _bundles = [];
+    private BundleItem? _selectedBundle;
+    private bool _initialized;
+
     public OutputBrowserPage()
     {
         InitializeComponent();
+        OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
     }
 
-    private async void OnListBundles(object sender, RoutedEventArgs e)
+    protected override async void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
+        if (_initialized)
+        {
+            return;
+        }
+        _initialized = true;
+        await RefreshBundlesAsync();
+    }
+
+    public async Task FocusBundleAsync(string languageSlug)
+    {
+        await RefreshBundlesAsync(languageSlug);
+    }
+
+    private async void OnRefreshBundles(object sender, RoutedEventArgs e)
+    {
+        await RefreshBundlesAsync();
+    }
+
+    private async void OnReloadTree(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBundle is null)
+        {
+            return;
+        }
+        await LoadTreeAsync(_selectedBundle);
+    }
+
+    private async void OnBundleSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (BundlesList.SelectedItem is not BundleItem bundle)
+        {
+            return;
+        }
+        _selectedBundle = bundle;
+        RefreshTreeButton.IsEnabled = true;
+        await LoadTreeAsync(bundle);
+    }
+
+    private async void OnTreeSelectionChanged(TreeView sender, TreeViewSelectionChangedEventArgs args)
+    {
+        if (_selectedBundle is null || sender.SelectedNode?.Content is not OutputNode node || node.IsDir)
+        {
+            return;
+        }
+        try
+        {
+            var result = await App.BackendHost.Client.GetOutputFileAsync(_selectedBundle.LanguageSlug, node.RelativePath);
+            PreviewPathText.Text = $"{_selectedBundle.LanguageSlug}/{node.RelativePath}";
+            PreviewBox.Text = result?["content"]?.GetValue<string>() ?? JsonFormatter.Format(result);
+            App.MainViewModel.RecordOutputSelection(_selectedBundle.LanguageSlug, node.RelativePath);
+        }
+        catch (Exception exc)
+        {
+            PreviewBox.Text = exc.Message;
+        }
+    }
+
+    private async Task RefreshBundlesAsync(string? preferredSlug = null)
     {
         try
         {
+            StatusText.Text = "Loading bundles...";
+            _bundles.Clear();
             var result = await App.BackendHost.Client.GetOutputBundlesAsync();
-            ContentBox.Text = JsonFormatter.Format(result);
+            foreach (var item in result ?? [])
+            {
+                if (item is not JsonObject row)
+                {
+                    continue;
+                }
+                _bundles.Add(new BundleItem
+                {
+                    LanguageSlug = row["language_slug"]?.GetValue<string>() ?? "",
+                    Language = row["language"]?.GetValue<string>() ?? (row["language_slug"]?.GetValue<string>() ?? ""),
+                    Source = row["source"]?.GetValue<string>() ?? "",
+                    TotalDocuments = row["total_documents"]?.GetValue<int?>() ?? 0,
+                });
+            }
+            BundlesList.ItemsSource = null;
+            BundlesList.ItemsSource = _bundles.OrderBy(item => item.Language).ToList();
+            StatusText.Text = _bundles.Count == 0 ? "No output bundles found yet." : $"Loaded {_bundles.Count} bundles.";
+
+            var targetSlug = preferredSlug
+                ?? App.MainViewModel.LastOutputLanguageSlug
+                ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(targetSlug))
+            {
+                BundlesList.SelectedItem = _bundles.FirstOrDefault(item => item.LanguageSlug == targetSlug);
+            }
+            if (BundlesList.SelectedItem is null && _bundles.Count > 0)
+            {
+                BundlesList.SelectedIndex = 0;
+            }
         }
         catch (Exception exc)
         {
-            ContentBox.Text = exc.Message;
+            StatusText.Text = exc.Message;
         }
     }
 
-    private async void OnLoadTree(object sender, RoutedEventArgs e)
+    private async Task LoadTreeAsync(BundleItem bundle)
     {
         try
         {
-            var result = await App.BackendHost.Client.GetOutputTreeAsync(LanguageSlugBox.Text);
-            ContentBox.Text = JsonFormatter.Format(result);
+            PreviewPathText.Text = $"{bundle.LanguageSlug}";
+            PreviewBox.Text = "";
+            FilesTree.RootNodes.Clear();
+            var tree = await App.BackendHost.Client.GetOutputTreeAsync(bundle.LanguageSlug);
+            if (tree is not JsonObject root)
+            {
+                StatusText.Text = "No tree data returned.";
+                return;
+            }
+            FilesTree.RootNodes.Add(BuildTree(root));
+            StatusText.Text = $"Loaded {bundle.Language} output tree.";
+            if (!string.IsNullOrWhiteSpace(App.MainViewModel.LastOutputRelativePath))
+            {
+                PreviewPathText.Text = $"{bundle.LanguageSlug}/{App.MainViewModel.LastOutputRelativePath}";
+            }
         }
         catch (Exception exc)
         {
-            ContentBox.Text = exc.Message;
+            StatusText.Text = exc.Message;
         }
     }
 
-    private async void OnLoadFile(object sender, RoutedEventArgs e)
+    private static TreeViewNode BuildTree(JsonObject node)
     {
-        try
+        var outputNode = new OutputNode
         {
-            var result = await App.BackendHost.Client.GetOutputFileAsync(LanguageSlugBox.Text, RelativePathBox.Text);
-            ContentBox.Text = JsonFormatter.Format(result);
-        }
-        catch (Exception exc)
+            Name = node["name"]?.GetValue<string>() ?? ".",
+            RelativePath = node["relative_path"]?.GetValue<string>() ?? ".",
+            IsDir = node["is_dir"]?.GetValue<bool?>() ?? false,
+        };
+        var treeNode = new TreeViewNode { Content = outputNode, IsExpanded = outputNode.RelativePath is "." };
+        if (node["children"] is JsonArray children)
         {
-            ContentBox.Text = exc.Message;
+            foreach (var child in children.OfType<JsonObject>())
+            {
+                treeNode.Children.Add(BuildTree(child));
+            }
         }
+        return treeNode;
     }
 }

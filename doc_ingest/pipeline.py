@@ -397,10 +397,22 @@ class DocumentationPipeline:
                 artifact_checkpoint(artifact, topic=doc.topic),
             )
             if progress_tracker is not None:
-                await progress_tracker.on_document_completed(language_slug)
+                await progress_tracker.on_document_completed(
+                    language_slug,
+                    title=doc.title,
+                    topic=doc.topic,
+                    total_documents=checkpoint.emitted_document_count + 1,
+                )
 
         try:
             checkpoint_store.update_phase(checkpoint, "fetching", output_path=str(consolidated_path))
+            if progress_tracker is not None:
+                await progress_tracker.on_phase_changed(
+                    language_slug,
+                    phase="fetching",
+                    message=f"Fetching source material for {catalog.display_name}",
+                    payload={"language": catalog.display_name, "source": source.name, "source_slug": catalog.slug},
+                )
             documents = _filtered_documents(
                 _documents_from_events(
                     _fetch_events(
@@ -466,6 +478,17 @@ class DocumentationPipeline:
         report.topics = compiled.topics
         try:
             checkpoint_store.update_phase(checkpoint, "validating", output_path=str(compiled.output_path))
+            if progress_tracker is not None:
+                await progress_tracker.on_phase_changed(
+                    language_slug,
+                    phase="validating",
+                    message=f"Validating and writing reports for {catalog.display_name}",
+                    payload={
+                        "language": catalog.display_name,
+                        "total_documents": compiled.total_documents,
+                        "output_path": str(compiled.output_path),
+                    },
+                )
             report.validation = validate_output(
                 language=catalog.display_name,
                 output_path=compiled.output_path,
@@ -510,6 +533,12 @@ class DocumentationPipeline:
             return report
 
         if progress_tracker is not None:
+            await progress_tracker.on_phase_changed(
+                language_slug,
+                phase="completed",
+                message=f"Completed {catalog.display_name}",
+                payload={"language": catalog.display_name, "total_documents": compiled.total_documents},
+            )
             await progress_tracker.on_language_complete(language_slug, report)
 
         checkpoint_store.update_phase(checkpoint, "completed", output_path=str(compiled.output_path))

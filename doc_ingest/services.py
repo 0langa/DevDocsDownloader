@@ -27,6 +27,7 @@ from .utils.filesystem import read_json
 class ServiceEvent(BaseModel):
     event_type: Literal[
         "phase_change",
+        "activity",
         "document_emitted",
         "warning",
         "validation_completed",
@@ -190,6 +191,7 @@ class DocumentationService:
     ) -> RunSummary:
         self._apply_output_options(request)
         await _emit(event_sink, ServiceEvent(event_type="phase_change", language=request.language, phase="started"))
+        progress_tracker = progress_tracker or _DesktopProgressTracker(event_sink)
         pipeline = DocumentationPipeline(self.config)
         try:
             summary = await pipeline.run(
@@ -231,6 +233,7 @@ class DocumentationService:
             self.config.adaptive_min_concurrency, request.adaptive_max_concurrency
         )
         await _emit(event_sink, ServiceEvent(event_type="phase_change", phase="bulk_started"))
+        progress_tracker = progress_tracker or _DesktopProgressTracker(event_sink)
         pipeline = DocumentationPipeline(self.config)
         try:
             summary = await pipeline.run_many(
@@ -571,15 +574,6 @@ class DocumentationService:
                         payload=warning_record.model_dump(mode="json"),
                     ),
                 )
-            for index in range(report.total_documents):
-                await _emit(
-                    event_sink,
-                    ServiceEvent(
-                        event_type="document_emitted",
-                        language=report.language,
-                        payload={"index": index + 1, "total": report.total_documents},
-                    ),
-                )
             if report.validation is not None:
                 await _emit(
                     event_sink,
@@ -615,6 +609,70 @@ async def _emit(event_sink: ServiceEventSink | None, event: ServiceEvent) -> Non
     result = event_sink(event)
     if result is not None:
         await result
+
+
+class _DesktopProgressTracker(CrawlProgressTracker):
+    def __init__(self, event_sink: ServiceEventSink | None) -> None:
+        super().__init__(single_terminal=True)
+        self._event_sink = event_sink
+
+    async def register_language(self, slug: str, display_name: str) -> None:
+        await super().register_language(slug, display_name)
+        await _emit(
+            self._event_sink,
+            ServiceEvent(
+                event_type="activity",
+                language=slug,
+                message=f"Preparing {display_name}",
+                payload={"language_slug": slug, "display_name": display_name},
+            ),
+        )
+
+    async def on_phase_changed(
+        self,
+        slug: str,
+        *,
+        phase: str,
+        message: str = "",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        await _emit(
+            self._event_sink,
+            ServiceEvent(
+                event_type="phase_change",
+                language=slug,
+                phase=phase,
+                message=message,
+                payload=dict(payload or {}),
+            ),
+        )
+
+    async def on_document_completed(
+        self,
+        slug: str,
+        *,
+        title: str = "",
+        topic: str = "",
+        total_documents: int | None = None,
+    ) -> None:
+        await super().on_document_completed(slug, title=title, topic=topic, total_documents=total_documents)
+        language = self._languages.get(slug)
+        completed = language.documents if language is not None else 0
+        await _emit(
+            self._event_sink,
+            ServiceEvent(
+                event_type="document_emitted",
+                language=slug,
+                message=f"Formatted {title or slug}",
+                payload={
+                    "index": completed,
+                    "total": total_documents,
+                    "title": title,
+                    "topic": topic,
+                    "phase": "compiling",
+                },
+            ),
+        )
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:

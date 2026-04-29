@@ -9,6 +9,9 @@
                 <controls:XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#155EEF" />
+            <x:Double x:Key="ControlContentThemeFontSize">15</x:Double>
+            <x:Double x:Key="CaptionTextBlockFontSize">13</x:Double>
+            <Thickness x:Key="ControlContentThemePadding">12,8,12,8</Thickness>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

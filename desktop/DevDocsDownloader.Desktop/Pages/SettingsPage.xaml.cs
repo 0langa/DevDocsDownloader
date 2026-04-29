@@ -2,37 +2,77 @@ using System.Text.Json.Nodes;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 
 namespace DevDocsDownloader.Desktop.Pages;
 
 public sealed partial class SettingsPage : Page
 {
+    private bool _initialized;
+
     public SettingsPage()
     {
         InitializeComponent();
         HelpBox.Text = """
-            DevDocsDownloader 1.0.4 desktop shell
+            DevDocsDownloader 1.0.5 desktop shell
 
-            1. Start in Dashboard / Run for a single language or Bulk for multiple languages.
-            2. Use Languages to discover available source catalog entries.
-            3. Use Presets / Audit before large recurring runs.
-            4. Use Reports, Output Browser, Checkpoints, and Cache to inspect results and recovery state.
-            5. Cache policy and output settings are persisted through the backend settings file.
+            What this app does
+            - Download official documentation from DevDocs, MDN, and Dash-backed catalogs.
+            - Compile the result into normalized Markdown under the selected output root.
+            - Keep restart-safe checkpoints, reports, and cache metadata for recurring runs.
+
+            Normal workflow
+            1. Use Languages to browse the available catalog and send a language into Run or Bulk.
+            2. Use Run for one language, or Bulk for comma-separated lists and preset-sized batches.
+            3. Watch the live progress panel while the job fetches, formats, validates, and writes output.
+            4. After completion, inspect Reports, Output Browser, Checkpoints, and Cache.
+
+            Expected behavior
+            - Tabs keep their state when you move around the shell.
+            - Only one backend job runs at a time in the 1.0.x desktop line.
+            - If startup fails, the sidebar shows the backend failure and the desktop log path.
+            - Checkpoints are safe resume boundaries, not final output.
+
+            Output layout
+            - Markdown files are written under <output root>/markdown
+            - Reports are written under <output root>/reports
+            - Desktop cache, state, and logs stay under LocalAppData/DevDocsDownloader
+
+            Cache and refresh
+            - use-if-present: fast default
+            - ttl: refresh after configured age
+            - always-refresh: re-fetch every time
+            - validate-if-possible: reuse cache but revalidate where the source supports it
+
+            Non-technical guidance
+            - Start with important mode unless you know you need the full catalog.
+            - Use Refresh catalogs or force refresh only when source data seems stale.
+            - If a run fails, check Reports and Checkpoints before retrying.
             """;
+    }
+
+    protected override async void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        if (_initialized)
+        {
+            return;
+        }
+        _initialized = true;
+        await LoadSettingsAsync();
     }
 
     private async void OnLoadSettings(object sender, RoutedEventArgs e)
     {
-        try
+        await LoadSettingsAsync();
+    }
+
+    private async void OnChooseFolder(object sender, RoutedEventArgs e)
+    {
+        var path = await FolderPickerService.PickFolderAsync(App.MainWindow, OutputDirBox.Text);
+        if (!string.IsNullOrWhiteSpace(path))
         {
-            var settings = await App.BackendHost.Client.GetSettingsAsync();
-            OutputDirBox.Text = settings?["output_dir"]?.GetValue<string>() ?? string.Empty;
-            CachePolicyBox.SelectedItem = settings?["cache_policy"]?.GetValue<string>() ?? "use-if-present";
-            CacheTtlBox.Text = settings?["cache_ttl_hours"]?.GetValue<int?>()?.ToString() ?? string.Empty;
-        }
-        catch (Exception exc)
-        {
-            HelpBox.Text = exc.Message;
+            OutputDirBox.Text = path;
         }
     }
 
@@ -40,17 +80,46 @@ public sealed partial class SettingsPage : Page
     {
         try
         {
-            JsonNode? saved = await App.BackendHost.Client.SaveSettingsAsync(new JsonObject
+            await App.MainViewModel.SaveSettingsAsync(new JsonObject
             {
                 ["output_dir"] = string.IsNullOrWhiteSpace(OutputDirBox.Text) ? null : OutputDirBox.Text,
+                ["default_mode"] = ModeBox.SelectedItem?.ToString() ?? "important",
+                ["source_preference"] = string.IsNullOrWhiteSpace(SourcePreferenceBox.Text) ? null : SourcePreferenceBox.Text,
                 ["cache_policy"] = CachePolicyBox.SelectedItem?.ToString() ?? "use-if-present",
                 ["cache_ttl_hours"] = int.TryParse(CacheTtlBox.Text, out var ttl) ? ttl : null,
+                ["language_tree_mode"] = App.MainViewModel.LanguageTreeMode,
+                ["language_search"] = App.MainViewModel.LanguageSearch,
+                ["last_output_language_slug"] = App.MainViewModel.LastOutputLanguageSlug,
+                ["last_output_relative_path"] = App.MainViewModel.LastOutputRelativePath,
+                ["last_selected_preset"] = App.MainViewModel.LastSelectedPreset,
+                ["language_concurrency"] = App.MainViewModel.LanguageConcurrency,
+                ["bulk_concurrency_policy"] = App.MainViewModel.BulkConcurrencyPolicy,
+                ["emit_document_frontmatter"] = App.MainViewModel.EmitDocumentFrontmatter,
+                ["emit_chunks"] = App.MainViewModel.EmitChunks,
             });
-            HelpBox.Text = JsonFormatter.Format(saved);
+            StatusText.Text = $"Saved settings. Output root: {App.MainViewModel.CurrentOutputRoot}";
         }
         catch (Exception exc)
         {
-            HelpBox.Text = exc.Message;
+            StatusText.Text = exc.Message;
+        }
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            await App.MainViewModel.LoadSettingsAsync();
+            OutputDirBox.Text = App.MainViewModel.CurrentOutputRoot;
+            ModeBox.SelectedItem = App.MainViewModel.DefaultMode;
+            SourcePreferenceBox.Text = App.MainViewModel.SourcePreference;
+            CachePolicyBox.SelectedItem = App.MainViewModel.CachePolicy;
+            CacheTtlBox.Text = App.MainViewModel.CacheTtlHours?.ToString() ?? "";
+            StatusText.Text = $"Loaded settings from desktop backend. Log path: {App.MainViewModel.BackendLogPath}";
+        }
+        catch (Exception exc)
+        {
+            StatusText.Text = exc.Message;
         }
     }
 }

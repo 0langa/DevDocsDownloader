@@ -1,18 +1,20 @@
-# DevDocsDownloader 1.0.4
+# DevDocsDownloader 1.0.5
 
-Bug-fix release.
+Desktop UX and reliability release.
 
-Changes since 1.0.3:
+Changes since 1.0.4:
 
-- Fixed desktop backend startup failure caused by missing `version.json` inside frozen PyInstaller bundles.
-- Added frozen-runtime version lookup fallback so backend startup no longer depends on source-tree layout.
-- Added backend build step to bundle `version.json` explicitly.
-- Added desktop shell logging of bundled backend stdout/stderr for future startup diagnostics.
+- Reworked the WinUI shell into a stateful operator UI with persistent tab/page state across navigation.
+- Added shared live progress tracking, activity history, warning/failure counts, and cancel controls across the shell.
+- Replaced raw JSON-heavy desktop views with structured pages for Languages, Run/Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings/Help.
+- Added searchable source-first and category-first language tree views with cross-tab prefill actions.
+- Changed the desktop default output root to `%UserProfile%\\Documents\\DevDocsDownloader` while keeping `markdown/` and `reports/` under that root.
+- Extended backend service events and desktop settings persistence to support the richer shell behavior.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.4.exe`
-- `DevDocsDownloader-Portable-1.0.4.zip`
+- `DevDocsDownloader-Setup-1.0.5.exe`
+- `DevDocsDownloader-Portable-1.0.5.zip`
 - `SHA256SUMS.txt`
 
 Notes:

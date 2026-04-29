@@ -21,12 +21,22 @@ def test_load_config_desktop_mode_uses_per_user_style_paths(tmp_path: Path, monk
     assert config.paths.cache_dir == (tmp_path / "local" / "DevDocsDownloader" / "cache")
     assert config.paths.state_dir == (tmp_path / "local" / "DevDocsDownloader" / "state")
     assert config.paths.settings_path == (tmp_path / "local" / "DevDocsDownloader" / "settings.json")
-    assert config.paths.output_dir.name == "output"
+    assert config.paths.output_dir.name == "DevDocsDownloader"
 
 
 def test_desktop_settings_store_round_trips(tmp_path: Path) -> None:
     store = DesktopSettingsStore(tmp_path / "settings.json")
-    settings = DesktopSettings(output_dir=tmp_path / "out", cache_policy="ttl", cache_ttl_hours=24, emit_chunks=True)
+    settings = DesktopSettings(
+        output_dir=tmp_path / "out",
+        cache_policy="ttl",
+        cache_ttl_hours=24,
+        emit_chunks=True,
+        language_tree_mode="category",
+        language_search="python",
+        last_output_language_slug="python",
+        last_output_relative_path="python.md",
+        last_selected_preset="webapp",
+    )
 
     store.save(settings)
     loaded = store.load()
@@ -35,6 +45,11 @@ def test_desktop_settings_store_round_trips(tmp_path: Path) -> None:
     assert loaded.cache_policy == "ttl"
     assert loaded.cache_ttl_hours == 24
     assert loaded.emit_chunks is True
+    assert loaded.language_tree_mode == "category"
+    assert loaded.language_search == "python"
+    assert loaded.last_output_language_slug == "python"
+    assert loaded.last_output_relative_path == "python.md"
+    assert loaded.last_selected_preset == "webapp"
 
 
 def test_desktop_backend_requires_bearer_token(tmp_path: Path) -> None:
@@ -55,9 +70,28 @@ def test_desktop_backend_requires_bearer_token(tmp_path: Path) -> None:
 def test_desktop_backend_run_language_job_and_events(tmp_path: Path, monkeypatch) -> None:
     async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
         if event_sink is not None:
-            await event_sink(ServiceEvent(event_type="phase_change", language=request.language, phase="started"))
             await event_sink(
-                ServiceEvent(event_type="document_emitted", language=request.language, payload={"index": 1, "total": 1})
+                ServiceEvent(
+                    event_type="activity",
+                    language=request.language,
+                    message="Downloading guide index",
+                    payload={"step": "fetch_catalog", "completed": 0, "total": 1},
+                )
+            )
+            await event_sink(
+                ServiceEvent(
+                    event_type="phase_change",
+                    language=request.language,
+                    phase="fetching",
+                    message="Fetching source inventory",
+                )
+            )
+            await event_sink(
+                ServiceEvent(
+                    event_type="document_emitted",
+                    language=request.language,
+                    payload={"index": 1, "total": 1, "title": "Intro", "topic": "Guide", "phase": "compiling"},
+                )
             )
             await event_sink(
                 ServiceEvent(event_type="validation_completed", language=request.language, payload={"score": 1.0})
@@ -87,9 +121,13 @@ def test_desktop_backend_run_language_job_and_events(tmp_path: Path, monkeypatch
             stream = await client.get(f"/jobs/{job_id}/events", headers=headers)
             assert stream.status_code == 200
             body = stream.text
+            assert "activity" in body
             assert "phase_change" in body
             assert "document_emitted" in body
             assert "validation_completed" in body
+            assert "Downloading guide index" in body
+            assert '"title": "Intro"' in body
+            assert '"topic": "Guide"' in body
 
     asyncio.run(scenario())
 
@@ -113,16 +151,31 @@ def test_desktop_backend_languages_and_settings_endpoints(tmp_path: Path, monkey
             updated = await client.put(
                 "/settings",
                 headers=headers,
-                json={"cache_policy": "ttl", "cache_ttl_hours": 8, "emit_chunks": True},
+                json={
+                    "cache_policy": "ttl",
+                    "cache_ttl_hours": 8,
+                    "emit_chunks": True,
+                    "language_tree_mode": "category",
+                    "language_search": "rust",
+                    "last_output_language_slug": "rust",
+                    "last_output_relative_path": "async/streams.md",
+                    "last_selected_preset": "backend",
+                },
             )
             assert updated.status_code == 200
             payload = settings_store.load().model_dump(mode="json")
             assert payload["cache_policy"] == "ttl"
             assert payload["cache_ttl_hours"] == 8
             assert payload["emit_chunks"] is True
+            assert payload["language_tree_mode"] == "category"
+            assert payload["language_search"] == "rust"
+            assert payload["last_output_language_slug"] == "rust"
+            assert payload["last_output_relative_path"] == "async/streams.md"
+            assert payload["last_selected_preset"] == "backend"
 
             fetched = await client.get("/settings", headers=headers)
             assert fetched.status_code == 200
             assert fetched.json()["cache_policy"] == "ttl"
+            assert fetched.json()["language_tree_mode"] == "category"
 
     asyncio.run(scenario())

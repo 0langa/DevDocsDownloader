@@ -1,22 +1,64 @@
+using System.Text.Json.Nodes;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 
 namespace DevDocsDownloader.Desktop.Pages;
 
 public sealed partial class CheckpointsPage : Page
 {
+    private sealed class CheckpointItem
+    {
+        public required string Slug { get; init; }
+        public required string Language { get; init; }
+        public required string Source { get; init; }
+        public required string Phase { get; init; }
+
+        public override string ToString() => $"{Language} [{Source}] - {Phase}";
+    }
+
+    private readonly Dictionary<string, JsonObject> _details = [];
+    private bool _initialized;
+
     public CheckpointsPage()
     {
         InitializeComponent();
     }
 
+    protected override async void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        if (_initialized)
+        {
+            return;
+        }
+        _initialized = true;
+        await RefreshAsync();
+    }
+
     private async void OnList(object sender, RoutedEventArgs e)
     {
+        await RefreshAsync();
+    }
+
+    private async void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CheckpointList.SelectedItem is not CheckpointItem item)
+        {
+            return;
+        }
+        UseCheckpointButton.IsEnabled = true;
+        DeleteCheckpointButton.IsEnabled = true;
         try
         {
-            var result = await App.BackendHost.Client.GetCheckpointsAsync();
-            ContentBox.Text = JsonFormatter.Format(result);
+            var detail = await App.BackendHost.Client.GetCheckpointAsync(item.Slug) as JsonObject;
+            if (detail is not null)
+            {
+                _details[item.Slug] = detail;
+            }
+            DetailTitleText.Text = $"{item.Language} checkpoint";
+            ContentBox.Text = JsonFormatter.Format(detail);
         }
         catch (Exception exc)
         {
@@ -24,29 +66,76 @@ public sealed partial class CheckpointsPage : Page
         }
     }
 
-    private async void OnLoad(object sender, RoutedEventArgs e)
+    private void OnUseCheckpoint(object sender, RoutedEventArgs e)
     {
-        try
+        if (CheckpointList.SelectedItem is not CheckpointItem item)
         {
-            var result = await App.BackendHost.Client.GetCheckpointAsync(SlugBox.Text);
-            ContentBox.Text = JsonFormatter.Format(result);
+            return;
         }
-        catch (Exception exc)
-        {
-            ContentBox.Text = exc.Message;
-        }
+        var runPage = App.MainWindow.GetCachedPage<RunPage>();
+        runPage?.ApplySuggestedLanguage(item.Language, item.Source);
+        App.MainWindow.NavigateTo("RunPage");
     }
 
     private async void OnDelete(object sender, RoutedEventArgs e)
     {
+        if (CheckpointList.SelectedItem is not CheckpointItem item)
+        {
+            return;
+        }
+        var dialog = new ContentDialog
+        {
+            Title = "Delete checkpoint?",
+            Content = $"Delete checkpoint for {item.Language}? This removes the saved resume boundary.",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            XamlRoot = XamlRoot,
+        };
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary)
+        {
+            return;
+        }
         try
         {
-            var result = await App.BackendHost.Client.DeleteCheckpointAsync(SlugBox.Text);
-            ContentBox.Text = JsonFormatter.Format(result);
+            await App.BackendHost.Client.DeleteCheckpointAsync(item.Slug);
+            await RefreshAsync();
+            ContentBox.Text = $"{item.Language} checkpoint deleted.";
         }
         catch (Exception exc)
         {
             ContentBox.Text = exc.Message;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            var result = await App.BackendHost.Client.GetCheckpointsAsync();
+            var items = (result ?? [])
+                .OfType<JsonObject>()
+                .Select(item => new CheckpointItem
+                {
+                    Slug = item["slug"]?.GetValue<string>() ?? "",
+                    Language = item["language"]?.GetValue<string>() ?? "",
+                    Source = item["source"]?.GetValue<string>() ?? "",
+                    Phase = item["phase"]?.GetValue<string>() ?? "",
+                })
+                .OrderBy(item => item.Language)
+                .ToList();
+            CheckpointList.ItemsSource = items;
+            UseCheckpointButton.IsEnabled = false;
+            DeleteCheckpointButton.IsEnabled = false;
+            DetailTitleText.Text = items.Count == 0 ? "No active checkpoints." : "Select a checkpoint.";
+            if (items.Count == 0)
+            {
+                ContentBox.Text = "";
+            }
+        }
+        catch (Exception exc)
+        {
+            DetailTitleText.Text = exc.Message;
         }
     }
 }

@@ -38,7 +38,7 @@ class PathsConfig(BaseModel):
     @classmethod
     def from_desktop(cls, *, app_name: str, output_dir: Path | None = None) -> PathsConfig:
         local_root = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / app_name
-        documents_root = Path.home() / "Documents" / app_name / "output"
+        documents_root = Path.home() / "Documents" / app_name
         resolved_output = (output_dir or documents_root).resolve()
         return cls(
             root=local_root.resolve(),

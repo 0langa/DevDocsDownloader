@@ -182,11 +182,20 @@ Release architecture:
 - `WinUI 3 + .NET 8` desktop shell
 - bundled frozen Python backend worker
 - local `127.0.0.1` HTTP API with bearer-token auth
+- persistent shell state across navigation, with shared live progress and activity logs
+- structured operator views for languages, presets, reports, output bundles, checkpoints, and cache metadata
 - GitHub Release artifacts:
-  - `DevDocsDownloader-Setup-1.0.4.exe`
-  - `DevDocsDownloader-Portable-1.0.4.zip`
+  - `DevDocsDownloader-Setup-1.0.5.exe`
+  - `DevDocsDownloader-Portable-1.0.5.zip`
 
 The backend API host lives in `doc_ingest/desktop_backend.py`. Release packaging scripts, installer definitions, and workflows live under `scripts/`, `desktop/installer/`, and `.github/workflows/`.
+
+Desktop defaults:
+
+- output root: `%UserProfile%\\Documents\\DevDocsDownloader`
+- generated Markdown: `%UserProfile%\\Documents\\DevDocsDownloader\\markdown`
+- reports: `%UserProfile%\\Documents\\DevDocsDownloader\\reports`
+- cache/state/logs/tmp/settings: `%LocalAppData%\\DevDocsDownloader\\...`
 
 If the desktop shell fails before showing the window, check `%LocalAppData%\DevDocsDownloader\logs\desktop-shell.log` and `%LocalAppData%\DevDocsDownloader\logs\desktop-backend.log`.
 
@@ -297,6 +306,17 @@ The GUI is a local operator interface. It calls `DocumentationService` in-proces
 - **Checkpoints:** inspect failed/active checkpoints and safely delete selected checkpoint files.
 - **Cache:** inspect cache metadata sidecars and refresh catalogs.
 - **Settings/Help:** read the built-in operator tutorial covering the full workflow, expected behavior, failure modes, cache/resume semantics, report interpretation, and CLI equivalents.
+
+## WinUI Desktop UX
+
+The WinUI desktop shell is the primary end-user GUI.
+
+- Tabs keep their state when switching between Run, Bulk, Languages, Reports, Output Browser, Checkpoints, Cache, and Settings.
+- The left shell shows backend readiness, output root, live job progress, the current activity line, and warning/failure counts.
+- Run and Bulk pages reuse the same live job monitor, so progress remains visible while browsing other tabs.
+- Languages uses a searchable tree view with `source-first` and `category-first` grouping; selections can prefill Run or Bulk.
+- Output Browser loads bundles from the current output root automatically and remembers the last selected bundle/file.
+- Settings persists desktop defaults such as output root, cache policy, language-tree mode, last output selection, and selected preset.
 
 ## Live Probe Guide
 

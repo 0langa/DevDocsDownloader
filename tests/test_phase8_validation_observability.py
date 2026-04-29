@@ -278,7 +278,6 @@ def test_service_event_sink_receives_stable_summary_events(tmp_path: Path, monke
     assert [event.event_type for event in events] == [
         "phase_change",
         "phase_change",
-        "document_emitted",
         "validation_completed",
         "runtime_telemetry",
         "phase_change",

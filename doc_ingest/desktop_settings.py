@@ -15,6 +15,11 @@ class DesktopSettings(BaseModel):
     cache_ttl_hours: int | None = None
     default_mode: CrawlMode = "important"
     source_preference: str | None = None
+    language_tree_mode: str = "source"
+    language_search: str = ""
+    last_output_language_slug: str = ""
+    last_output_relative_path: str = ""
+    last_selected_preset: str = ""
     emit_document_frontmatter: bool = False
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000

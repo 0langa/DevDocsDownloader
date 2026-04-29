@@ -87,12 +87,13 @@ In short:
 - WinUI desktop shell scaffold exists under `desktop/DevDocsDownloader.Desktop/`
 - Desktop backend host exists in `doc_ingest/desktop_backend.py`
 - Desktop settings persist under `%LOCALAPPDATA%\\DevDocsDownloader\\settings.json`
-- Desktop mode uses per-user cache, state, logs, tmp, and output roots instead of repo-root defaults
+- Desktop mode uses per-user cache, state, logs, tmp, and settings roots plus a default output root at `%UserProfile%\\Documents\\DevDocsDownloader`
 - Legacy NiceGUI dashboard is still available through `python DevDocsDownloader.py gui`
 - Single-language, validation-only, and bulk/preset/all runs expose CLI-equivalent options
 - Desktop/backend and GUI-facing services expose structured jobs, events, progress, failures, and completed summaries
 - Language listing, preset audit, catalog refresh, report inspection, output browsing, checkpoint controls, and cache metadata views are present
 - Desktop/API and GUI file reads and checkpoint deletion go through `DocumentationService` path-safety checks
+- The WinUI shell now keeps tab state across navigation, shows shared live progress and activity history, and presents languages through searchable source/category tree views instead of raw JSON
 
 ### Tests
 

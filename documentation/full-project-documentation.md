@@ -54,7 +54,9 @@ For actual ingestion work, the CLI routes into `_execute_run()` for single-langu
 
 The `1.0.0` desktop release direction is a WinUI 3 shell with a bundled loopback backend host in `doc_ingest/desktop_backend.py`.
 That backend exposes `DocumentationService` over local HTTP with bearer-token auth, structured job status, and SSE
-event streaming for the desktop shell.
+event streaming for the desktop shell. The shell now keeps tab state across navigation, shares one live job monitor
+across Run/Bulk and sidebar surfaces, and uses structured tree/list views for languages, output, reports, checkpoints,
+and cache metadata instead of raw JSON panes.
 
 `python DevDocsDownloader.py gui` launches the legacy NiceGUI dashboard when the `gui` extra is installed. The `1.0.0`
 desktop release direction is therefore no longer the NiceGUI surface, which remains in the repo as a migration and

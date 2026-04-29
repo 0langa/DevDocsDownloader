@@ -18,6 +18,7 @@ Completed foundations:
 - Operator workflows: legacy local NiceGUI dashboard with CLI-equivalent run controls, in-process job queue, output browser, report drill-down, checkpoint controls, and cache metadata views retained as a migration bridge while the WinUI desktop release track is completed.
 - Source expansion and fidelity: entry-point source plugins, exact local cross-document link rewriting, event-driven asset inventory, optional tokenizer chunking, and removal of unused extended-conversion extras.
 - Release readiness: opt-in adaptive bulk scheduling, deterministic source suggestion tests, bounded live extraction sanity probes, desktop-safe runtime paths/settings, a local desktop backend API, WinUI desktop shell scaffolding, and GitHub Actions release automation for installer/portable artifacts.
+- Desktop UX hardening: persistent WinUI tab/view state, shared live progress tracking with activity details, searchable language tree views, structured report/output/checkpoint/cache pages, DPI-aware shell defaults, and a desktop default output root at `Documents/DevDocsDownloader`.
 
 Current guarantees:
 
@@ -187,6 +188,9 @@ Current guarantees:
 - Windows-native desktop shell under `desktop/DevDocsDownloader.Desktop/`
 - loopback desktop backend host in `doc_ingest/desktop_backend.py`
 - desktop-safe settings and storage roots
+- persistent shell viewmodels and cached page instances so navigation does not reset forms or loaded data
+- live SSE job progress, shared activity history, and richer phase/document payloads for the WinUI shell
+- structured operator views replacing raw JSON dumps for Languages, Run/Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings/Help
 - backend freeze, installer, and GitHub Release workflow scaffolding
 - release-facing docs now point to the WinUI desktop path as the supported GUI direction for `1.0.0`
 - remaining practical blocker for full local verification on this machine: missing WinUI PRI packaging task assembly required by the Windows App SDK build targets

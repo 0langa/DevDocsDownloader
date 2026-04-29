@@ -3,22 +3,56 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ScrollViewer>
-        <StackPanel Spacing="12" Padding="16">
-            <TextBlock Text="Settings / Help" FontSize="20" FontWeight="SemiBold" />
-            <TextBox x:Name="OutputDirBox" Header="Output directory" />
-            <ComboBox x:Name="CachePolicyBox" Header="Cache policy" SelectedIndex="0">
-                <x:String>use-if-present</x:String>
-                <x:String>ttl</x:String>
-                <x:String>always-refresh</x:String>
-                <x:String>validate-if-possible</x:String>
-            </ComboBox>
-            <TextBox x:Name="CacheTtlBox" Header="Cache TTL hours" Text="24" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Content="Load settings" Click="OnLoadSettings" />
-                <Button Content="Save settings" Click="OnSaveSettings" />
+        <Grid Padding="20" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Spacing="6">
+                <TextBlock Text="Settings / Help" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="Choose defaults once, then let the shell prefill forms, output browsing, and language catalog behavior for the next session." Opacity="0.75" TextWrapping="WrapWholeWords" />
             </StackPanel>
-            <TextBlock Text="Operator Help" FontWeight="SemiBold" />
-            <TextBox x:Name="HelpBox" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" Height="420" />
-        </StackPanel>
+
+            <Grid Grid.Row="1" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                    <StackPanel Spacing="12">
+                        <TextBox x:Name="OutputDirBox" Header="Output root" />
+                        <Button Content="Choose folder" Click="OnChooseFolder" />
+                        <ComboBox x:Name="ModeBox" Header="Default mode">
+                            <x:String>important</x:String>
+                            <x:String>full</x:String>
+                        </ComboBox>
+                        <TextBox x:Name="SourcePreferenceBox" Header="Preferred source" PlaceholderText="devdocs, mdn, dash" />
+                        <ComboBox x:Name="CachePolicyBox" Header="Cache policy">
+                            <x:String>use-if-present</x:String>
+                            <x:String>ttl</x:String>
+                            <x:String>always-refresh</x:String>
+                            <x:String>validate-if-possible</x:String>
+                        </ComboBox>
+                        <TextBox x:Name="CacheTtlBox" Header="Cache TTL hours" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Load settings" Click="OnLoadSettings" />
+                            <Button Content="Save settings" Click="OnSaveSettings" />
+                        </StackPanel>
+                        <TextBlock x:Name="StatusText" Opacity="0.75" TextWrapping="WrapWholeWords" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Operator Guide" FontSize="20" FontWeight="SemiBold" />
+                        <TextBox x:Name="HelpBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
     </ScrollViewer>
 </Page>

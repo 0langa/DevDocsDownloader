@@ -62,7 +62,25 @@ class CrawlProgressTracker:
             self._languages.setdefault(slug, LanguageProgress(slug=slug, display_name=display_name))
             self._refresh()
 
-    async def on_document_completed(self, slug: str) -> None:
+    async def on_phase_changed(
+        self,
+        slug: str,
+        *,
+        phase: str,
+        message: str = "",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        del slug, phase, message, payload
+
+    async def on_document_completed(
+        self,
+        slug: str,
+        *,
+        title: str = "",
+        topic: str = "",
+        total_documents: int | None = None,
+    ) -> None:
+        del title, topic, total_documents
         async with self._lock:
             lang = self._languages.setdefault(slug, LanguageProgress(slug=slug, display_name=slug))
             lang.documents += 1

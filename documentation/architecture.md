@@ -149,7 +149,7 @@ The optional `gui` command launches the older local NiceGUI operator interface w
 - `state/checkpoints/`
 - `tmp/`
 
-The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, tokenizer chunk settings, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. Source plugins are discovered from installed Python entry points in the `devdocsdownloader.sources` group; built-in sources are registered first. In desktop mode, `PathsConfig.from_desktop()` redirects cache, state, logs, tmp, settings, and default output roots to per-user Windows locations.
+The config surface is intentionally small. `AppConfig` controls language concurrency, generated-Markdown durability, optional document frontmatter, optional retrieval chunks, tokenizer chunk settings, and cache freshness policy. `SourceRuntime` accepts conservative environment overrides for source-profile throttling through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`. Source plugins are discovered from installed Python entry points in the `devdocsdownloader.sources` group; built-in sources are registered first. In desktop mode, `PathsConfig.from_desktop()` redirects cache, state, logs, tmp, and settings to per-user Windows locations and uses `%UserProfile%\\Documents\\DevDocsDownloader` as the default output root.
 
 ### 3. Source resolution layer
 
