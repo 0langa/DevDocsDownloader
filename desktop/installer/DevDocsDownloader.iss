@@ -2,7 +2,7 @@
   #define MyAppName "DevDocsDownloader"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.6"
+  #define MyAppVersion "1.0.7"
 #endif
 #ifndef MyAppPublisher
   #define MyAppPublisher "DevDocsDownloader"
@@ -11,7 +11,7 @@
   #define MyAppExeName "DevDocsDownloader.Desktop.exe"
 #endif
 #ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "DevDocsDownloader-Setup-1.0.6"
+  #define MyOutputBaseFilename "DevDocsDownloader-Setup-1.0.7"
 #endif
 
 [Setup]
@@ -24,12 +24,13 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist\installer
 OutputBaseFilename={#MyOutputBaseFilename}
+SetupIconFile=..\..\desktop\DevDocsDownloader.Desktop\Assets\DevDocsDownloader.ico
+UninstallDisplayIcon={app}\DevDocsDownloader.ico
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
 WizardStyle=modern
-UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -38,8 +39,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "..\publish\desktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\DevDocsDownloader.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\DevDocsDownloader.ico"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

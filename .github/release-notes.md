@@ -1,4 +1,4 @@
-# DevDocsDownloader 1.0.6
+# DevDocsDownloader 1.0.7
 
 Desktop UX and reliability release.
 
@@ -13,8 +13,8 @@ Changes since 1.0.4:
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.6.exe`
-- `DevDocsDownloader-Portable-1.0.6.zip`
+- `DevDocsDownloader-Setup-1.0.7.exe`
+- `DevDocsDownloader-Portable-1.0.7.zip`
 - `SHA256SUMS.txt`
 
 Notes:

@@ -45,7 +45,7 @@ public sealed class BackendProcessHost : IAsyncDisposable
         _client = new DesktopBackendClient(new HttpClient
         {
             BaseAddress = new Uri($"http://127.0.0.1:{Port}"),
-            Timeout = TimeSpan.FromSeconds(30),
+            Timeout = System.Threading.Timeout.InfiniteTimeSpan, // SSE streams; cancellation via CancellationToken
         }, Token);
         await WaitForHealthyAsync(cancellationToken);
         return _client;

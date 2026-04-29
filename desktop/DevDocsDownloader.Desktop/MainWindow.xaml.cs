@@ -36,13 +36,12 @@ public sealed partial class MainWindow : Window
     private readonly Button _cancelJobButton;
     private readonly Frame _contentFrame;
     private string _activePageKey = "RunPage";
+    private bool _resizeGuard;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = "DevDocsDownloader";
-        AppWindow.Resize(new SizeInt32(MinimumWindowWidth, MinimumWindowHeight));
-        SizeChanged += OnWindowSizeChanged;
         var root = new Grid();
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -204,6 +203,9 @@ public sealed partial class MainWindow : Window
         root.Children.Add(headerBorder);
         root.Children.Add(_contentFrame);
         Content = root;
+        var scale = Content.XamlRoot?.RasterizationScale ?? 1.0;
+        AppWindow.Resize(new SizeInt32((int)(MinimumWindowWidth * scale), (int)(MinimumWindowHeight * scale)));
+        SizeChanged += OnWindowSizeChanged;
         App.MainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
         ApplyShellState();
         NavigateTo("RunPage");
@@ -211,13 +213,19 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
-        var width = Math.Max((int)args.Size.Width, MinimumWindowWidth);
-        var height = Math.Max((int)args.Size.Height, MinimumWindowHeight);
-        if (width == (int)args.Size.Width && height == (int)args.Size.Height)
-        {
-            return;
-        }
-        AppWindow.Resize(new SizeInt32(width, height));
+        if (_resizeGuard) return;
+        // args.Size is in DIPs; AppWindow.Resize needs physical pixels
+        var scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
+        var minWidthPx = (int)(MinimumWindowWidth * scale);
+        var minHeightPx = (int)(MinimumWindowHeight * scale);
+        var newWidthPx = (int)(args.Size.Width * scale);
+        var newHeightPx = (int)(args.Size.Height * scale);
+        var clampedWidth = Math.Max(newWidthPx, minWidthPx);
+        var clampedHeight = Math.Max(newHeightPx, minHeightPx);
+        if (clampedWidth == newWidthPx && clampedHeight == newHeightPx) return;
+        _resizeGuard = true;
+        try { AppWindow.Resize(new SizeInt32(clampedWidth, clampedHeight)); }
+        finally { _resizeGuard = false; }
     }
 
     private void OnMainViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)

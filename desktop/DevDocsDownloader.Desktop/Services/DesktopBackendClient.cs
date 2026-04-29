@@ -91,12 +91,12 @@ public sealed class DesktopBackendClient
 
         string currentEvent = "message";
         var dataBuilder = new StringBuilder();
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        while (!cancellationToken.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(cancellationToken);
             if (line is null)
             {
-                break;
+                break; // stream ended
             }
             if (line.Length == 0)
             {

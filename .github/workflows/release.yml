@@ -52,6 +52,9 @@ jobs:
       - name: Run test and build gates
         run: python -m pytest -q
 
+      - name: Generate app icon
+        run: python scripts/generate_icon.py
+
       - name: Build frozen desktop backend
         run: python scripts/build_desktop_backend.py --clean
 
