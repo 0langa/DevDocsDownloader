@@ -27,30 +27,21 @@ def test_cli_help_exposes_scripted_contract_options() -> None:
     assert "Resolution:" in run_result.output
     assert "Resume and safety:" in run_result.output
     assert "Always writes per-document Markdown" in run_result.output
-    assert "--include-topic" in run_result.output
-    assert "--exclude-topic" in run_result.output
-    assert "--output-dir" in run_result.output
-    assert "--chunk-strategy" in run_result.output
-    assert "Maximum tokens" in run_result.output
-    assert "tokenizer extra" in run_result.output
+    assert "Use --source devdocs|mdn|dash" in run_result.output
+    assert "Optional flags can add YAML" in run_result.output
+    assert "retrieval chunks" in run_result.output
+    assert "run rust --include-topic std --chunks" in run_result.output
 
     assert bulk_result.exit_code == 0
     assert "Targets:" in bulk_result.output
     assert "Concurrency:" in bulk_result.output
-    assert "--language-conc" in bulk_result.output
-    assert "static|adaptiv" in bulk_result.output
-    assert "--adaptive-min" in bulk_result.output
-    assert "--adaptive-max" in bulk_result.output
-    assert "--include-topic" in bulk_result.output
-    assert "--exclude-topic" in bulk_result.output
-    assert "--chunk-strategy" in bulk_result.output
-    assert "Maximum tokens" in bulk_result.output
-    assert "--chunks" in run_result.output
-    assert "--cache-policy" in run_result.output
+    assert "adaptive policy lowers concurrency" in bulk_result.output
+    assert "Each language keeps its own state" in bulk_result.output
+    assert "bulk webapp --concurrency-policy adaptive" in bulk_result.output
 
     assert audit_result.exit_code == 0
-    assert "--source" in audit_result.output
-    assert "--force-refresh" in audit_result.output
+    assert "Resolve one or all presets" in audit_result.output
+    assert "suitable for CI or release checks" in audit_result.output
 
 
 def test_cli_run_wires_topic_filters(monkeypatch) -> None:

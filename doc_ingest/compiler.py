@@ -1021,7 +1021,7 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
     records: list[str] = []
     chunk_count = 0
     token_kwargs = {
-        "max_tokens": max(100, plan.chunk_max_tokens),
+        "max_tokens": max(1, plan.chunk_max_tokens),
         "overlap_tokens": max(0, plan.chunk_overlap_tokens),
     }
     max_chars = max(500, plan.chunk_max_chars)

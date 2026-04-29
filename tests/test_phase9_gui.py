@@ -229,10 +229,11 @@ def test_cli_gui_help_and_missing_extra(monkeypatch, tmp_path: Path) -> None:
     error_result = runner.invoke(cli.app, ["gui", "--host", "127.0.0.1", "--port", "8123"])
 
     assert help_result.exit_code == 0
-    assert "--host" in help_result.output
-    assert "--port" in help_result.output
-    assert "--native" in help_result.output
-    assert "--output-dir" in help_result.output
+    assert "Launch the legacy local NiceGUI operator interface" in help_result.output
+    assert "Install first:" in help_result.output
+    assert ".[gui]" in help_result.output
+    assert "WinUI 3 desktop shell with a bundled backend" in help_result.output
+    assert "default host 127.0.0.1" in help_result.output
     assert error_result.exit_code == 1
     assert "pip install -e .[gui]" in error_result.output
 
