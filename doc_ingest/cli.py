@@ -26,7 +26,6 @@ Typical workflows:
   python DevDocsDownloader.py run javascript --source mdn --mode full --chunks
   python DevDocsDownloader.py bulk webapp --language-concurrency 3
   python DevDocsDownloader.py validate python
-  python DevDocsDownloader.py gui
 
 Output defaults:
   Markdown bundles: output/markdown/<language>/
@@ -85,19 +84,6 @@ Examples:
   python DevDocsDownloader.py bulk backend --mode full --chunks
   python DevDocsDownloader.py bulk all --mode important --yes
   python DevDocsDownloader.py bulk webapp --concurrency-policy adaptive --adaptive-max-concurrency 4
-"""
-
-GUI_HELP = """
-Launch the legacy local NiceGUI operator interface.
-
-Install first:
-  python -m pip install -e ".\\[gui]"
-
-This UI remains available for migration and internal operator workflows, but the public 1.0.0 release direction is the
-WinUI 3 desktop shell with a bundled backend.
-
-This is a local operator UI, not a hosted multi-user service. Keep the default host 127.0.0.1 unless you explicitly
-intend to expose it on another interface.
 """
 
 app = typer.Typer(
@@ -751,8 +737,8 @@ def list_languages(
 @app.command(
     "refresh-catalogs",
     help=(
-        "Force-refresh all configured source catalogs and report how many language entries each source exposes. "
-        "This is useful before audits, first-time GUI use, or scheduled bulk runs."
+        "Force-refresh all configured source catalogs and report structured per-source status. "
+        "This is useful before audits, first-time desktop use, or scheduled bulk runs."
     ),
 )
 def refresh_catalogs() -> None:
@@ -761,8 +747,22 @@ def refresh_catalogs() -> None:
     async def _runner() -> None:
         service = DocumentationService(config)
         catalogs = await service.refresh_catalogs()
-        for name, count in catalogs.items():
-            console.print(f"[bold]{name}[/bold]: {count} entries")
+        table = Table(title="Catalog refresh status")
+        table.add_column("Source", style="bold cyan")
+        table.add_column("Status")
+        table.add_column("Entries", justify="right")
+        table.add_column("Fallback")
+        table.add_column("Notes")
+        for row in catalogs:
+            notes = "; ".join([*row.warnings[:1], *row.errors[:1]])
+            table.add_row(
+                row.source,
+                row.status,
+                str(row.entry_count),
+                row.fallback_reason if row.fallback_used else "",
+                notes,
+            )
+        console.print(table)
 
     asyncio.run(_runner())
 
@@ -828,32 +828,6 @@ def validate(
         include_topics=None,
         exclude_topics=None,
     )
-
-
-@app.command(help=GUI_HELP)
-def gui(
-    host: str = typer.Option(
-        "127.0.0.1",
-        "--host",
-        help="Host interface for the local GUI server. Keep 127.0.0.1 for local-only operation.",
-    ),
-    port: int = typer.Option(8080, "--port", min=1, max=65535, help="Port for the local GUI server."),
-    reload: bool = typer.Option(False, "--reload", help="Enable NiceGUI reload while developing the GUI."),
-    native: bool = typer.Option(False, "--native", help="Launch NiceGUI in native desktop-window mode when available."),
-    output_dir: Path | None = typer.Option(
-        None,
-        "--output-dir",
-        help="Alternate output root used by the GUI for output, reports, state, checkpoints, cache, logs, and tmp.",
-    ),
-) -> None:
-    config = load_config(output_dir=output_dir)
-    try:
-        from .gui.app import run_gui
-
-        run_gui(config, host=host, port=port, reload=reload, native=native)
-    except RuntimeError as exc:
-        console.print(str(exc), style="red", markup=False)
-        raise typer.Exit(code=1) from exc
 
 
 @app.command(

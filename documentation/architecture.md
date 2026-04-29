@@ -30,15 +30,6 @@ WinUI shell
 	-> same pipeline/state/report/output paths as CLI
 ```
 
-Legacy GUI flow (deprecated, removal target v1.1.0):
-
-```text
-local browser
-	-> doc_ingest.gui
-	-> DocumentationService
-	-> same pipeline/state/report/output paths as CLI
-```
-
 ## Architectural style
 
 ### Primary pattern
@@ -72,15 +63,13 @@ local browser
 - initialize config, logging, progress tracking, and service requests
 - render terminal summaries with Rich
 - provide long-form operator help for command behavior, output locations, resume/checkpoint behavior, cache policies,
-  chunking, adaptive bulk scheduling, GUI launch, and examples
+  chunking, adaptive bulk scheduling, and examples
 
 **Key behavior:**
 
 - `DevDocsDownloader.py` is a thin bootstrap that imports `app` and executes it
 - `doc_ingest/cli.py` owns all user-facing commands
 - single-language runs and bulk runs call `DocumentationService`, which owns the pipeline lifecycle
-
-The optional `gui` command launches the older local NiceGUI operator interface when the `gui` extra is installed. It is deprecated and targeted for removal in v1.1.0. The WinUI 3 shell plus bundled Python backend worker is the supported GUI direction.
 
 ### 1.0 Desktop backend host
 
@@ -107,23 +96,7 @@ The optional `gui` command launches the older local NiceGUI operator interface w
 - cooperative cancellation: `asyncio.sleep(0)` in event sink between documents allows `CancelledError` to propagate at document boundaries when `task.cancel()` is called
 - frozen and bundled into the desktop release via PyInstaller `--onedir`
 
-### 1.1 Local GUI and operator workflow layer (DEPRECATED)
-
-> **Removal target: v1.1.0.** WinUI desktop shell is the supported GUI. NiceGUI surface is kept only as a migration bridge.
-
-**Files:**
-
-- `doc_ingest/gui/app.py`
-- `doc_ingest/gui/state.py`
-
-**Key behavior:**
-
-- NiceGUI is optional through `.[gui]`
-- calls `DocumentationService` directly; does not shell out to Typer commands
-- file reads are constrained to configured output/report/cache/state roots
-- destructive checkpoint deletion is limited to `state/checkpoints/*.json`
-
-### 1.2 WinUI 3 desktop shell
+### 1.1 WinUI 3 desktop shell
 
 **Files:**
 
@@ -495,10 +468,6 @@ doc_ingest.cli
 	-> doc_ingest.sources.presets
 	-> doc_ingest.sources.registry
 
-doc_ingest.gui
-	-> doc_ingest.services
-	-> doc_ingest.gui.state
-
 doc_ingest.services
 	-> doc_ingest.pipeline
 	-> doc_ingest.sources.registry
@@ -535,7 +504,6 @@ doc_ingest.compiler
 - `pytest` — test runner in the `dev` extra
 - `ruff` — lint and format check in the `dev` extra
 - `mypy` — pragmatic type-checking gate in the `dev` extra
-- `nicegui` — optional local operator GUI in the `gui` extra
 - `tiktoken` — optional tokenizer-aware chunking in the `tokenizer` extra
 - `playwright` — optional browser package in the `browser` extra
 - `psutil` — benchmark support in the `benchmark` extra

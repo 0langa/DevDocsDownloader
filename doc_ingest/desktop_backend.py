@@ -301,8 +301,8 @@ def create_app(
         return [item.model_dump(mode="json") for item in results]
 
     @app.post("/refresh-catalogs", dependencies=[Depends(require_auth)])
-    async def refresh_catalogs() -> dict[str, int]:
-        return await service.refresh_catalogs()
+    async def refresh_catalogs() -> list[dict[str, Any]]:
+        return [item.model_dump(mode="json") for item in await service.refresh_catalogs()]
 
     @app.get("/settings", dependencies=[Depends(require_auth)])
     async def get_settings() -> dict[str, Any]:

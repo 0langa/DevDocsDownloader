@@ -1,11 +1,13 @@
 using DevDocsDownloader.Desktop.Pages;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI;
 using Windows.Graphics;
 using CommunityToolkit.Mvvm.ComponentModel;
+using WinRT.Interop;
 
 namespace DevDocsDownloader.Desktop;
 
@@ -13,6 +15,7 @@ public sealed partial class MainWindow : Window
 {
     private const int MinimumWindowWidth = 1280;
     private const int MinimumWindowHeight = 860;
+    private const uint WmGetMinMaxInfo = 0x0024;
     private readonly Dictionary<string, Type> _pages = new()
     {
         ["RunPage"] = typeof(RunPage),
@@ -35,8 +38,9 @@ public sealed partial class MainWindow : Window
     private readonly ProgressBar _progressBar;
     private readonly Button _cancelJobButton;
     private readonly Frame _contentFrame;
+    private readonly nint _windowHandle;
+    private readonly SubclassProc _subclassProc;
     private string _activePageKey = "RunPage";
-    private bool _resizeGuard;
 
     public MainWindow()
     {
@@ -136,6 +140,8 @@ public sealed partial class MainWindow : Window
             },
         });
         _cancelJobButton.Click += OnCancelJobClick;
+        _windowHandle = WindowNative.GetWindowHandle(this);
+        _subclassProc = WindowSubclassProc;
 
         foreach (var entry in new[]
         {
@@ -208,29 +214,17 @@ public sealed partial class MainWindow : Window
         {
             AppWindow.SetIcon(iconPath);
         }
-        var scale = Content.XamlRoot?.RasterizationScale ?? 1.0;
-        AppWindow.Resize(new SizeInt32((int)(MinimumWindowWidth * scale), (int)(MinimumWindowHeight * scale)));
-        SizeChanged += OnWindowSizeChanged;
+        SetWindowSubclass(_windowHandle, _subclassProc, 1, 0);
+        AppWindow.Resize(new SizeInt32(MinimumWindowWidth, MinimumWindowHeight));
+        Closed += OnClosed;
         App.MainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
         ApplyShellState();
         NavigateTo("RunPage");
     }
 
-    private void OnWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
+    private void OnClosed(object sender, WindowEventArgs args)
     {
-        if (_resizeGuard) return;
-        // args.Size is in DIPs; AppWindow.Resize needs physical pixels
-        var scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
-        var minWidthPx = (int)(MinimumWindowWidth * scale);
-        var minHeightPx = (int)(MinimumWindowHeight * scale);
-        var newWidthPx = (int)(args.Size.Width * scale);
-        var newHeightPx = (int)(args.Size.Height * scale);
-        var clampedWidth = Math.Max(newWidthPx, minWidthPx);
-        var clampedHeight = Math.Max(newHeightPx, minHeightPx);
-        if (clampedWidth == newWidthPx && clampedHeight == newHeightPx) return;
-        _resizeGuard = true;
-        try { AppWindow.Resize(new SizeInt32(clampedWidth, clampedHeight)); }
-        finally { _resizeGuard = false; }
+        RemoveWindowSubclass(_windowHandle, _subclassProc, 1);
     }
 
     private void OnMainViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
@@ -327,4 +321,50 @@ public sealed partial class MainWindow : Window
                 selected ? ColorHelper.FromArgb(255, 96, 165, 250) : ColorHelper.FromArgb(255, 55, 65, 81));
         }
     }
+
+    private nint WindowSubclassProc(nint hWnd, uint msg, nuint wParam, nint lParam, nuint uIdSubclass, nuint dwRefData)
+    {
+        if (msg == WmGetMinMaxInfo)
+        {
+            var info = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            info.ptMinTrackSize = new NativePoint(MinimumWindowWidth, MinimumWindowHeight);
+            Marshal.StructureToPtr(info, lParam, false);
+        }
+
+        return DefSubclassProc(hWnd, msg, wParam, lParam);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+
+        public NativePoint(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public NativePoint ptReserved;
+        public NativePoint ptMaxSize;
+        public NativePoint ptMaxPosition;
+        public NativePoint ptMinTrackSize;
+        public NativePoint ptMaxTrackSize;
+    }
+
+    private delegate nint SubclassProc(nint hWnd, uint msg, nuint wParam, nint lParam, nuint uIdSubclass, nuint dwRefData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern bool SetWindowSubclass(nint hWnd, SubclassProc pfnSubclass, nuint uIdSubclass, nuint dwRefData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern bool RemoveWindowSubclass(nint hWnd, SubclassProc pfnSubclass, nuint uIdSubclass);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern nint DefSubclassProc(nint hWnd, uint msg, nuint wParam, nint lParam);
 }

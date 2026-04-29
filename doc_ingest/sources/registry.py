@@ -63,9 +63,18 @@ class SourceRegistry:
                 return source
         return None
 
-    async def catalog(self, *, force_refresh: bool = False) -> dict[str, list[LanguageCatalog]]:
+    async def catalog(
+        self,
+        *,
+        force_refresh: bool = False,
+        source_name: str | None = None,
+    ) -> dict[str, list[LanguageCatalog]]:
         result: dict[str, list[LanguageCatalog]] = {}
-        for source in self.sources:
+        sources = self.sources
+        if source_name is not None:
+            source = self.get(source_name)
+            sources = [source] if source is not None else []
+        for source in sources:
             try:
                 result[source.name] = await source.list_languages(force_refresh=force_refresh)
             except Exception as exc:
@@ -81,7 +90,7 @@ class SourceRegistry:
         force_refresh: bool = False,
     ) -> tuple[DocumentationSource, LanguageCatalog] | None:
         needle = language.strip().lower()
-        catalogs = await self.catalog(force_refresh=force_refresh)
+        catalogs = await self.catalog(force_refresh=force_refresh, source_name=source_name)
 
         if source_name:
             entries = catalogs.get(source_name, [])

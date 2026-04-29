@@ -114,6 +114,21 @@ class CatalogAuditResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class CatalogRefreshResult(BaseModel):
+    source: str
+    status: Literal["refreshed", "fallback", "failed"]
+    entry_count: int = 0
+    supported_entries: int = 0
+    experimental_entries: int = 0
+    ignored_entries: int = 0
+    discovery_strategy: str = ""
+    fetched_at: str = ""
+    fallback_used: bool = False
+    fallback_reason: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class RuntimeSnapshot(BaseModel):
     states: list[Path] = Field(default_factory=list)
     checkpoints: list[Path] = Field(default_factory=list)
@@ -276,7 +291,7 @@ class DocumentationService:
     async def list_languages(self, *, source: str | None = None, force_refresh: bool = False) -> list[LanguageEntry]:
         registry = self._registry()
         try:
-            catalogs = await registry.catalog(force_refresh=force_refresh)
+            catalogs = await registry.catalog(force_refresh=force_refresh, source_name=source)
         finally:
             await registry.runtime.close()
         rows: list[LanguageEntry] = []
@@ -294,13 +309,22 @@ class DocumentationService:
                 )
         return sorted(rows, key=lambda item: (item.language.lower(), item.source))
 
-    async def refresh_catalogs(self) -> dict[str, int]:
+    async def refresh_catalogs(self) -> list[CatalogRefreshResult]:
         registry = self._registry()
+        results: list[CatalogRefreshResult] = []
         try:
-            catalogs = await registry.catalog(force_refresh=True)
+            for source in registry.sources:
+                errors: list[str] = []
+                entry_count = 0
+                try:
+                    entries = await source.list_languages(force_refresh=True)
+                    entry_count = len(entries)
+                except Exception as exc:
+                    errors.append(f"{type(exc).__name__}: {exc}")
+                results.append(self._catalog_refresh_result(source=source.name, entry_count=entry_count, errors=errors))
         finally:
             await registry.runtime.close()
-        return {source: len(entries) for source, entries in catalogs.items()}
+        return results
 
     def audit_source_catalogs(self) -> list[CatalogAuditResult]:
         results: list[CatalogAuditResult] = []
@@ -578,6 +602,39 @@ class DocumentationService:
             return LanguageRunCheckpoint.model_validate(read_json(path, {}))
         except Exception:
             return None
+
+    def _catalog_refresh_result(
+        self,
+        *,
+        source: str,
+        entry_count: int,
+        errors: list[str] | None = None,
+    ) -> CatalogRefreshResult:
+        manifest_path = self.config.paths.cache_dir / "catalogs" / f"{source}.json"
+        payload = read_json(manifest_path, {}) if manifest_path.exists() else {}
+        entries = payload.get("entries") if isinstance(payload, dict) else []
+        if not isinstance(entries, list):
+            entries = []
+        support_levels = [str(entry.get("support_level") or "supported") for entry in entries if isinstance(entry, dict)]
+        combined_errors = [*([str(item) for item in payload.get("errors") or []] if isinstance(payload, dict) else []), *(errors or [])]
+        fallback_used = bool(payload.get("fallback_used", False)) if isinstance(payload, dict) else False
+        status: Literal["refreshed", "fallback", "failed"] = "failed" if combined_errors and entry_count == 0 else "refreshed"
+        if fallback_used and status != "failed":
+            status = "fallback"
+        return CatalogRefreshResult(
+            source=source,
+            status=status,
+            entry_count=entry_count,
+            supported_entries=sum(1 for level in support_levels if level == "supported"),
+            experimental_entries=sum(1 for level in support_levels if level == "experimental"),
+            ignored_entries=sum(1 for level in support_levels if level == "ignored"),
+            discovery_strategy=str(payload.get("discovery_strategy") or "") if isinstance(payload, dict) else "",
+            fetched_at=str(payload.get("fetched_at") or "") if isinstance(payload, dict) else "",
+            fallback_used=fallback_used,
+            fallback_reason=str(payload.get("fallback_reason") or "") if isinstance(payload, dict) else "",
+            warnings=[str(item) for item in payload.get("warnings") or []] if isinstance(payload, dict) else [],
+            errors=combined_errors,
+        )
 
     def _tree_node(self, path: Path, *, root: Path) -> OutputTreeNode:
         root_resolved = root.resolve()

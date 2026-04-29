@@ -18,6 +18,7 @@
         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10">
             <Button Content="Refresh bundles" Click="OnRefreshBundles" />
             <Button x:Name="RefreshTreeButton" Content="Reload selected bundle" Click="OnReloadTree" IsEnabled="False" />
+            <Button Content="Open output folder" Click="OnOpenOutputFolder" />
             <TextBlock x:Name="StatusText" VerticalAlignment="Center" Opacity="0.75" />
         </StackPanel>
 

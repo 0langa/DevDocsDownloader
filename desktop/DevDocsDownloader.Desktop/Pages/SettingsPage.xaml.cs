@@ -14,7 +14,7 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         HelpBox.Text = """
-            DevDocsDownloader 1.0.6 desktop shell
+            DevDocsDownloader 1.1.0 desktop shell
 
             What this app does
             - Download official documentation from DevDocs, MDN, and Dash-backed catalogs.
@@ -29,7 +29,7 @@ public sealed partial class SettingsPage : Page
 
             Expected behavior
             - Tabs keep their state when you move around the shell.
-            - Only one backend job runs at a time in the 1.0.x desktop line.
+            - Only one backend job runs at a time in the 1.1.x desktop line.
             - If startup fails, the sidebar shows the backend failure and the desktop log path.
             - Checkpoints are safe resume boundaries, not final output.
 
@@ -80,6 +80,7 @@ public sealed partial class SettingsPage : Page
     {
         try
         {
+            var previousOutputRoot = App.MainViewModel.CurrentOutputRoot;
             await App.MainViewModel.SaveSettingsAsync(new JsonObject
             {
                 ["output_dir"] = string.IsNullOrWhiteSpace(OutputDirBox.Text) ? null : OutputDirBox.Text,
@@ -97,7 +98,11 @@ public sealed partial class SettingsPage : Page
                 ["emit_document_frontmatter"] = App.MainViewModel.EmitDocumentFrontmatter,
                 ["emit_chunks"] = App.MainViewModel.EmitChunks,
             });
-            StatusText.Text = $"Saved settings. Output root: {App.MainViewModel.CurrentOutputRoot}";
+            App.MainWindow.GetCachedPage<OutputBrowserPage>()?.UpdateOutputRoot();
+            var outputChanged = !string.Equals(previousOutputRoot, App.MainViewModel.CurrentOutputRoot, StringComparison.OrdinalIgnoreCase);
+            StatusText.Text = outputChanged
+                ? $"Settings saved. Applies to next run. Output root changed to {App.MainViewModel.CurrentOutputRoot}. Existing output was not moved."
+                : $"Settings saved. Applies to next run. Output root: {App.MainViewModel.CurrentOutputRoot}";
         }
         catch (Exception exc)
         {

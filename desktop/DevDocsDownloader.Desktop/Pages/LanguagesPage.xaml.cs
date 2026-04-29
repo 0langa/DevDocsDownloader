@@ -103,9 +103,10 @@ public sealed partial class LanguagesPage : Page
         try
         {
             SummaryText.Text = "Loading source catalogs...";
+            string refreshSummary = "";
             if (forceRefresh)
             {
-                await App.BackendHost.Client.RefreshCatalogsAsync();
+                refreshSummary = SummarizeRefreshResult(await App.BackendHost.Client.RefreshCatalogsAsync());
             }
             var presetNode = await App.BackendHost.Client.GetPresetsAsync();
             _presetMap = ParsePresets(presetNode as JsonObject);
@@ -134,6 +135,10 @@ public sealed partial class LanguagesPage : Page
 
             LoadSourceFilter();
             RebuildTree();
+            if (!string.IsNullOrWhiteSpace(refreshSummary))
+            {
+                SummaryText.Text = refreshSummary;
+            }
         }
         catch (Exception exc)
         {
@@ -279,5 +284,45 @@ public sealed partial class LanguagesPage : Page
                 .ToList();
         }
         return result;
+    }
+
+    private static string SummarizeRefreshResult(JsonNode? payload)
+    {
+        if (payload is not JsonArray rows || rows.Count == 0)
+        {
+            return "Catalog refresh completed.";
+        }
+
+        var refreshed = 0;
+        var fallbacks = new List<string>();
+        var failures = new List<string>();
+        foreach (var row in rows.OfType<JsonObject>())
+        {
+            var source = row["source"]?.GetValue<string>() ?? "unknown";
+            var status = row["status"]?.GetValue<string>() ?? "";
+            if (status == "failed")
+            {
+                failures.Add(source);
+            }
+            else if (status == "fallback")
+            {
+                fallbacks.Add(source);
+            }
+            else
+            {
+                refreshed += 1;
+            }
+        }
+
+        var parts = new List<string> { $"Catalog refresh: {refreshed} refreshed" };
+        if (fallbacks.Count > 0)
+        {
+            parts.Add($"fallback: {string.Join(", ", fallbacks)}");
+        }
+        if (failures.Count > 0)
+        {
+            parts.Add($"failed: {string.Join(", ", failures)}");
+        }
+        return string.Join(" | ", parts);
     }
 }

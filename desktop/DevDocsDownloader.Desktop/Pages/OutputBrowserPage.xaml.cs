@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
@@ -13,6 +14,7 @@ public sealed partial class OutputBrowserPage : Page
         public required string LanguageSlug { get; init; }
         public required string Language { get; init; }
         public required string Source { get; init; }
+        public required string Path { get; init; }
         public int TotalDocuments { get; init; }
 
         public override string ToString() => $"{Language} ({Source}, {TotalDocuments} docs)";
@@ -54,6 +56,11 @@ public sealed partial class OutputBrowserPage : Page
         await RefreshBundlesAsync(languageSlug);
     }
 
+    public void UpdateOutputRoot()
+    {
+        OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
+    }
+
     private async void OnRefreshBundles(object sender, RoutedEventArgs e)
     {
         await RefreshBundlesAsync();
@@ -66,6 +73,29 @@ public sealed partial class OutputBrowserPage : Page
             return;
         }
         await LoadTreeAsync(_selectedBundle);
+    }
+
+    private void OnOpenOutputFolder(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var target = _selectedBundle?.Path;
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                target = App.MainViewModel.CurrentOutputRoot;
+            }
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                StatusText.Text = "No output folder configured.";
+                return;
+            }
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = true });
+            StatusText.Text = $"Opened {target}";
+        }
+        catch (Exception exc)
+        {
+            StatusText.Text = exc.Message;
+        }
     }
 
     private async void OnBundleSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -116,6 +146,7 @@ public sealed partial class OutputBrowserPage : Page
                     LanguageSlug = row["language_slug"]?.GetValue<string>() ?? "",
                     Language = row["language"]?.GetValue<string>() ?? (row["language_slug"]?.GetValue<string>() ?? ""),
                     Source = row["source"]?.GetValue<string>() ?? "",
+                    Path = row["path"]?.GetValue<string>() ?? "",
                     TotalDocuments = row["total_documents"]?.GetValue<int?>() ?? 0,
                 });
             }

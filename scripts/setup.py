@@ -11,11 +11,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 VENV_DIR = REPO_ROOT / ".venv"
 DEFAULT_PROFILE = "full"
-KNOWN_EXTRAS = {"dev", "analysis", "browser", "benchmark", "gui", "tokenizer"}
+KNOWN_EXTRAS = {"dev", "analysis", "browser", "benchmark", "tokenizer"}
 PROFILE_EXTRAS = {
     "minimal": [],
-    "full": ["gui", "browser", "benchmark", "tokenizer"],
-    "dev": ["gui", "browser", "benchmark", "tokenizer", "dev"],
+    "full": ["browser", "benchmark", "tokenizer"],
+    "dev": ["browser", "benchmark", "tokenizer", "dev"],
 }
 
 
@@ -101,8 +101,6 @@ def print_next_steps(python_path: Path, extras: list[str], *, profile: str, play
     print("[setup] Common commands:")
     print(f"  {python_path} DevDocsDownloader.py --help")
     print(f"  {python_path} DevDocsDownloader.py run python")
-    if "gui" in extras:
-        print(f"  {python_path} DevDocsDownloader.py gui")
     print(f"  {python_path} DevDocsDownloader.py validate python")
     print(f"  {python_path} DevDocsDownloader.py audit-presets")
     print(f"  {python_path} -m pytest -q")
@@ -117,14 +115,13 @@ def print_next_steps(python_path: Path, extras: list[str], *, profile: str, play
     print("[setup] Full runtime note:")
     print("  Browser fallback requires the browser extra plus Playwright Chromium.")
     print("  Token-based chunking requires the tokenizer extra.")
-    print("  GUI operation requires the gui extra.")
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Bootstrap DevDocsDownloader into a ready-to-run local environment. By default this installs the full "
-            "runtime capability set: GUI, Playwright browser package, Chromium browser runtime, tokenizer chunking, "
+            "runtime capability set: Playwright browser package, Chromium browser runtime, tokenizer chunking, "
             "and adaptive benchmark support."
         )
     )

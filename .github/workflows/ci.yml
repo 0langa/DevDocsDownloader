@@ -53,7 +53,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .[dev,tokenizer,browser,benchmark]
+          python -m pip install -e .[dev,tokenizer,benchmark]
 
       - name: Check version consistency
         run: python scripts/check_version.py
@@ -76,9 +76,6 @@ jobs:
       - name: Python compile check
         shell: pwsh
         run: Get-ChildItem doc_ingest,tests,scripts -Recurse -Filter *.py | ForEach-Object { python -m py_compile $_.FullName }
-
-      - name: Desktop backend smoke
-        run: python -m pytest tests/test_desktop_backend.py -q
 
       - name: Build WinUI desktop shell
         shell: pwsh

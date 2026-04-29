@@ -9,7 +9,13 @@ from doc_ingest.config import load_config
 from doc_ingest.desktop_backend import create_app
 from doc_ingest.desktop_settings import DesktopSettings, DesktopSettingsStore
 from doc_ingest.models import RunSummary
-from doc_ingest.services import DocumentationService, LanguageEntry, RunLanguageRequest, ServiceEvent
+from doc_ingest.services import (
+    CatalogRefreshResult,
+    DocumentationService,
+    LanguageEntry,
+    RunLanguageRequest,
+    ServiceEvent,
+)
 
 
 def test_load_config_desktop_mode_uses_per_user_style_paths(tmp_path: Path, monkeypatch) -> None:
@@ -177,6 +183,37 @@ def test_desktop_backend_languages_and_settings_endpoints(tmp_path: Path, monkey
             assert fetched.status_code == 200
             assert fetched.json()["cache_policy"] == "ttl"
             assert fetched.json()["language_tree_mode"] == "category"
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_refresh_catalogs_returns_structured_status(tmp_path: Path, monkeypatch) -> None:
+    async def fake_refresh_catalogs(self):
+        return [
+            CatalogRefreshResult(source="devdocs", status="refreshed", entry_count=10),
+            CatalogRefreshResult(
+                source="mdn",
+                status="fallback",
+                entry_count=6,
+                fallback_used=True,
+                fallback_reason="cached manifest",
+            ),
+        ]
+
+    monkeypatch.setattr(DocumentationService, "refresh_catalogs", fake_refresh_catalogs)
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret")
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post("/refresh-catalogs", headers=headers)
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload[0]["source"] == "devdocs"
+            assert payload[0]["status"] == "refreshed"
+            assert payload[1]["status"] == "fallback"
+            assert payload[1]["fallback_reason"] == "cached manifest"
 
     asyncio.run(scenario())
 

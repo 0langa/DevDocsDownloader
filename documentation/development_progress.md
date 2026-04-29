@@ -21,7 +21,6 @@ Post-v1.0.8 fixes on main (not yet tagged):
 - Typer app defined in `doc_ingest/cli.py` with full operator help text
 - Interactive wizard path exists
 - Single-language, bulk, validation-only, catalog listing/refresh, preset audit, and init commands all implemented
-- Optional `gui` command launches the retained legacy NiceGUI operator interface (targeted for removal in v1.1.0)
 - Desktop backend host uses desktop-safe runtime paths and settings
 
 ### Source registry and resolution
@@ -95,7 +94,7 @@ Post-v1.0.8 fixes on main (not yet tagged):
 
 ### Tests
 
-- Contract, integration, CLI, resilience, architecture, GUI-legacy, desktop-backend, pipeline, setup-script, version, source-discovery, live-endpoint (opt-in), and live-extraction-sanity (opt-in) test files
+- Contract, integration, CLI, resilience, architecture, desktop-backend, pipeline, service-artifact, setup-script, version, source-discovery, live-endpoint (opt-in), and live-extraction-sanity (opt-in) test files
 - `test_desktop_backend.py` covers job queue transitions, SSE, history, cancel, auth
 
 ## Partially implemented or shallow areas
@@ -117,10 +116,6 @@ Does **not** verify:
 
 Cooperative cancel improved: `asyncio.sleep(0)` between events allows `CancelledError` to propagate at document boundaries. Cancel is now meaningfully faster for document-heavy runs. Full sub-document granularity (interrupting in-flight httpx requests mid-download) is not yet implemented.
 
-### Legacy NiceGUI GUI
-
-Available via `python DevDocsDownloader.py gui` when `.[gui]` is installed. Calls `DocumentationService` directly. Targeted for removal in v1.1.0 — WinUI shell is the supported GUI direction.
-
 ## Known bugs, mismatches, and fragile areas
 
 See `documentation/roadmap.md` for the full prioritized list. Summary of remaining open issues:
@@ -134,7 +129,6 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 - Catalog refresh failure shows false success (Medium)
 - Unsigned binary — Windows SmartScreen warning (Medium)
 - PRI file copy in CI is fragile grep (Medium)
-- Legacy NiceGUI still present (Medium)
 - No auto-update (Low)
 - No open-folder button in Output Browser (Low)
 
@@ -155,7 +149,6 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 | Progress UI | Working | CLI presentation only |
 | Desktop backend | Working | Jobs, SSE reconnect, history persistence, health endpoint |
 | WinUI shell | Working | All pages, persistent state, health monitor, error dialogs |
-| Legacy NiceGUI GUI | Deprecated | Removal target: v1.1.0 |
 | Tests | Working | Broad coverage; live probes opt-in |
 | Benchmarks | Working | Targets active CLI |
 | Support scripts | Aligned | build_desktop_backend, check_version, generate_icon, minimal_smoke all current |
@@ -171,11 +164,10 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 
 ### Medium priority (v1.1.0)
 
-1. Remove legacy NiceGUI — delete `doc_ingest/gui/`, remove `gui` CLI subcommand, audit test coverage
-2. Open-folder button in Output Browser
-3. Job queue UI (show pending state instead of 409 error)
-4. Output storage cleanup UI (per-language size + delete)
-5. Settings feedback on apply
+1. Open-folder button in Output Browser
+2. Job queue UI (show pending state instead of 409 error)
+3. Output storage cleanup UI (per-language size + delete)
+4. Settings feedback on apply
 
 ### Lower priority (v1.2.0+)
 

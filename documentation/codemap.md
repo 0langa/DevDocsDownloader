@@ -76,10 +76,6 @@ DevDocsDownloader/
 │   │   └── urls.py                    # URL rewriting helpers
 │   ├── validator.py                   # structural + quality validation, per-document records
 │   └── version.py                     # app_version() reads version.json
-│   └── gui/                           # DEPRECATED — legacy NiceGUI operator surface (removal: v1.1.0)
-│       ├── __init__.py
-│       ├── app.py
-│       └── state.py
 ├── documentation/
 │   ├── architecture.md                # subsystem and pipeline design reference
 │   ├── codemap.md                     # this file — repository navigation guide
@@ -117,7 +113,7 @@ DevDocsDownloader/
     ├── test_phase6_conversion_quality.py
     ├── test_phase7_output_consumption.py
     ├── test_phase8_validation_observability.py
-    ├── test_phase9_gui.py
+    ├── test_service_artifacts.py
     ├── test_pipeline_integration.py
     ├── test_setup_script.py
     ├── test_source_resilience.py

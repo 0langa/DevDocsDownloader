@@ -40,9 +40,8 @@ The Typer application in `doc_ingest/cli.py` exposes:
 - `audit-catalogs`
 - `validate`
 - `init`
-- `gui`
 
-The CLI now acts as a presentation adapter over `doc_ingest.services.DocumentationService` for run, bulk, list, audit, refresh, validation-only, and inspection-friendly workflows. The service returns typed models, owns pipeline lifecycle cleanup, and accepts an optional event sink for GUI-ready phase, document, warning, validation, telemetry, and failure events.
+The CLI now acts as a presentation adapter over `doc_ingest.services.DocumentationService` for run, bulk, list, audit, refresh, validation-only, and inspection-friendly workflows. The service returns typed models, owns pipeline lifecycle cleanup, and accepts an optional event sink for desktop-ready phase, document, warning, validation, telemetry, and failure events.
 
 The root help page and each command help page are written as an operator reference. They document source resolution,
 modes, cache freshness policies, resume/checkpoint semantics, optional frontmatter and chunk outputs, adaptive bulk
@@ -51,7 +50,7 @@ separate manual for basic operation.
 
 For actual ingestion work, the CLI routes into `_execute_run()` for single-language execution and into a custom async runner inside `bulk()` for multi-language execution.
 
-### 2.1.1 Desktop backend and local GUI operator interfaces
+### 2.1.1 Desktop backend operator interface
 
 The `1.0.0` desktop release direction is a WinUI 3 shell with a bundled loopback backend host in `doc_ingest/desktop_backend.py`.
 That backend exposes `DocumentationService` over local HTTP with bearer-token auth, structured job status, and SSE
@@ -59,24 +58,7 @@ event streaming for the desktop shell. The shell now keeps tab state across navi
 across Run/Bulk and sidebar surfaces, and uses structured tree/list views for languages, output, reports, checkpoints,
 and cache metadata instead of raw JSON panes.
 
-`python DevDocsDownloader.py gui` launches the legacy NiceGUI dashboard when the `gui` extra is installed. The `1.0.0`
-desktop release direction is therefore no longer the NiceGUI surface, which remains in the repo as a migration and
-internal operator tool.
-
-The GUI is local/operator-focused and calls `DocumentationService` in-process. It does not shell out to Typer commands for core workflows. Its first screen is an operational dashboard with:
-
-- single-language, validation-only, preset, bulk, and all-language run controls
-- source, mode, topic filter, cache policy, TTL, force-refresh, frontmatter, chunk, and concurrency options
-- job queue and service event log
-- language listing, preset audit, and catalog refresh controls
-- output bundle browser and Markdown preview
-- report, validation JSONL, history, and trends views
-- checkpoint listing and safe deletion
-- source cache metadata inspection
-- a Settings/Help tutorial that explains the end-to-end workflow, expected failure behavior, cache/resume semantics,
-  report interpretation, output browsing, and CLI equivalents
-
-All GUI file reads are routed through service methods that resolve paths under configured output, report, cache, or checkpoint roots before reading or deleting. The desktop backend exposes equivalent safe readers over loopback HTTP for the WinUI shell.
+All desktop file reads are routed through service methods that resolve paths under configured output, report, cache, or checkpoint roots before reading or deleting. The desktop backend exposes equivalent safe readers over loopback HTTP for the WinUI shell.
 
 ### 2.2 Configuration and path setup
 
@@ -726,13 +708,12 @@ The benchmark and state-manifest scripts have been updated for the active runtim
 - `lxml`
 - `PyYAML`
 - optional `orjson`
-- optional `nicegui` through the `gui` extra
 - optional `tiktoken` through the `tokenizer` extra
 
-Developer tooling lives in the `dev` extra. Support-script, browser, GUI, tokenizer, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
+Developer tooling lives in the `dev` extra. Support-script, browser, tokenizer, and benchmark dependencies live in explicit optional extras. `requirements.txt` and `source-documents/requirements.txt` are compatibility shims only.
 
 `scripts/setup.py` is the recommended bootstrap path for users and operators. It now defaults to a full runtime setup:
-GUI support, Playwright browser package, Playwright Chromium installation, tokenizer chunking, benchmark telemetry
+Playwright browser package, Playwright Chromium installation, tokenizer chunking, benchmark telemetry
 support, a local `.venv`, and the current runtime directory tree. The `dev` profile adds test/lint/type tools on top
 of that runtime baseline, while `minimal` keeps only the base runtime.
 

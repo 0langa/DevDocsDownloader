@@ -73,7 +73,6 @@ The stable generated-output contract is documented in `documentation/output_cont
 - `validate`
 - `init`
 - desktop backend worker for the WinUI 3 shell
-- `gui` (legacy NiceGUI operator UI kept for migration/internal use)
 
 ## High-level architecture
 
@@ -116,7 +115,7 @@ python scripts/setup.py
 This is the primary installation path. By default it:
 
 - creates `.venv`
-- installs the editable package with full runtime capability extras: `gui`, `browser`, `benchmark`, and `tokenizer`
+- installs the editable package with full runtime capability extras: `browser`, `benchmark`, and `tokenizer`
 - installs Playwright Chromium so browser-backed functionality is actually available
 - creates the runtime directories under `output/`, `cache/`, `logs/`, `state/`, and `tmp/`
 
@@ -157,7 +156,6 @@ Optional extras:
 - `analysis` — support for archived crawler path-analysis utilities
 - `browser` — Playwright package
 - `benchmark` — benchmark helper dependencies
-- `gui` — legacy NiceGUI operator interface retained for migration/internal use
 - `tokenizer` — optional tiktoken-backed retrieval chunking
 
 ### Optional helper setup
@@ -210,7 +208,6 @@ The CLI is the primary automation interface. It supports one-language runs, pres
 python DevDocsDownloader.py --help
 python DevDocsDownloader.py run --help
 python DevDocsDownloader.py bulk --help
-python DevDocsDownloader.py gui --help
 python DevDocsDownloader.py init
 ```
 
@@ -281,35 +278,6 @@ python DevDocsDownloader.py audit-presets webapp
 ```bash
 python DevDocsDownloader.py
 ```
-
-## Legacy NiceGUI Guide
-
-> **Deprecation notice:** The NiceGUI surface is targeted for removal in v1.1.0. The WinUI desktop app is the supported GUI. Use this only if you need the legacy operator surface for migration purposes.
-
-The older local NiceGUI surface remains in the repo as a migration and internal operator tool.
-
-### Install and launch
-
-```bash
-python -m pip install -e .[gui]
-python DevDocsDownloader.py gui
-python DevDocsDownloader.py gui --host 127.0.0.1 --port 8080
-python DevDocsDownloader.py gui --output-dir output
-```
-
-The GUI is a local operator interface. It calls `DocumentationService` in-process and does not shell out to CLI commands for core operations. Do not expose it as a public multi-user web service.
-
-### GUI workflows
-
-- **Run:** configure a single language, source, mode, topic filters, cache policy, frontmatter, chunks, and validation-only runs.
-- **Bulk:** run presets or all languages with static or adaptive concurrency.
-- **Languages:** list available source catalog entries.
-- **Presets/Audit:** inspect preset coverage and unresolved languages.
-- **Reports:** inspect latest reports, validation records, history, and trends.
-- **Output Browser:** browse generated language bundles, per-document Markdown, consolidated manuals, chunks, manifests, and metadata.
-- **Checkpoints:** inspect failed/active checkpoints and safely delete selected checkpoint files.
-- **Cache:** inspect cache metadata sidecars and refresh catalogs.
-- **Settings/Help:** read the built-in operator tutorial covering the full workflow, expected behavior, failure modes, cache/resume semantics, report interpretation, and CLI equivalents.
 
 ## WinUI Desktop UX
 
@@ -459,7 +427,7 @@ When adapters emit `AssetEvent` records with bytes or safe local files, the comp
 
 ### Desktop and service boundary
 
-`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, validation-only, runtime inspection, output bundle browsing, report reading, checkpoint inspection/deletion, and cache metadata workflows. The new desktop backend host in `doc_ingest.desktop_backend` exposes these workflows over a local loopback HTTP API for the WinUI shell, while the older NiceGUI surface remains a migration-only interface.
+`doc_ingest.services.DocumentationService` exposes typed request and response models for run, bulk run, list, audit, refresh, validation-only, runtime inspection, output bundle browsing, report reading, checkpoint inspection/deletion, and cache metadata workflows. The desktop backend host in `doc_ingest.desktop_backend` exposes these workflows over a local loopback HTTP API for the WinUI shell.
 
 The service layer also accepts an optional event sink for phase, document, warning, validation, runtime telemetry, and failure events. The desktop backend uses that signal path for SSE job streams. Existing CLI rendering continues to use Rich progress.
 
@@ -472,7 +440,6 @@ The service layer also accepts an optional event sink for phase, document, warni
 ```text
 DevDocsDownloader.py         # top-level entry point
 doc_ingest/                 # active package
-doc_ingest/gui/             # optional NiceGUI operator interface
 desktop/                    # WinUI 3 desktop shell and installer assets
 documentation/              # project documentation files
 scripts/                    # helper and historical support scripts
@@ -534,7 +501,7 @@ The current tests focus on:
 - docset/tarball failure handling
 - source-specific HTML cleanup, MDN YAML frontmatter parsing, link rewriting, and conversion-quality validation
 - collision-safe consolidated anchors, optional document frontmatter, optional chunk exports, cache freshness policy, and service-layer wiring
-- GUI-safe service artifact readers, checkpoint/cache inspection, job queue transitions, CLI GUI launcher wiring, and optional NiceGUI app-factory smoke coverage
+- Service artifact readers, checkpoint/cache inspection, desktop-backend job queue transitions, and path-safety coverage
 - source plugin registration, exact cross-document link rewriting, asset inventory, and optional tokenizer chunking
 - adaptive bulk scheduling, deterministic source suggestions, and opt-in live extraction sanity hooks
 - dynamic DevDocs/MDN/Dash catalog discovery manifests, alias-aware resolution, cached-manifest fallback, and fragment-reference preservation
@@ -543,10 +510,9 @@ The current tests focus on:
 
 See `documentation/roadmap.md` for the full prioritized list. Near-term:
 
-1. Remove the legacy NiceGUI surface (v1.1.0)
-2. Open-folder button, job queue UI, output storage cleanup UI (v1.1.0)
-3. Language normalization hardening, improved validation scoring, Dash acceptance tests (v1.2.0)
-4. Code signing, auto-update notification (long-term)
+1. Open-folder button, job queue UI, output storage cleanup UI
+2. Language normalization hardening, improved validation scoring, Dash acceptance tests
+3. Code signing, auto-update notification
 
 ## Release readiness
 
@@ -559,5 +525,5 @@ Use `documentation/release_checklist.md` for the required Python checks, desktop
 - `documentation/development_progress.md` — implementation status and known gaps
 - `documentation/full-project-documentation.md` — detailed technical reference
 - `documentation/output_contract.md` — generated output, state, checkpoint, and report contract
-- `documentation/release_checklist.md` — v1.0.0 desktop release validation checklist
+- `documentation/release_checklist.md` — desktop release validation checklist
 - `documentation/roadmap.md` — known bugs, limitations, and prioritized roadmap

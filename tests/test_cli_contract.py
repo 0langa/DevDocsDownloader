@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 import doc_ingest.cli as cli
 from doc_ingest.config import load_config
 from doc_ingest.models import RunSummary
+from doc_ingest.services import CatalogRefreshResult
 from doc_ingest.utils.filesystem import write_json, write_text
 
 runner = CliRunner()
@@ -209,3 +210,38 @@ def test_cli_audit_presets_exit_codes(monkeypatch, tmp_path: Path) -> None:
     assert "Resolved:" in ok.output
     assert missing.exit_code == 1
     assert "Unknown preset" in missing.output
+
+
+def test_cli_refresh_catalogs_prints_structured_status(monkeypatch, tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+
+    def fake_load_config(*_args, **_kwargs):
+        return config
+
+    class FakeService:
+        def __init__(self, config):
+            self.config = config
+
+        async def refresh_catalogs(self):
+            return [
+                CatalogRefreshResult(source="devdocs", status="refreshed", entry_count=10),
+                CatalogRefreshResult(
+                    source="mdn",
+                    status="fallback",
+                    entry_count=6,
+                    fallback_used=True,
+                    fallback_reason="cached manifest",
+                    warnings=["used fallback"],
+                ),
+            ]
+
+    monkeypatch.setattr(cli, "load_config", fake_load_config)
+    monkeypatch.setattr(cli, "DocumentationService", FakeService)
+
+    result = runner.invoke(cli.app, ["refresh-catalogs"])
+
+    assert result.exit_code == 0
+    assert "Catalog refresh status" in result.output
+    assert "devdocs" in result.output
+    assert "refreshed" in result.output
+    assert "cached manifest" in result.output

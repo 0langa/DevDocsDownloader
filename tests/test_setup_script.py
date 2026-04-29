@@ -21,16 +21,16 @@ def test_setup_profile_defaults_cover_full_runtime() -> None:
     setup_script = _load_setup_module()
 
     assert setup_script.DEFAULT_PROFILE == "full"
-    assert setup_script.extras_for_profile("full") == ["gui", "browser", "benchmark", "tokenizer"]
-    assert setup_script.extras_for_profile("dev") == ["gui", "browser", "benchmark", "tokenizer", "dev"]
+    assert setup_script.extras_for_profile("full") == ["browser", "benchmark", "tokenizer"]
+    assert setup_script.extras_for_profile("dev") == ["browser", "benchmark", "tokenizer", "dev"]
 
 
 def test_setup_merge_extras_preserves_order_and_deduplicates() -> None:
     setup_script = _load_setup_module()
 
-    merged = setup_script.merge_extras(["gui", "browser"], ["browser", "tokenizer"], ["dev"])
+    merged = setup_script.merge_extras(["browser", "benchmark"], ["browser", "tokenizer"], ["dev"])
 
-    assert merged == ["gui", "browser", "tokenizer", "dev"]
+    assert merged == ["browser", "benchmark", "tokenizer", "dev"]
 
 
 def test_setup_main_installs_full_profile_and_browser_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,12 +60,12 @@ def test_setup_main_installs_full_profile_and_browser_by_default(monkeypatch: py
     setup_script.main([])
 
     assert ("dirs", []) in calls
-    assert ("install", ["gui", "browser", "benchmark", "tokenizer"]) in calls
+    assert ("install", ["browser", "benchmark", "tokenizer"]) in calls
     assert any(name == "browser" and payload[0].endswith("python") for name, payload in calls)
     assert any(
         name == "summary"
         and payload[0].endswith("python")
-        and payload[1:] == ["full", "gui,browser,benchmark,tokenizer", "True"]
+        and payload[1:] == ["full", "browser,benchmark,tokenizer", "True"]
         for name, payload in calls
     )
 
