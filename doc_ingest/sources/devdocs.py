@@ -225,7 +225,9 @@ class DevDocsSource:
                     diagnostics.skip("missing_content")
                 continue
 
-            source_url = f"https://devdocs.io/{language.slug}/{doc_key}" if doc_key else f"https://devdocs.io/{language.slug}/"
+            source_url = (
+                f"https://devdocs.io/{language.slug}/{doc_key}" if doc_key else f"https://devdocs.io/{language.slug}/"
+            )
             markdown = await asyncio.to_thread(_convert_html, html, source_url)
             markdown = _append_fragment_reference_notes(markdown, fragment_refs.get(doc_key, []))
             if not markdown.strip():
