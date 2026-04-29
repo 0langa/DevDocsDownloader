@@ -248,7 +248,10 @@ def _exact_match(entries: list[LanguageCatalog], needle: str) -> LanguageCatalog
         slug_norm = _normalise_lang(slug)
         family_norm = _normalise_lang(family)
         if (
-            display == needle or slug == needle or family == needle or needle in aliases
+            display == needle
+            or slug == needle
+            or family == needle
+            or needle in aliases
             or (needle_norm and (display_norm == needle_norm or slug_norm == needle_norm or family_norm == needle_norm))
         ):
             exact.append(entry)

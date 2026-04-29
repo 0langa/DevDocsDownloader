@@ -1,4 +1,5 @@
 """Generate DevDocsDownloader.ico at multiple resolutions using Pillow."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,14 +53,14 @@ def draw_arrow_down(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int, colo
 def draw_code_brackets(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int, color: tuple, lw: int) -> None:
     """Draw </> using thick lines."""
     gap = size // 4
-    bw = size // 3     # bracket width
-    bh = size // 2     # bracket height
+    bw = size // 3  # bracket width
+    bh = size // 2  # bracket height
 
     # Left bracket <
     lx = cx - gap - bw
     points_l = [
         (lx + bw, cy - bh // 2),
-        (lx,      cy),
+        (lx, cy),
         (lx + bw, cy + bh // 2),
     ]
     draw.line([points_l[0], points_l[1]], fill=color, width=lw)
@@ -68,9 +69,9 @@ def draw_code_brackets(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int, c
     # Right bracket >
     rx = cx + gap
     points_r = [
-        (rx,      cy - bh // 2),
+        (rx, cy - bh // 2),
         (rx + bw, cy),
-        (rx,      cy + bh // 2),
+        (rx, cy + bh // 2),
     ]
     draw.line([points_r[0], points_r[1]], fill=color, width=lw)
     draw.line([points_r[1], points_r[2]], fill=color, width=lw)
