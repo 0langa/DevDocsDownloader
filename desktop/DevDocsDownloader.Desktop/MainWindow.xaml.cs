@@ -1,4 +1,5 @@
 using DevDocsDownloader.Desktop.Pages;
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -22,17 +23,22 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        if (Content is FrameworkElement root)
-        {
-            root.DataContext = App.MainViewModel;
-        }
-        NavigationList.SelectedIndex = 0;
+        App.MainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
+        StatusTextBlock.Text = App.MainViewModel.StatusText;
         ContentFrame.Navigate(typeof(RunPage));
     }
 
-    private void OnSelectionChanged(object sender, SelectionChangedEventArgs args)
+    private void OnMainViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if ((sender as ListBox)?.SelectedItem is not ListBoxItem item || item.Tag is not string tag)
+        if (args.PropertyName == nameof(ViewModels.MainWindowViewModel.StatusText))
+        {
+            StatusTextBlock.Text = App.MainViewModel.StatusText;
+        }
+    }
+
+    private void OnNavigateClick(object sender, RoutedEventArgs args)
+    {
+        if (sender is not Button button || button.Tag is not string tag)
         {
             return;
         }
