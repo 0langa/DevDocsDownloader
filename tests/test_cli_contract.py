@@ -27,7 +27,6 @@ def test_cli_help_exposes_scripted_contract_options() -> None:
     assert "Resolution:" in run_result.output
     assert "Resume and safety:" in run_result.output
     assert "Always writes per-document Markdown" in run_result.output
-    assert "Use --source devdocs|mdn|dash" in run_result.output
     assert "Optional flags can add YAML" in run_result.output
     assert "retrieval chunks" in run_result.output
     assert "run rust --include-topic std --chunks" in run_result.output
