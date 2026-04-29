@@ -84,6 +84,11 @@ Bounded extraction sanity:
 $env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live_extraction_sanity.py -q
 ```
 
+Current bounded extraction expectations:
+- DevDocs: convert one live `db.json` HTML payload
+- MDN: parse one live `index.md` frontmatter/body pair
+- Dash: download one small real docset within the probe budget, extract it, validate `docSet.dsidx`, and convert one indexed HTML document
+
 ## Release Notes
 
 Update `.github/release-notes.md` before tagging. The release workflow reads this file as `body_path` for the GitHub Release.

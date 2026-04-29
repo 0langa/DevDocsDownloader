@@ -19,6 +19,8 @@
             <Button Content="Refresh bundles" Click="OnRefreshBundles" />
             <Button x:Name="RefreshTreeButton" Content="Reload selected bundle" Click="OnReloadTree" IsEnabled="False" />
             <Button Content="Open output folder" Click="OnOpenOutputFolder" />
+            <Button x:Name="DeleteBundleButton" Content="Delete selected bundle" Click="OnDeleteBundle" IsEnabled="False" />
+            <Button Content="Prune report history" Click="OnPruneReportHistory" />
             <TextBlock x:Name="StatusText" VerticalAlignment="Center" Opacity="0.75" />
         </StackPanel>
 
@@ -28,15 +30,24 @@
                 <ColumnDefinition Width="360" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <ListView x:Name="BundlesList" SelectionChanged="OnBundleSelectionChanged" />
+            <Grid RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <ListView x:Name="BundlesList" SelectionChanged="OnBundleSelectionChanged" />
+                <TextBlock x:Name="StorageSummaryText" Grid.Row="1" Opacity="0.75" TextWrapping="WrapWholeWords" />
+            </Grid>
             <controls:TreeView x:Name="FilesTree" Grid.Column="1" SelectionChanged="OnTreeSelectionChanged" />
             <Grid Grid.Column="2" RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="PreviewPathText" FontWeight="SemiBold" TextWrapping="WrapWholeWords" />
-                <TextBox x:Name="PreviewBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" />
+                <TextBlock x:Name="BundleDetailText" Grid.Row="1" Opacity="0.75" TextWrapping="WrapWholeWords" />
+                <TextBox x:Name="PreviewBox" Grid.Row="2" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" />
             </Grid>
         </Grid>
     </Grid>

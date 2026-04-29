@@ -1,17 +1,21 @@
 # Development Progress
 
-## Current state summary (v1.0.8 + post-release fixes)
+## Current state summary (v1.1.1)
 
 The repository ships as a working Windows desktop application backed by a frozen Python FastAPI process. The active Python package is a source-adapter ingestion pipeline for DevDocs, MDN, and Dash/Kapeli. The WinUI3 shell covers all operator workflows: Languages, Run, Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings.
 
-Post-v1.0.8 fixes on main (not yet tagged):
+Highlights shipped in `v1.1.1`:
 - Cooperative cancellation via `asyncio.sleep(0)` in the event sink between documents
 - Job history persisted to `logs/job_history.jsonl` and restored on backend startup
 - 30s backend health monitor with dispatcher-safe UI updates on failure/recovery
 - SSE reconnection with `from_index` cursor on unexpected stream disconnect (5 retries, exponential backoff)
 - Cancel button gives immediate UI feedback before SSE event arrives
 - Startup error dialog (`ContentDialog`) when backend fails to start
-- `ruff format` compliance on `registry.py` and `generate_icon.py`
+- `ruff format` compliance on touched Python files
+- language resolution hardening for shorthand aliases, version-shaped inputs, and punctuation/Unicode variants
+- weighted validation score with additive component scores
+- bounded live Dash acceptance probe that extracts a real docset, validates SQLite traversal, and converts one indexed document
+- output storage management in the desktop shell: bundle sizes, safe bundle deletion, and report-history pruning
 
 ## What works today
 
@@ -27,8 +31,9 @@ Post-v1.0.8 fixes on main (not yet tagged):
 
 - Source registry composes DevDocs, MDN, and Dash adapters with plugin entry-point loading
 - Language resolution supports source override and source priority ordering
-- `_normalise_lang()` maps special-char names (C++→cpp, C#→csharp, F#→fsharp, Node.js→nodejs, .NET→net)
+- `_normalise_lang()` maps special-char names and shorthand aliases (C++→cpp, C#→csharp, Node.js→nodejs, .NET→net, js→javascript, ts→typescript, py→python)
 - Exact, family, prefix, and contains matching with alias support
+- Version-shaped requests such as `python3.12` and `vue 3` resolve to the right family and prefer an exact version when present
 - Fuzzy suggestions for unresolved names
 - All-language catalog enumeration with deduplication
 
@@ -54,6 +59,7 @@ Post-v1.0.8 fixes on main (not yet tagged):
 - Docset download, extraction, and SQLite search index traversal
 - HTML-to-Markdown with navigation noise removal and relative link rewriting
 - Important/full mode filtering via entry type
+- Opt-in bounded live acceptance probe verifies one small real docset archive end to end
 
 ### Output generation
 
@@ -71,6 +77,7 @@ Post-v1.0.8 fixes on main (not yet tagged):
 - Structural validation after every compilation run
 - Internal anchor, duplicate section/document heading, source-inventory reconciliation checks
 - Per-document validation records in `validation_documents.jsonl`
+- Weighted validation score with additive component scores for completeness, structure, conversion, consistency, and document quality
 - Quality trend reports in `trends.json` / `trends.md`
 - Report history under `output/reports/history/`
 - Active checkpoints under `state/checkpoints/` during runs; removed on success
@@ -89,6 +96,7 @@ Post-v1.0.8 fixes on main (not yet tagged):
 - Startup failure shows `ContentDialog` with error message and log path
 - Language tree: searchable source-first and category-first views
 - Output Browser, Reports, Checkpoints, Cache, Settings pages all present and functional
+- Output Browser shows managed storage totals, bundle sizes, safe delete, and report-history pruning
 - Desktop default output root: `%UserProfile%\Documents\DevDocsDownloader`
 - Desktop per-user storage: `%LocalAppData%\DevDocsDownloader\{cache,state,logs,tmp,settings}`
 
@@ -105,6 +113,7 @@ Layered and pragmatic — not semantic.
 
 - detects missing/tiny output, unbalanced code fences, required sections, unresolved links, HTML leftovers, malformed tables, definition-list artifacts
 - checks internal anchors, duplicate sections/document headings, source inventory reconciliation
+- weights validation scores by bundle size and emits component scores instead of flat per-issue deductions
 - emits per-document validation records
 
 Does **not** verify:
@@ -121,16 +130,12 @@ Cooperative cancel improved: `asyncio.sleep(0)` between events allows `Cancelled
 See `documentation/roadmap.md` for the full prioritized list. Summary of remaining open issues:
 
 - Single-job queue with no queuing UI (High)
-- Validation score not meaningful for large languages (High)
-- Dash source untested end-to-end in real runs (High)
-- Output directory grows unbounded, no cleanup UI (High)
-- Language normalization edge cases (`&`, version suffixes, Unicode) (Medium)
+- Dash source still lacks broad full-language acceptance coverage (High)
+- Some language normalization edge cases may still exist outside the common alias set (Medium)
 - Settings changes don't affect already-running jobs (Medium)
-- Catalog refresh failure shows false success (Medium)
 - Unsigned binary — Windows SmartScreen warning (Medium)
 - PRI file copy in CI is fragile grep (Medium)
 - No auto-update (Low)
-- No open-folder button in Output Browser (Low)
 
 ## Implementation completeness by subsystem
 
@@ -141,7 +146,7 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 | Registry | Working | Normalization, exact/family/prefix/contains matching, plugins |
 | DevDocs adapter | Working | Best-aligned source |
 | MDN adapter | Working with caveats | Heavy archive; simple frontmatter |
-| Dash adapter | Working with caveats | Untested end-to-end against real feeds in CI |
+| Dash adapter | Working with caveats | Bounded live acceptance exists; full language coverage still not in routine CI |
 | Compiler | Working | Chunking, asset inventory, link rewriting |
 | Validator | Working | Structural, anchor, inventory, per-document records |
 | Reporting | Working | Summaries, history, trends |
@@ -162,18 +167,15 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 - ~~SSE stream drops silently~~ — done (reconnect with from_index)
 - ~~Startup failure shows blank window~~ — done (ContentDialog)
 
-### Medium priority (v1.1.0)
+### Medium priority (v1.1.x - v1.2.0)
 
-1. Open-folder button in Output Browser
-2. Job queue UI (show pending state instead of 409 error)
-3. Output storage cleanup UI (per-language size + delete)
-4. Settings feedback on apply
+1. Job queue UI (show pending state instead of 409 error)
+2. Better desktop cleanup breadth (cache + richer retention controls)
+3. Broader Dash acceptance depth in CI
+4. Packaging/distribution cleanup around desktop release reliability
 
 ### Lower priority (v1.2.0+)
 
-- Language normalization hardening (`&`, version suffixes, alias table)
-- Improved validation scoring (document-weighted model)
-- Dash end-to-end acceptance tests in CI
 - PRI packaging fix (MSBuild target instead of grep-and-copy)
 - Code signing
 - Auto-update notification

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
@@ -145,9 +146,33 @@ class OutputBundleSummary(BaseModel):
     source_slug: str = ""
     mode: str = ""
     total_documents: int = 0
+    generated_at: str = ""
+    bundle_bytes: int = 0
+    file_count: int = 0
+    chunk_count: int = 0
     topics: list[dict[str, Any]] = Field(default_factory=list)
     has_chunks: bool = False
     has_frontmatter: bool = False
+
+
+class OutputStorageSummary(BaseModel):
+    output_root: Path
+    bundle_count: int = 0
+    total_bundle_bytes: int = 0
+    latest_reports_bytes: int = 0
+    history_reports_bytes: int = 0
+    history_report_count: int = 0
+    validation_records_bytes: int = 0
+    trends_bytes: int = 0
+    total_managed_bytes: int = 0
+
+
+class StorageCleanupResult(BaseModel):
+    target: str
+    deleted: bool = False
+    freed_bytes: int = 0
+    deleted_files: int = 0
+    deleted_directories: int = 0
 
 
 class OutputTreeNode(BaseModel):
@@ -418,6 +443,9 @@ class DocumentationService:
             meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
             raw_outputs = meta.get("outputs")
             outputs: dict[str, Any] = raw_outputs if isinstance(raw_outputs, dict) else {}
+            bundle_bytes, file_count = _path_usage(language_dir)
+            chunk_manifest = language_dir / "chunks" / "manifest.jsonl"
+            chunk_count = len(chunk_manifest.read_text(encoding="utf-8").splitlines()) if chunk_manifest.exists() else 0
             bundles.append(
                 OutputBundleSummary(
                     language_slug=language_dir.name,
@@ -427,6 +455,10 @@ class DocumentationService:
                     source_slug=str(meta.get("source_slug") or ""),
                     mode=str(meta.get("mode") or ""),
                     total_documents=int(meta.get("total_documents") or 0),
+                    generated_at=str(meta.get("generated_at") or ""),
+                    bundle_bytes=bundle_bytes,
+                    file_count=file_count,
+                    chunk_count=chunk_count,
                     topics=list(meta.get("topics") or []),
                     has_chunks=(language_dir / "chunks" / "manifest.jsonl").exists()
                     or bool(outputs.get("chunks", False)),
@@ -434,6 +466,85 @@ class DocumentationService:
                 )
             )
         return bundles
+
+    def output_storage_summary(self) -> OutputStorageSummary:
+        bundles = self.list_output_bundles()
+        reports_dir = self.config.paths.reports_dir
+        history_dir = reports_dir / "history"
+        latest_report_paths = [
+            reports_dir / "run_summary.json",
+            reports_dir / "run_summary.md",
+        ]
+        trends_paths = [
+            reports_dir / "trends.json",
+            reports_dir / "trends.md",
+        ]
+        validation_path = reports_dir / "validation_documents.jsonl"
+        latest_reports_bytes = sum(path.stat().st_size for path in latest_report_paths if path.exists())
+        trends_bytes = sum(path.stat().st_size for path in trends_paths if path.exists())
+        validation_records_bytes = validation_path.stat().st_size if validation_path.exists() else 0
+        history_reports = sorted(history_dir.glob("*-run_summary.json")) if history_dir.exists() else []
+        history_reports_bytes = sum(path.stat().st_size for path in history_reports)
+        total_bundle_bytes = sum(bundle.bundle_bytes for bundle in bundles)
+        return OutputStorageSummary(
+            output_root=self.config.paths.output_dir,
+            bundle_count=len(bundles),
+            total_bundle_bytes=total_bundle_bytes,
+            latest_reports_bytes=latest_reports_bytes,
+            history_reports_bytes=history_reports_bytes,
+            history_report_count=len(history_reports),
+            validation_records_bytes=validation_records_bytes,
+            trends_bytes=trends_bytes,
+            total_managed_bytes=(
+                total_bundle_bytes
+                + latest_reports_bytes
+                + history_reports_bytes
+                + validation_records_bytes
+                + trends_bytes
+            ),
+        )
+
+    def delete_output_bundle(self, language_slug: str) -> StorageCleanupResult:
+        language_root = self._resolve_under(self.config.paths.markdown_dir, language_slug)
+        if not language_root.exists():
+            return StorageCleanupResult(target=language_slug, deleted=False)
+        if not language_root.is_dir():
+            raise NotADirectoryError(str(language_root))
+        freed_bytes, deleted_files, deleted_directories = _path_usage_with_directories(language_root)
+        shutil.rmtree(language_root)
+        return StorageCleanupResult(
+            target=language_slug,
+            deleted=True,
+            freed_bytes=freed_bytes,
+            deleted_files=deleted_files,
+            deleted_directories=deleted_directories,
+        )
+
+    def prune_report_history(self, *, keep_latest: int = 10) -> StorageCleanupResult:
+        history_dir = self.config.paths.reports_dir / "history"
+        keep = max(0, keep_latest)
+        if not history_dir.exists():
+            return StorageCleanupResult(target="reports/history", deleted=False)
+        history_reports = sorted(history_dir.glob("*-run_summary.json"))
+        if len(history_reports) <= keep:
+            return StorageCleanupResult(target="reports/history", deleted=False)
+        deleted_files = 0
+        freed_bytes = 0
+        for path in history_reports[: len(history_reports) - keep]:
+            freed_bytes += path.stat().st_size
+            path.unlink()
+            deleted_files += 1
+        deleted_directories = 0
+        if not any(history_dir.iterdir()):
+            history_dir.rmdir()
+            deleted_directories = 1
+        return StorageCleanupResult(
+            target="reports/history",
+            deleted=deleted_files > 0 or deleted_directories > 0,
+            freed_bytes=freed_bytes,
+            deleted_files=deleted_files,
+            deleted_directories=deleted_directories,
+        )
 
     def output_tree(self, language_slug: str) -> OutputTreeNode:
         language_root = self._resolve_under(self.config.paths.markdown_dir, language_slug)
@@ -810,3 +921,23 @@ def _media_type(path: Path) -> str:
     if suffix == ".jsonl":
         return "application/jsonl"
     return "text/plain"
+
+
+def _path_usage(path: Path) -> tuple[int, int]:
+    if path.is_file():
+        return path.stat().st_size, 1
+    total_bytes = 0
+    file_count = 0
+    for child in path.rglob("*"):
+        if child.is_file():
+            total_bytes += child.stat().st_size
+            file_count += 1
+    return total_bytes, file_count
+
+
+def _path_usage_with_directories(path: Path) -> tuple[int, int, int]:
+    total_bytes, file_count = _path_usage(path)
+    if path.is_file():
+        return total_bytes, file_count, 0
+    directory_count = 1 + sum(1 for child in path.rglob("*") if child.is_dir())
+    return total_bytes, file_count, directory_count

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+import tarfile
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
+from io import BytesIO
 from pathlib import Path
 
 import httpx
@@ -13,9 +16,12 @@ from .conversion import DASH_PROFILE, DEVDOCS_PROFILE, convert_html_to_markdown,
 from .sources.dash import CHEATSHEETS_URL, FEED_BASE, DashFeedSource
 from .sources.devdocs import DOCS_INDEX_URL, DOCUMENTS_BASE
 from .sources.mdn import CONTENT_ROOT_URL, _parse_frontmatter
+from .utils.archive import safe_extract_tar
 
 DEFAULT_PROBE_BYTES = 4096
 DEFAULT_TIMEOUT_SECONDS = 20.0
+DEFAULT_DASH_ACCEPTANCE_MAX_BYTES = 12_000_000
+DEFAULT_DASH_ACCEPTANCE_CANDIDATES = 12
 
 ProbeCallable = Callable[[httpx.AsyncClient], Awaitable["LiveProbeResult"]]
 
@@ -237,9 +243,12 @@ async def _probe_dash_extraction(client: httpx.AsyncClient, *, dash_seed_path: P
     try:
         response = await client.get(CHEATSHEETS_URL)
         response.raise_for_status()
-        entry = next(
-            iter(DashFeedSource(cache_dir=Path(tempfile.mkdtemp()))._discover_catalog_entries(response.text)),
-            None,
+        entries = DashFeedSource(cache_dir=Path(tempfile.mkdtemp()))._discover_catalog_entries(response.text)
+        entry = await _select_dash_acceptance_entry(
+            client,
+            entries=entries,
+            max_archive_bytes=DEFAULT_DASH_ACCEPTANCE_MAX_BYTES,
+            candidate_limit=DEFAULT_DASH_ACCEPTANCE_CANDIDATES,
         )
     except Exception as exc:
         return LiveProbeResult(source, "Dash", "", CHEATSHEETS_URL, None, 0, False, f"{type(exc).__name__}: {exc}")
@@ -248,36 +257,116 @@ async def _probe_dash_extraction(client: httpx.AsyncClient, *, dash_seed_path: P
     slug = entry.slug
     language = entry.display_name
     url = f"{FEED_BASE}/{slug}.tgz"
-    archive_probe = await _probe_capped_get(
-        client, source=source, language=language, source_slug=slug, url=url, require_gzip=True
-    )
-    if not archive_probe.ok:
-        return archive_probe
-    html = """
-    <html><body><nav>Noise</nav><main><h1>Dash Probe</h1><p>Content</p><pre><code>print(1)</code></pre></main></body></html>
-    """
-    markdown = convert_html_to_markdown(html, base_url=f"dash://{slug}/index.html", profile=DASH_PROFILE)
-    if "Dash Probe" not in markdown or "print(1)" not in markdown:
-        return LiveProbeResult(
-            source,
-            language,
-            slug,
-            url,
-            archive_probe.status_code,
-            archive_probe.downloaded_bytes,
-            False,
-            "Dash fixture conversion failed",
+    try:
+        status_code, archive_bytes = await _download_dash_archive_with_limit(
+            client,
+            url=url,
+            max_archive_bytes=DEFAULT_DASH_ACCEPTANCE_MAX_BYTES,
         )
-    return LiveProbeResult(
-        source,
-        language,
-        slug,
-        url,
-        archive_probe.status_code,
-        archive_probe.downloaded_bytes,
-        True,
-        "archive shape and fixture conversion ok",
-    )
+        message = await asyncio.to_thread(_validate_dash_archive_acceptance, slug, archive_bytes)
+        return LiveProbeResult(source, language, slug, url, status_code, len(archive_bytes), True, message)
+    except Exception as exc:
+        return LiveProbeResult(source, language, slug, url, None, 0, False, f"{type(exc).__name__}: {exc}")
+
+
+async def _select_dash_acceptance_entry(
+    client: httpx.AsyncClient,
+    *,
+    entries: list,
+    max_archive_bytes: int,
+    candidate_limit: int,
+):
+    limited = entries[: max(1, candidate_limit)]
+    if not limited:
+        return None
+    sized: list[tuple[int, object]] = []
+    for entry in limited:
+        size = await _dash_archive_size_hint(client, f"{FEED_BASE}/{entry.slug}.tgz")
+        if size is not None and size <= max_archive_bytes:
+            sized.append((size, entry))
+    if sized:
+        sized.sort(key=lambda item: item[0])
+        return sized[0][1]
+    return limited[0]
+
+
+async def _dash_archive_size_hint(client: httpx.AsyncClient, url: str) -> int | None:
+    try:
+        response = await client.head(url)
+        if response.status_code >= 400:
+            return None
+        raw = response.headers.get("Content-Length")
+        return int(raw) if raw and raw.isdigit() else None
+    except Exception:
+        return None
+
+
+async def _download_dash_archive_with_limit(
+    client: httpx.AsyncClient,
+    *,
+    url: str,
+    max_archive_bytes: int,
+) -> tuple[int | None, bytes]:
+    downloaded = bytearray()
+    status_code: int | None = None
+    async with client.stream("GET", url) as response:
+        status_code = response.status_code
+        response.raise_for_status()
+        async for chunk in response.aiter_bytes():
+            downloaded.extend(chunk)
+            if len(downloaded) > max_archive_bytes:
+                raise ValueError(f"Dash acceptance archive exceeded {max_archive_bytes} byte budget")
+    if not downloaded:
+        raise ValueError("Dash acceptance archive was empty")
+    if bytes(downloaded[:2]) != b"\x1f\x8b":
+        raise ValueError("Dash acceptance archive did not start with gzip magic bytes")
+    return status_code, bytes(downloaded)
+
+
+def _validate_dash_archive_acceptance(slug: str, archive_bytes: bytes) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        with tarfile.open(fileobj=BytesIO(archive_bytes), mode="r:gz") as archive:
+            safe_extract_tar(archive, root)
+        docsets = list(root.glob("*.docset"))
+        if not docsets:
+            raise ValueError("extracted archive did not contain a .docset")
+        docset = docsets[0]
+        dsidx = docset / "Contents" / "Resources" / "docSet.dsidx"
+        docs_root = docset / "Contents" / "Resources" / "Documents"
+        if not dsidx.exists():
+            raise ValueError("extracted docset was missing docSet.dsidx")
+        if not docs_root.exists():
+            raise ValueError("extracted docset was missing Documents root")
+
+        connection = sqlite3.connect(dsidx)
+        try:
+            rows = connection.execute(
+                "SELECT name, type, path FROM searchIndex ORDER BY type, name LIMIT 200"
+            ).fetchall()
+        finally:
+            connection.close()
+        if not rows:
+            raise ValueError("Dash searchIndex query returned no rows")
+
+        selected: tuple[str, str, str] | None = None
+        for row_name, row_type, row_path in rows:
+            doc_key = str(row_path).split("#", 1)[0] if row_path else ""
+            if not doc_key:
+                continue
+            candidate = docs_root / doc_key
+            if candidate.exists() and candidate.is_file():
+                selected = (str(row_name), str(row_type), doc_key)
+                break
+        if selected is None:
+            raise ValueError("Dash searchIndex rows did not map to a readable document file")
+
+        name, entry_type, doc_key = selected
+        html = (docs_root / doc_key).read_text(encoding="utf-8", errors="ignore")
+        markdown = convert_html_to_markdown(html, base_url=f"dash://{slug}/{doc_key}", profile=DASH_PROFILE)
+        if len(markdown.strip()) < 20:
+            raise ValueError("Dash real-doc conversion produced tiny Markdown")
+        return f"docset extracted, sqlite ok, converted {entry_type}:{name} from {doc_key}"
 
 
 async def _probe_capped_get(

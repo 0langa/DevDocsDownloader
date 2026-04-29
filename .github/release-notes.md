@@ -1,21 +1,19 @@
-# DevDocsDownloader 1.1.0
+# DevDocsDownloader 1.1.1
 
-Stable 1.1.0 release focused on product-surface cleanup, faster validation cycles, and desktop operator polish.
+Stable `1.1.1` release focused on trust signals, source confidence, and repeat-use desktop operations.
 
 Highlights:
 
-- Removed the deprecated NiceGUI surface from runtime, setup, tests, and docs.
-- Cut local Python test runtime dramatically by avoiding unnecessary catalog loading in source-specific paths.
-- `refresh-catalogs` now returns structured per-source status instead of raw counts only.
-- WinUI Languages page now surfaces catalog refresh fallback/failure information.
-- Output Browser can open the current output folder directly.
-- Settings now make it clear that changes apply to the next run and warn when the output root changes.
-- Window resizing now uses WinUI `OverlappedPresenter` minimum-size constraints instead of `SizeChanged` clamping.
+- Hardened language resolution for shorthand aliases, punctuation variants, and version-shaped inputs.
+- Replaced flat validation scoring with weighted component scoring while keeping the existing top-level composite score.
+- Added a bounded live Dash acceptance probe that downloads one real docset, validates `docSet.dsidx`, and converts one indexed HTML document.
+- Added desktop output storage management: bundle sizing, managed-storage summary, safe bundle deletion, and report-history pruning.
+- Preserved the previously shipped desktop reliability work around restart-safe history, health monitoring, SSE reconnect, and cancellation feedback.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.1.0.exe`
-- `DevDocsDownloader-Portable-1.1.0.zip`
+- `DevDocsDownloader-Setup-1.1.1.exe`
+- `DevDocsDownloader-Portable-1.1.1.zip`
 - `SHA256SUMS.txt`
 
 Notes:

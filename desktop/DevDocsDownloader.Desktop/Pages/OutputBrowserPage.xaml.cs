@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json.Nodes;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
@@ -16,8 +17,12 @@ public sealed partial class OutputBrowserPage : Page
         public required string Source { get; init; }
         public required string Path { get; init; }
         public int TotalDocuments { get; init; }
+        public long BundleBytes { get; init; }
+        public int FileCount { get; init; }
+        public int ChunkCount { get; init; }
+        public string GeneratedAt { get; init; } = "";
 
-        public override string ToString() => $"{Language} ({Source}, {TotalDocuments} docs)";
+        public override string ToString() => $"{Language} ({Source}, {TotalDocuments} docs, {FormatBytes(BundleBytes)})";
     }
 
     private sealed class OutputNode
@@ -106,6 +111,8 @@ public sealed partial class OutputBrowserPage : Page
         }
         _selectedBundle = bundle;
         RefreshTreeButton.IsEnabled = true;
+        DeleteBundleButton.IsEnabled = true;
+        BundleDetailText.Text = FormatBundleDetail(bundle);
         await LoadTreeAsync(bundle);
     }
 
@@ -148,11 +155,19 @@ public sealed partial class OutputBrowserPage : Page
                     Source = row["source"]?.GetValue<string>() ?? "",
                     Path = row["path"]?.GetValue<string>() ?? "",
                     TotalDocuments = row["total_documents"]?.GetValue<int?>() ?? 0,
+                    BundleBytes = row["bundle_bytes"]?.GetValue<long?>() ?? 0,
+                    FileCount = row["file_count"]?.GetValue<int?>() ?? 0,
+                    ChunkCount = row["chunk_count"]?.GetValue<int?>() ?? 0,
+                    GeneratedAt = row["generated_at"]?.GetValue<string>() ?? "",
                 });
             }
             BundlesList.ItemsSource = null;
             BundlesList.ItemsSource = _bundles.OrderBy(item => item.Language).ToList();
+            RefreshTreeButton.IsEnabled = false;
+            DeleteBundleButton.IsEnabled = false;
+            BundleDetailText.Text = "";
             StatusText.Text = _bundles.Count == 0 ? "No output bundles found yet." : $"Loaded {_bundles.Count} bundles.";
+            await RefreshStorageSummaryAsync();
 
             var targetSlug = preferredSlug
                 ?? App.MainViewModel.LastOutputLanguageSlug
@@ -196,6 +211,119 @@ public sealed partial class OutputBrowserPage : Page
         {
             StatusText.Text = exc.Message;
         }
+    }
+
+    private async void OnDeleteBundle(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBundle is null)
+        {
+            return;
+        }
+        var dialog = new ContentDialog
+        {
+            Title = "Delete output bundle?",
+            Content =
+                $"Delete {_selectedBundle.Language} from the output browser? This removes generated Markdown, chunks, and bundle metadata under that language folder.",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            var result = await App.BackendHost.Client.DeleteOutputBundleAsync(_selectedBundle.LanguageSlug);
+            var freedBytes = result?["freed_bytes"]?.GetValue<long?>() ?? 0;
+            StatusText.Text = $"Deleted {_selectedBundle.Language} ({FormatBytes(freedBytes)} freed).";
+            PreviewPathText.Text = "";
+            PreviewBox.Text = "";
+            BundleDetailText.Text = "";
+            FilesTree.RootNodes.Clear();
+            await RefreshBundlesAsync();
+        }
+        catch (Exception exc)
+        {
+            StatusText.Text = exc.Message;
+        }
+    }
+
+    private async void OnPruneReportHistory(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Prune report history?",
+            Content = "Keep the latest 10 history reports and delete older report snapshots? Current bundles stay untouched.",
+            PrimaryButtonText = "Prune",
+            CloseButtonText = "Cancel",
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            var result = await App.BackendHost.Client.PruneReportHistoryAsync();
+            var deletedFiles = result?["deleted_files"]?.GetValue<int?>() ?? 0;
+            var freedBytes = result?["freed_bytes"]?.GetValue<long?>() ?? 0;
+            StatusText.Text = deletedFiles == 0
+                ? "Report history already within retention target."
+                : $"Pruned {deletedFiles} report snapshot(s) ({FormatBytes(freedBytes)} freed).";
+            await RefreshStorageSummaryAsync();
+        }
+        catch (Exception exc)
+        {
+            StatusText.Text = exc.Message;
+        }
+    }
+
+    private async Task RefreshStorageSummaryAsync()
+    {
+        try
+        {
+            var summary = await App.BackendHost.Client.GetOutputStorageSummaryAsync() as JsonObject;
+            if (summary is null)
+            {
+                StorageSummaryText.Text = "";
+                return;
+            }
+            var bundleCount = summary["bundle_count"]?.GetValue<int?>() ?? 0;
+            var bundleBytes = summary["total_bundle_bytes"]?.GetValue<long?>() ?? 0;
+            var reportBytes = (summary["latest_reports_bytes"]?.GetValue<long?>() ?? 0)
+                + (summary["history_reports_bytes"]?.GetValue<long?>() ?? 0)
+                + (summary["validation_records_bytes"]?.GetValue<long?>() ?? 0)
+                + (summary["trends_bytes"]?.GetValue<long?>() ?? 0);
+            var historyCount = summary["history_report_count"]?.GetValue<int?>() ?? 0;
+            var totalManaged = summary["total_managed_bytes"]?.GetValue<long?>() ?? 0;
+            StorageSummaryText.Text =
+                $"Storage summary: {bundleCount} bundle(s), {FormatBytes(bundleBytes)} in bundles, {FormatBytes(reportBytes)} in reports, {historyCount} history snapshot(s), {FormatBytes(totalManaged)} total managed.";
+        }
+        catch (Exception exc)
+        {
+            StorageSummaryText.Text = exc.Message;
+        }
+    }
+
+    private static string FormatBundleDetail(BundleItem bundle)
+    {
+        var generated = string.IsNullOrWhiteSpace(bundle.GeneratedAt) ? "unknown time" : bundle.GeneratedAt;
+        return
+            $"Bundle details: {bundle.TotalDocuments} docs, {bundle.FileCount} file(s), {bundle.ChunkCount} chunk(s), {FormatBytes(bundle.BundleBytes)}, generated {generated}.";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        double value = bytes;
+        var unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+        return string.Format(CultureInfo.InvariantCulture, "{0:0.#} {1}", value, units[unitIndex]);
     }
 
     private static TreeViewNode BuildTree(JsonObject node)

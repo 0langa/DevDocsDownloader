@@ -218,6 +218,42 @@ def test_desktop_backend_refresh_catalogs_returns_structured_status(tmp_path: Pa
     asyncio.run(scenario())
 
 
+def test_desktop_backend_output_storage_management_endpoints(tmp_path: Path, monkeypatch) -> None:
+    async def scenario() -> None:
+        config = load_config(root=tmp_path, runtime_mode="repo")
+        app = create_app(config, token="secret")
+        headers = {"Authorization": "Bearer secret"}
+
+        language_dir = config.paths.markdown_dir / "python"
+        language_dir.mkdir(parents=True, exist_ok=True)
+        (language_dir / "_meta.json").write_text(
+            '{"language":"Python","source":"devdocs","source_slug":"python","total_documents":1,"topics":[]}',
+            encoding="utf-8",
+        )
+        (language_dir / "python.md").write_text("# Python\n", encoding="utf-8")
+        history_dir = config.paths.reports_dir / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        (history_dir / "20260101T000000Z-run_summary.json").write_text("{}", encoding="utf-8")
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            summary = await client.get("/output/storage-summary", headers=headers)
+            assert summary.status_code == 200
+            assert summary.json()["bundle_count"] == 1
+
+            deleted = await client.delete("/output/python", headers=headers)
+            assert deleted.status_code == 200
+            assert deleted.json()["deleted"] is True
+            assert not language_dir.exists()
+
+            pruned = await client.post("/reports/prune-history?keep_latest=0", headers=headers)
+            assert pruned.status_code == 200
+            assert pruned.json()["deleted_files"] == 1
+            assert not history_dir.exists()
+
+    asyncio.run(scenario())
+
+
 def test_desktop_backend_cancel_sets_cancelling_then_cancelled(tmp_path: Path, monkeypatch) -> None:
     async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
         if event_sink is not None:

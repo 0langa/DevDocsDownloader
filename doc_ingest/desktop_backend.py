@@ -356,6 +356,10 @@ def create_app(
     async def output_bundles() -> list[dict[str, Any]]:
         return [bundle.model_dump(mode="json") for bundle in service.list_output_bundles()]
 
+    @app.get("/output/storage-summary", dependencies=[Depends(require_auth)])
+    async def output_storage_summary() -> dict[str, Any]:
+        return service.output_storage_summary().model_dump(mode="json")
+
     @app.get("/output/{language_slug}/tree", dependencies=[Depends(require_auth)])
     async def output_tree(language_slug: str) -> dict[str, Any]:
         return service.output_tree(language_slug).model_dump(mode="json")
@@ -368,6 +372,10 @@ def create_app(
     async def output_file(language_slug: str, path: str) -> dict[str, Any]:
         return service.read_output_file(language_slug, path).model_dump(mode="json")
 
+    @app.delete("/output/{language_slug}", dependencies=[Depends(require_auth)])
+    async def delete_output_bundle(language_slug: str) -> dict[str, Any]:
+        return service.delete_output_bundle(language_slug).model_dump(mode="json")
+
     @app.get("/reports", dependencies=[Depends(require_auth)])
     async def reports() -> dict[str, Any]:
         return service.read_reports().model_dump(mode="json")
@@ -375,6 +383,10 @@ def create_app(
     @app.get("/reports/file", dependencies=[Depends(require_auth)])
     async def report_file(path: str) -> dict[str, Any]:
         return service.read_report_file(path).model_dump(mode="json")
+
+    @app.post("/reports/prune-history", dependencies=[Depends(require_auth)])
+    async def prune_report_history(keep_latest: int = Query(default=10, ge=0, le=200)) -> dict[str, Any]:
+        return service.prune_report_history(keep_latest=keep_latest).model_dump(mode="json")
 
     @app.get("/checkpoints", dependencies=[Depends(require_auth)])
     async def checkpoints() -> list[dict[str, Any]]:

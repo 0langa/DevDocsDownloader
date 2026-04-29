@@ -51,6 +51,14 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
         )
         if report.validation is not None:
             lines.append(f"- Validation score: {report.validation.score}")
+            if report.validation.component_scores is not None:
+                components = report.validation.component_scores
+                lines.append("- Validation components:")
+                lines.append(f"  - Completeness: {components.completeness}")
+                lines.append(f"  - Structure: {components.structure}")
+                lines.append(f"  - Conversion: {components.conversion}")
+                lines.append(f"  - Consistency: {components.consistency}")
+                lines.append(f"  - Document quality: {components.document_quality}")
             if report.validation.issues:
                 lines.append("- Validation issues:")
                 for issue in report.validation.issues:

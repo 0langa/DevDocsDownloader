@@ -45,7 +45,7 @@ jobs:
           from pathlib import Path
           from doc_ingest.live_probe import probe_live_extraction_sanity
 
-          results = asyncio.run(probe_live_extraction_sanity(concurrency=2, timeout_seconds=45, limit=3))
+          results = asyncio.run(probe_live_extraction_sanity(concurrency=1, timeout_seconds=60, limit=3))
           payload = [result.__dict__ for result in results]
           Path("artifacts/live-probe-extraction.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
           failed = [item for item in payload if not item["ok"]]

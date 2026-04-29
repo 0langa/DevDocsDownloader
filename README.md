@@ -20,7 +20,7 @@ The runtime path is usable today for those three source families. The repository
 	- a single consolidated Markdown file per language
 	- metadata JSON for each compiled language bundle
 - Optionally emits YAML frontmatter and retrieval-friendly Markdown chunks with JSONL manifests
-- Validates the compiled output with a simple structural scoring pass
+- Validates the compiled output with a weighted structural scoring pass
 - Produces JSON and Markdown run summaries in `output/reports/`
 - Produces additive per-document validation, report history, and quality trend artifacts
 - Writes active per-language checkpoints under `state/checkpoints/` during runs and removes them after successful completion
@@ -287,7 +287,7 @@ The WinUI desktop shell is the primary end-user GUI.
 - The left shell shows backend readiness, output root, live job progress, the current activity line, and warning/failure counts.
 - Run and Bulk pages reuse the same live job monitor, so progress remains visible while browsing other tabs.
 - Languages uses a searchable tree view with `source-first` and `category-first` grouping; selections can prefill Run or Bulk.
-- Output Browser loads bundles from the current output root automatically and remembers the last selected bundle/file.
+- Output Browser loads bundles from the current output root automatically, shows managed-storage totals, and can delete bundles or prune old report-history snapshots.
 - Settings persists desktop defaults such as output root, cache policy, language-tree mode, last output selection, and selected preset.
 
 ## Live Probe Guide
@@ -312,7 +312,7 @@ For a bounded extraction sanity tier that checks one representative source-famil
 $env:DEVDOCS_LIVE_EXTRACTION_TESTS='1'; python -m pytest -m live tests\test_live_extraction_sanity.py -q
 ```
 
-This fetches a DevDocs document payload, one MDN raw `index.md`, and a capped Dash archive probe plus local Dash conversion fixture. It catches upstream shape drift but is not a full extraction correctness check.
+This fetches a DevDocs document payload, one MDN raw `index.md`, and one bounded live Dash docset archive. The Dash probe extracts a small real docset, validates `docSet.dsidx`, resolves at least one indexed document path, and converts one real HTML document to Markdown. It catches upstream shape drift without compiling a full language bundle.
 
 GitHub Actions also runs a separate scheduled `live-drift` workflow that writes machine-readable JSON artifacts for endpoint and bounded extraction drift triage.
 
@@ -334,7 +334,9 @@ python -m mypy doc_ingest
 	- MDN first for `html`, `css`, `http`, `web-apis`, and `webassembly`
 	- DevDocs first for everything else
 	- Dash as a fallback
-- Resolution uses exact, family, prefix, and contains matching against display name and slug
+- Resolution uses exact, family, prefix, and contains matching against display name, slug, and aliases
+- Resolution normalizes common shorthand and punctuation variants such as `js`, `ts`, `py`, `Node.js`, `.NET`, `C++`, and `C#`
+- Resolution accepts common version-shaped inputs such as `python3.12`, `python 3.12`, and `vue 3`, preferring an exact catalog version when available and otherwise falling back to the base family
 - Resolution also considers source-provided aliases from discovery manifests, such as MDN `web-apis` resolving from `api` or `web api`
 
 ### Mode behavior
@@ -356,7 +358,7 @@ python -m mypy doc_ingest
 
 ### Validation behavior
 
-Compiled output is scored by `doc_ingest/validator.py` using simple checks:
+Compiled output is scored by `doc_ingest/validator.py` using layered weighted checks:
 
 - output file exists
 - total documents is non-zero
@@ -371,7 +373,7 @@ Compiled output is scored by `doc_ingest/validator.py` using simple checks:
 - source diagnostics reconcile discovered, emitted, skipped, and compiled document counts where available
 - generated per-document files are scanned for local conversion/link issues
 
-The validation score is heuristic. It does not verify semantic correctness or source completeness.
+The validator emits a backward-compatible composite `score` plus component scores for completeness, structure, conversion quality, source consistency, and per-document quality. The score is still heuristic. It does not verify semantic correctness or source completeness.
 
 ### Checkpoint behavior
 
@@ -510,8 +512,8 @@ The current tests focus on:
 
 See `documentation/roadmap.md` for the full prioritized list. Near-term:
 
-1. Open-folder button, job queue UI, output storage cleanup UI
-2. Language normalization hardening, improved validation scoring, Dash acceptance tests
+1. Job queue UI and richer cleanup breadth
+2. Dash acceptance hardening and packaging polish
 3. Code signing, auto-update notification
 
 ## Release readiness

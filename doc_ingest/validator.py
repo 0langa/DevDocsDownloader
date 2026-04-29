@@ -1,15 +1,73 @@
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
-from .models import DocumentValidationResult, SourceRunDiagnostics, TopicStats, ValidationIssue, ValidationResult
+from .models import (
+    DocumentValidationResult,
+    SourceRunDiagnostics,
+    TopicStats,
+    ValidationIssue,
+    ValidationResult,
+    ValidationScoreComponents,
+)
 
 _MARKDOWN_LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]*)\)")
 _HTML_LEFTOVER_RE = re.compile(r"</?(?:div|span|section|article|nav|aside|table|tr|td|th|p|ul|ol|li)\b", re.I)
 _SAFE_LINK_PREFIXES = ("http://", "https://", "mailto:", "tel:", "data:", "dash://", "#")
 _ANCHOR_RE = re.compile(r'<a\s+id="([^"]+)"\s*></a>')
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+_COMPONENT_WEIGHTS = {
+    "completeness": 0.35,
+    "structure": 0.25,
+    "conversion": 0.15,
+    "consistency": 0.15,
+    "document_quality": 0.10,
+}
+_ISSUE_BASE_WEIGHTS = {
+    "missing_output": 1.0,
+    "no_documents": 1.0,
+    "tiny_output": 0.8,
+    "missing_section": 0.45,
+    "no_topics": 0.35,
+    "code_fence": 0.35,
+    "missing_internal_anchor": 0.3,
+    "duplicate_topic_section": 0.3,
+    "document_heading_count_mismatch": 0.45,
+    "malformed_heading_hierarchy": 0.5,
+    "duplicate_document_heading": 0.25,
+    "topic_total_mismatch": 0.45,
+    "source_inventory_mismatch": 0.4,
+    "emitted_less_than_compiled": 0.55,
+    "relative_link": 0.35,
+    "relative_image": 0.2,
+    "empty_link_target": 0.2,
+    "html_leftover": 0.35,
+    "malformed_table": 0.3,
+    "definition_list_artifact": 0.2,
+    "duplicate_section_link": 0.2,
+}
+_COMPONENT_CODES = {
+    "completeness": {"missing_output", "no_documents", "tiny_output", "missing_section", "no_topics"},
+    "structure": {
+        "code_fence",
+        "missing_internal_anchor",
+        "duplicate_topic_section",
+        "document_heading_count_mismatch",
+        "malformed_heading_hierarchy",
+        "duplicate_document_heading",
+    },
+    "conversion": {
+        "relative_link",
+        "relative_image",
+        "empty_link_target",
+        "html_leftover",
+        "malformed_table",
+        "definition_list_artifact",
+    },
+    "consistency": {"topic_total_mismatch", "source_inventory_mismatch", "emitted_less_than_compiled"},
+}
 
 
 def validate_output(
@@ -28,7 +86,15 @@ def validate_output(
         issues.append(
             ValidationIssue(level="error", code="missing_output", message="Consolidated markdown file is missing.")
         )
-        return ValidationResult(language=language, output_path=output_path, score=0.0, issues=issues)
+        zero_scores = ValidationScoreComponents()
+        return ValidationResult(
+            language=language,
+            output_path=output_path,
+            score=0.0,
+            quality_score=0.0,
+            component_scores=zero_scores,
+            issues=issues,
+        )
 
     text = output_path.read_text(encoding="utf-8")
     size = len(text)
@@ -72,20 +138,87 @@ def validate_output(
         source=source,
         source_slug=source_slug,
     )
-
-    score = 1.0
-    for issue in issues:
-        score -= 0.3 if issue.level == "error" else 0.1
-    score = max(0.0, min(1.0, score))
+    component_scores = _score_validation(
+        issues=issues,
+        document_results=document_results,
+        total_documents=total_documents,
+        topics=topics,
+    )
+    score = _composite_score(component_scores)
 
     return ValidationResult(
         language=language,
         output_path=output_path,
         score=round(score, 2),
         quality_score=round(score, 2),
+        component_scores=component_scores,
         issues=issues,
         document_results=document_results,
     )
+
+
+def _score_validation(
+    *,
+    issues: list[ValidationIssue],
+    document_results: list[DocumentValidationResult],
+    total_documents: int,
+    topics: list[TopicStats],
+) -> ValidationScoreComponents:
+    topic_count = len(topics)
+    bundle_scale = _bundle_scale(total_documents=total_documents, topic_count=topic_count)
+    document_scale = _document_scale(total_documents=total_documents)
+    component_issues: dict[str, list[ValidationIssue]] = {name: [] for name in _COMPONENT_CODES}
+    for issue in issues:
+        for component, codes in _COMPONENT_CODES.items():
+            if issue.code in codes:
+                component_issues[component].append(issue)
+                break
+    document_issues = [issue for result in document_results for issue in result.issues]
+    return ValidationScoreComponents(
+        completeness=round(_component_score(component_issues["completeness"], scale=bundle_scale), 2),
+        structure=round(
+            _component_score(component_issues["structure"], scale=max(1.0, bundle_scale * 0.95)),
+            2,
+        ),
+        conversion=round(
+            _component_score(component_issues["conversion"], scale=max(1.0, bundle_scale * 1.1)),
+            2,
+        ),
+        consistency=round(
+            _component_score(component_issues["consistency"], scale=max(1.0, bundle_scale)),
+            2,
+        ),
+        document_quality=round(_component_score(document_issues, scale=document_scale), 2),
+    )
+
+
+def _bundle_scale(*, total_documents: int, topic_count: int) -> float:
+    document_factor = math.sqrt(max(total_documents - 1, 0)) * 0.18
+    topic_factor = math.sqrt(max(topic_count - 1, 0)) * 0.08
+    return 1.0 + min(1.6, document_factor + topic_factor)
+
+
+def _document_scale(*, total_documents: int) -> float:
+    return 1.0 + min(1.8, math.sqrt(max(total_documents - 1, 0)) * 0.22)
+
+
+def _component_score(issues: list[ValidationIssue], *, scale: float) -> float:
+    if not issues:
+        return 1.0
+    penalty = sum(_issue_penalty(issue) for issue in issues)
+    score = 1.0 - (penalty / max(scale, 1.0))
+    return max(0.0, min(1.0, score))
+
+
+def _issue_penalty(issue: ValidationIssue) -> float:
+    base = _ISSUE_BASE_WEIGHTS.get(issue.code)
+    if base is not None:
+        return base
+    return 0.7 if issue.level == "error" else 0.25 if issue.level == "warning" else 0.1
+
+
+def _composite_score(component_scores: ValidationScoreComponents) -> float:
+    return sum(getattr(component_scores, name) * weight for name, weight in _COMPONENT_WEIGHTS.items())
 
 
 def _validate_links(text: str) -> list[ValidationIssue]:

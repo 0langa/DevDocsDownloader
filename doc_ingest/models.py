@@ -45,11 +45,20 @@ class DocumentValidationResult(BaseModel):
     context: str = ""
 
 
+class ValidationScoreComponents(BaseModel):
+    completeness: float = 0.0
+    structure: float = 0.0
+    conversion: float = 0.0
+    consistency: float = 0.0
+    document_quality: float = 0.0
+
+
 class ValidationResult(BaseModel):
     language: str
     output_path: Path
     score: float = 0.0
     quality_score: float = 0.0
+    component_scores: ValidationScoreComponents | None = None
     issues: list[ValidationIssue] = Field(default_factory=list)
     document_results: list[DocumentValidationResult] = Field(default_factory=list)
 

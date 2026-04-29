@@ -224,6 +224,9 @@ public sealed class DesktopBackendClient
     public Task<JsonArray?> GetOutputBundlesAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/output/bundles", cancellationToken);
 
+    public Task<JsonNode?> GetOutputStorageSummaryAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync("/output/storage-summary", cancellationToken);
+
     public Task<JsonNode?> GetOutputTreeAsync(string languageSlug, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/output/{languageSlug}/tree", cancellationToken);
 
@@ -233,11 +236,17 @@ public sealed class DesktopBackendClient
     public Task<JsonNode?> GetOutputFileAsync(string languageSlug, string path, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/output/{languageSlug}/file?path={Uri.EscapeDataString(path)}", cancellationToken);
 
+    public Task<JsonNode?> DeleteOutputBundleAsync(string languageSlug, CancellationToken cancellationToken = default) =>
+        DeleteJsonAsync($"/output/{languageSlug}", cancellationToken);
+
     public Task<JsonNode?> GetReportsAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("/reports", cancellationToken);
 
     public Task<JsonNode?> GetReportFileAsync(string path, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/reports/file?path={Uri.EscapeDataString(path)}", cancellationToken);
+
+    public Task<JsonNode?> PruneReportHistoryAsync(int keepLatest = 10, CancellationToken cancellationToken = default) =>
+        PostJsonAsync($"/reports/prune-history?keep_latest={keepLatest}", null, cancellationToken);
 
     public Task<JsonArray?> GetCheckpointsAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/checkpoints", cancellationToken);

@@ -124,7 +124,7 @@ Standard skip reasons currently include `filtered_mode`, `filtered_topic_include
 
 Resume is conservative but no longer all-or-nothing on temporary fragments. If a checkpoint identity matches and the durable per-document artifact files still exist, the compiler may rebuild missing temporary consolidated fragments from those durable documents during resume. Missing durable document artifacts still force a replay from the start.
 
-Validation results must include `score`, `quality_score`, `issues`, language, and output path. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.
+Validation results must include `score`, `quality_score`, `issues`, language, and output path. They may also include additive `component_scores` for completeness, structure, conversion, consistency, and document quality. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.
 
 Current validation issue codes include structural issues such as `missing_output`, `no_documents`, `tiny_output`, `code_fence`, `missing_section`, and `no_topics`; navigation and structure warnings such as `missing_internal_anchor`, `duplicate_topic_section`, `document_heading_count_mismatch`, `malformed_heading_hierarchy`, and `duplicate_document_heading`; source reconciliation warnings such as `topic_total_mismatch`, `source_inventory_mismatch`, and `emitted_less_than_compiled`; plus conversion-quality warnings such as `relative_link`, `relative_image`, `empty_link_target`, `html_leftover`, `malformed_table`, and `definition_list_artifact`.
 
@@ -136,7 +136,7 @@ Reports include additive structured fields when available:
 - `runtime_telemetry`: request count, retry count, bytes observed, source failures, cache hits, and cache refreshes
 - `adaptive_telemetry`: bulk scheduling policy, min/max/current concurrency, adjustment count, adjustment reasons, observed windows, failed language count, and retry-pressure windows
 
-`output/reports/history/` stores timestamped copies of run summaries. `trends.json` and `trends.md` summarize historical document counts, validation scores, issue counts, duration, runtime telemetry, and failures. Existing `run_summary.json` and `run_summary.md` remain the latest-report contract.
+`output/reports/history/` stores timestamped copies of run summaries. `trends.json` and `trends.md` summarize historical document counts, validation scores, issue counts, duration, runtime telemetry, and failures. `run_summary.md` may additionally render validation component scores when present. Existing `run_summary.json` and `run_summary.md` remain the latest-report contract.
 
 ## Phase 7 Optional Outputs
 

@@ -132,6 +132,80 @@ def test_validator_reports_source_inventory_mismatch(tmp_path: Path) -> None:
     assert any(issue.code == "source_inventory_mismatch" for issue in result.issues)
 
 
+def test_validator_emits_weighted_component_scores(tmp_path: Path) -> None:
+    output = _consolidated(
+        tmp_path / "test.md",
+        "\n".join(
+            [
+                '<a id="reference"></a>',
+                "",
+                "### Reference",
+                "",
+                "#### Alpha",
+                "",
+                "See [guide](relative/page).",
+            ]
+        ),
+    )
+
+    result = validate_output(
+        language="Test",
+        output_path=output,
+        total_documents=1,
+        topics=[TopicStats(topic="Reference", document_count=1)],
+    )
+
+    assert result.component_scores is not None
+    assert result.component_scores.completeness == 1.0
+    assert result.component_scores.conversion < 1.0
+    assert result.score == result.quality_score
+
+
+def test_weighted_validation_penalizes_small_bundle_more_than_large_bundle(tmp_path: Path) -> None:
+    small_output = _consolidated(
+        tmp_path / "small.md",
+        "\n".join(
+            [
+                '<a id="reference"></a>',
+                "",
+                "### Reference",
+                "",
+                "#### Alpha",
+                "",
+                "See [guide](relative/page).",
+            ]
+        ),
+    )
+    large_output = _consolidated(
+        tmp_path / "large.md",
+        "\n".join(['<a id="reference"></a>', "", "### Reference", "", '<a id="alpha"></a>', "", "#### Alpha"]),
+    )
+    large_text = large_output.read_text(encoding="utf-8").replace(
+        "#### Alpha",
+        "\n".join(f"#### Alpha {index}\n\ncontent" for index in range(1, 17)),
+    )
+    large_text = large_text.replace("x" * 2200, "See [guide](relative/page).\n\n" + ("x" * 2200))
+    write_text(large_output, large_text)
+
+    small = validate_output(
+        language="Small",
+        output_path=small_output,
+        total_documents=1,
+        topics=[TopicStats(topic="Reference", document_count=1)],
+    )
+    large = validate_output(
+        language="Large",
+        output_path=large_output,
+        total_documents=16,
+        topics=[TopicStats(topic="Reference", document_count=16)],
+    )
+
+    assert small.component_scores is not None
+    assert large.component_scores is not None
+    assert small.component_scores.conversion < large.component_scores.conversion
+    assert small.score < large.score
+
+
 def test_document_validation_jsonl_maps_issues_to_document_paths(tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"
     language_dir = tmp_path / "markdown" / "doc-lang"

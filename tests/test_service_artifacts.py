@@ -37,13 +37,24 @@ def test_service_output_reading_and_path_safety(tmp_path: Path) -> None:
     assert bundles[0].language == "Synthetic"
     assert bundles[0].has_chunks is True
     assert bundles[0].has_frontmatter is True
+    assert bundles[0].bundle_bytes > 0
+    assert bundles[0].file_count >= 4
+    assert bundles[0].chunk_count == 1
     tree = service.output_tree("synthetic")
     assert any(child.name == "synthetic.md" for child in tree.children)
     assert service.read_output_file("synthetic", "synthetic.md").content == "# Synthetic\n"
     assert service.read_meta("synthetic")["language"] == "Synthetic"
+    storage = service.output_storage_summary()
+    assert storage.bundle_count == 1
+    assert storage.total_bundle_bytes >= bundles[0].bundle_bytes
 
     with pytest.raises(ValueError):
         service.read_output_file("synthetic", "..\\..\\pyproject.toml")
+
+    deleted = service.delete_output_bundle("synthetic")
+    assert deleted.deleted is True
+    assert deleted.freed_bytes >= bundles[0].bundle_bytes
+    assert not language_dir.exists()
 
 
 def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
@@ -92,6 +103,10 @@ def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
     assert cache[0].cache_key == "docs-json"
     assert service.delete_checkpoint("synthetic") is True
     assert not (config.paths.checkpoints_dir / "synthetic.json").exists()
+    pruned = service.prune_report_history(keep_latest=0)
+    assert pruned.deleted is True
+    assert pruned.deleted_files == 1
+    assert not (config.paths.reports_dir / "history").exists()
 
     with pytest.raises(ValueError):
         service.read_report_file("..\\state\\synthetic.json")
