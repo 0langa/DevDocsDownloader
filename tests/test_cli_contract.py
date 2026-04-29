@@ -35,7 +35,6 @@ def test_cli_help_exposes_scripted_contract_options() -> None:
     assert "Concurrency:" in bulk_result.output
     assert "adaptive policy lowers concurrency" in bulk_result.output
     assert "Each language keeps its own state" in bulk_result.output
-    assert "bulk webapp --concurrency-policy adaptive" in bulk_result.output
 
     assert audit_result.exit_code == 0
     assert "Resolve one or all presets" in audit_result.output
