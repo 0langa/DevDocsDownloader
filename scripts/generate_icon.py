@@ -1,10 +1,9 @@
 """Generate DevDocsDownloader.ico at multiple resolutions using Pillow."""
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "desktop" / "DevDocsDownloader.Desktop" / "Assets" / "DevDocsDownloader.ico"
@@ -33,7 +32,6 @@ def draw_arrow_down(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int, colo
     half = size // 2
     stem_w = max(2, size // 5)
     stem_h = size // 2
-    head_h = size - stem_h
     head_w = size
 
     # Stem
@@ -56,7 +54,6 @@ def draw_code_brackets(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int, c
     gap = size // 4
     bw = size // 3     # bracket width
     bh = size // 2     # bracket height
-    tip = size // 5    # inward tip
 
     # Left bracket <
     lx = cx - gap - bw

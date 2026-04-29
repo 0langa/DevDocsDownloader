@@ -51,6 +51,21 @@ public sealed class BackendProcessHost : IAsyncDisposable
         return _client;
     }
 
+    /// <summary>Synchronously kill the backend process. Safe to call from a Closed event handler.</summary>
+    public void Terminate()
+    {
+        try
+        {
+            if (_process is not null && !_process.HasExited)
+            {
+                _process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_client is not null)

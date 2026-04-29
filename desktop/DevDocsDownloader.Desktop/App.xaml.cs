@@ -22,6 +22,7 @@ public partial class App : Application
         try
         {
             MainWindow = new MainWindow();
+            MainWindow.Closed += (_, _) => BackendHost.Terminate();
             MainWindow.Activate();
             await MainViewModel.InitializeAsync();
         }

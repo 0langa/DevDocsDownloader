@@ -218,9 +218,24 @@ def _version_key(catalog: LanguageCatalog) -> tuple:
     return (tuple(parts), version)
 
 
+def _normalise_lang(s: str) -> str:
+    """Normalise a language name token for fuzzy matching.
+
+    Maps common display-name conventions to the slug-style form used by source
+    catalogs, e.g. "C++" → "cpp", "C#" → "csharp", "Node.js" → "nodejs".
+    """
+    s = s.lower().strip()
+    s = s.replace("++", "pp")      # C++ → cpp
+    s = s.replace("#", "sharp")    # C# → csharp
+    s = s.replace(".", "")         # Node.js → nodejs
+    s = s.replace(" ", "")
+    return s
+
+
 def _exact_match(entries: list[LanguageCatalog], needle: str) -> LanguageCatalog | None:
     if not entries:
         return None
+    needle_norm = _normalise_lang(needle)
     exact: list[LanguageCatalog] = []
     prefix: list[LanguageCatalog] = []
     contains: list[LanguageCatalog] = []
@@ -229,7 +244,13 @@ def _exact_match(entries: list[LanguageCatalog], needle: str) -> LanguageCatalog
         slug = entry.slug.lower()
         family = slug.split("~", 1)[0]
         aliases = {alias.lower() for alias in entry.aliases}
-        if display == needle or slug == needle or family == needle or needle in aliases:
+        display_norm = _normalise_lang(display)
+        slug_norm = _normalise_lang(slug)
+        family_norm = _normalise_lang(family)
+        if (
+            display == needle or slug == needle or family == needle or needle in aliases
+            or (needle_norm and (display_norm == needle_norm or slug_norm == needle_norm or family_norm == needle_norm))
+        ):
             exact.append(entry)
         elif (
             display.startswith(needle)
