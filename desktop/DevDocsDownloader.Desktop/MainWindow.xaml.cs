@@ -203,6 +203,11 @@ public sealed partial class MainWindow : Window
         root.Children.Add(headerBorder);
         root.Children.Add(_contentFrame);
         Content = root;
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "DevDocsDownloader.ico");
+        if (File.Exists(iconPath))
+        {
+            AppWindow.SetIcon(iconPath);
+        }
         var scale = Content.XamlRoot?.RasterizationScale ?? 1.0;
         AppWindow.Resize(new SizeInt32((int)(MinimumWindowWidth * scale), (int)(MinimumWindowHeight * scale)));
         SizeChanged += OnWindowSizeChanged;
@@ -232,6 +237,7 @@ public sealed partial class MainWindow : Window
     {
         if (args.PropertyName is nameof(ViewModels.MainWindowViewModel.StatusText)
             or nameof(ViewModels.MainWindowViewModel.CurrentOutputRoot)
+            or nameof(ViewModels.MainWindowViewModel.ActiveJobId)
             or nameof(ViewModels.MainWindowViewModel.ActiveJobLabel)
             or nameof(ViewModels.MainWindowViewModel.LatestActivity)
             or nameof(ViewModels.MainWindowViewModel.WarningCount)

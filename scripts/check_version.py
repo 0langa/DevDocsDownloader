@@ -28,13 +28,20 @@ def main() -> None:
         mismatches.append(f"desktop csproj={desktop_version}")
     if installer_version != version:
         mismatches.append(f"installer iss={installer_version}")
-    if manifest_version != f"{version}.0":
+    if manifest_version != _pad_to_four(version):
         mismatches.append(f"app manifest={manifest_version}")
     if mismatches:
         joined = ", ".join(mismatches)
         raise SystemExit(f"Version mismatch for {version}: {joined}")
 
     print(f"[version] OK: {version}")
+
+
+def _pad_to_four(version: str) -> str:
+    parts = version.split(".")
+    while len(parts) < 4:
+        parts.append("0")
+    return ".".join(parts[:4])
 
 
 def _match(text: str, pattern: str) -> str:

@@ -346,7 +346,6 @@ public partial class MainWindowViewModel : ObservableObject
         if (status is "completed" or "failed" or "cancelled")
         {
             ProgressIndeterminate = false;
-            ProgressVisible = true;
             ProgressValue = status == "completed" ? 100 : ProgressValue;
             LatestActivity = $"Job {status}: {detail}";
             AppendActivity(LatestActivity);
@@ -355,6 +354,8 @@ public partial class MainWindowViewModel : ObservableObject
                 FailureCount += 1;
             }
             ActiveJobId = "";
+            ActiveJobLabel = "";
+            ProgressVisible = false;
         }
     }
 

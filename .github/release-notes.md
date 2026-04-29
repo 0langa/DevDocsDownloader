@@ -1,20 +1,17 @@
-# DevDocsDownloader 1.0.9
+# DevDocsDownloader 1.0.9.1
 
-Reliability and UX polish release.
+Hotfix release — UI state and window icon fixes.
 
-Changes since 1.0.8:
+Changes since 1.0.9:
 
-- Fixed cancel button: shows "Cancelling..." immediately on click; asyncio cooperative cancellation allows CancelledError to propagate at document boundaries instead of waiting for the entire run.
-- Fixed blank window on backend startup failure: a ContentDialog now shows the error message and desktop log path.
-- Fixed SSE stream dropping silently: the shell reconnects automatically on unexpected stream disconnect using a from_index cursor (up to 5 retries with exponential backoff).
-- Added backend health monitor: polls /health every 30s; marks backend unavailable and shows status text if the backend crashes; recovers automatically if the backend becomes healthy again.
-- Added job history persistence: completed, failed, and cancelled job summaries are written to logs/job_history.jsonl and restored on backend startup.
-- Fixed ruff format violations in registry.py and generate_icon.py (alignment spaces, long boolean conditions).
+- Fixed sidebar not clearing after job completes: cancel button, progress bar, and job label now reset to idle state when a job finishes (completed, failed, or cancelled).
+- Fixed window/taskbar icon missing at runtime: the app now calls AppWindow.SetIcon() on startup so the correct icon appears in the taskbar and title bar (not just the installer).
+- Fixed ActiveJobId property change not triggering sidebar refresh: ApplyShellState was not wired to ActiveJobId, so the cancel button stayed visible after ActiveJobId cleared.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.0.9.exe`
-- `DevDocsDownloader-Portable-1.0.9.zip`
+- `DevDocsDownloader-Setup-1.0.9.1.exe`
+- `DevDocsDownloader-Portable-1.0.9.1.zip`
 - `SHA256SUMS.txt`
 
 Notes:
