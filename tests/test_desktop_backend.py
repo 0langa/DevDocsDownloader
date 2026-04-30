@@ -8,7 +8,7 @@ import httpx
 from doc_ingest.config import load_config
 from doc_ingest.desktop_backend import create_app
 from doc_ingest.desktop_settings import DesktopSettings, DesktopSettingsStore
-from doc_ingest.models import RunSummary
+from doc_ingest.models import DryRunResult, RunSummary
 from doc_ingest.services import (
     CatalogRefreshResult,
     DocumentationService,
@@ -138,6 +138,49 @@ def test_desktop_backend_run_language_job_and_events(tmp_path: Path, monkeypatch
     asyncio.run(scenario())
 
 
+def test_desktop_backend_queues_jobs_and_reports_positions(tmp_path: Path, monkeypatch) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
+        if request.language == "Python":
+            started.set()
+            await release.wait()
+        return RunSummary()
+
+    monkeypatch.setattr(DocumentationService, "run_language", fake_run_language)
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret")
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=5.0) as client:
+            first = await client.post("/jobs/run-language", headers=headers, json={"language": "Python"})
+            assert first.status_code == 202
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+
+            second = await client.post("/jobs/run-language", headers=headers, json={"language": "Rust"})
+            assert second.status_code == 202
+            assert second.json()["status"] == "pending"
+            assert second.json()["queue_position"] == 1
+
+            queue = await client.get("/jobs/queue", headers=headers)
+            assert queue.status_code == 200
+            assert queue.json()["depth"] == 1
+            assert queue.json()["pending"][0]["language"] == "Rust"
+
+            release.set()
+            for _ in range(50):
+                status = await client.get(f"/jobs/{second.json()['id']}", headers=headers)
+                if status.json()["status"] == "completed":
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                raise AssertionError("queued job did not complete")
+
+    asyncio.run(scenario())
+
+
 def test_desktop_backend_languages_and_settings_endpoints(tmp_path: Path, monkeypatch) -> None:
     async def fake_list_languages(self, *, source=None, force_refresh=False):
         return [LanguageEntry(language="Python", source="devdocs", slug="python", version="3.13")]
@@ -250,6 +293,75 @@ def test_desktop_backend_output_storage_management_endpoints(tmp_path: Path, mon
             assert pruned.status_code == 200
             assert pruned.json()["deleted_files"] == 1
             assert not history_dir.exists()
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_cache_summary_and_entry_delete_endpoints(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config = load_config(root=tmp_path, runtime_mode="repo")
+        cache_entry = config.paths.cache_dir / "devdocs" / "python"
+        cache_entry.mkdir(parents=True, exist_ok=True)
+        payload = cache_entry / "index.json"
+        payload.write_text("{}", encoding="utf-8")
+        (cache_entry / "index.json.meta.json").write_text(
+            '{"source":"devdocs","cache_key":"python/index.json","url":"","fetched_at":"2026-01-01T00:00:00Z","source_version":"","etag":"","last_modified":"","checksum":"","byte_count":2,"policy":"use-if-present","refreshed_by_force":false,"mdn_commit_sha":""}',
+            encoding="utf-8",
+        )
+
+        app = create_app(config, token="secret")
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            summary = await client.get("/cache/summary", headers=headers)
+            assert summary.status_code == 200
+            assert summary.json()["entries"][0]["slug"] == "python"
+
+            deleted = await client.delete("/cache/entry?source=devdocs&slug=python", headers=headers)
+            assert deleted.status_code == 200
+            assert deleted.json()["deleted"] is True
+            assert not cache_entry.exists()
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_dry_run_returns_preview_summary(tmp_path: Path, monkeypatch) -> None:
+    async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
+        assert request.dry_run is True
+        return DryRunResult(
+            language=request.language,
+            source="devdocs",
+            slug="python",
+            estimated_document_count=42,
+            estimated_size_hint=4096,
+            topics=["Guide", "API"],
+        )
+
+    monkeypatch.setattr(DocumentationService, "run_language", fake_run_language)
+    app = create_app(load_config(root=tmp_path, runtime_mode="repo"), token="secret")
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=5.0) as client:
+            created = await client.post(
+                "/jobs/run-language", headers=headers, json={"language": "Python", "dry_run": True}
+            )
+            assert created.status_code == 202
+            job_id = created.json()["id"]
+
+            for _ in range(50):
+                status = await client.get(f"/jobs/{job_id}", headers=headers)
+                assert status.status_code == 200
+                if status.json()["status"] == "completed":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("dry-run job did not complete")
+
+            payload = status.json()["summary"]
+            assert payload["estimated_document_count"] == 42
+            assert payload["topics"] == ["Guide", "API"]
 
     asyncio.run(scenario())
 

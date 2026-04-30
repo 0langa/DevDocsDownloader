@@ -33,7 +33,8 @@
                             PlaceholderText="Search catalog (e.g. python, angular, react)..."
                             TextChanged="OnLanguageSearchTextChanged"
                             SuggestionChosen="OnLanguageSuggestionChosen"
-                            QuerySubmitted="OnLanguageQuerySubmitted" />
+                            QuerySubmitted="OnLanguageQuerySubmitted"
+                            UpdateTextOnSelect="False" />
 
                         <!-- Selected languages list -->
                         <StackPanel Spacing="4">

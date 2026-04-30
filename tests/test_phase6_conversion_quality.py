@@ -143,9 +143,12 @@ def test_validator_reports_relative_links_empty_targets_and_conversion_artifacts
     assert "relative_link" in codes
     assert "relative_image" in codes
     assert "empty_link_target" in codes
-    assert "html_leftover" in codes
+    assert "html_artifact" in codes
     assert "malformed_table" in codes
     assert "definition_list_artifact" in codes
+    suggestions = {issue.code: issue.suggestion for issue in result.issues}
+    assert suggestions["relative_link"] == "Rerun with a newer cache; source HTML may have changed."
+    assert suggestions["html_artifact"] == "Conversion profile may need tuning for this source."
 
 
 def test_pipeline_integration_preserves_rewritten_source_links(tmp_path: Path) -> None:

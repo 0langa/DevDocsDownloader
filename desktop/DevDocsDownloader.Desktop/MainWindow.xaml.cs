@@ -35,6 +35,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _jobLabelTextBlock;
     private readonly TextBlock _activityTextBlock;
     private readonly TextBlock _warningTextBlock;
+    private readonly TextBlock _errorHintTextBlock;
     private readonly ProgressBar _progressBar;
     private readonly Button _cancelJobButton;
     private readonly Frame _contentFrame;
@@ -130,6 +131,15 @@ public sealed partial class MainWindow : Window
                         FontSize = 12,
                         Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 206, 120)),
                     }),
+                    (_errorHintTextBlock = new TextBlock
+                    {
+                        TextWrapping = TextWrapping.Wrap,
+                        FontSize = 12,
+                        Padding = new Thickness(8),
+                        Background = new SolidColorBrush(ColorHelper.FromArgb(255, 74, 52, 18)),
+                        Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 220, 160)),
+                        Visibility = Visibility.Collapsed,
+                    }),
                     (_cancelJobButton = new Button
                     {
                         Content = "Cancel active job",
@@ -209,8 +219,13 @@ public sealed partial class MainWindow : Window
         root.Children.Add(headerBorder);
         root.Children.Add(_contentFrame);
         Content = root;
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "DevDocsDownloader.ico");
-        if (File.Exists(iconPath))
+        var iconCandidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "DevDocsDownloader.ico"),
+            Path.Combine(AppContext.BaseDirectory, "Assets", "DevDocsDownloader.ico"),
+        };
+        var iconPath = iconCandidates.FirstOrDefault(File.Exists);
+        if (!string.IsNullOrWhiteSpace(iconPath))
         {
             AppWindow.SetIcon(iconPath);
         }
@@ -236,6 +251,7 @@ public sealed partial class MainWindow : Window
             or nameof(ViewModels.MainWindowViewModel.LatestActivity)
             or nameof(ViewModels.MainWindowViewModel.WarningCount)
             or nameof(ViewModels.MainWindowViewModel.FailureCount)
+            or nameof(ViewModels.MainWindowViewModel.LastErrorHint)
             or nameof(ViewModels.MainWindowViewModel.ProgressVisible)
             or nameof(ViewModels.MainWindowViewModel.ProgressIndeterminate)
             or nameof(ViewModels.MainWindowViewModel.ProgressValue)
@@ -301,6 +317,10 @@ public sealed partial class MainWindow : Window
         _warningTextBlock.Text = App.MainViewModel.WarningCount > 0 || App.MainViewModel.FailureCount > 0
             ? $"Warnings: {App.MainViewModel.WarningCount}   Failures: {App.MainViewModel.FailureCount}"
             : "";
+        _errorHintTextBlock.Text = App.MainViewModel.LastErrorHint;
+        _errorHintTextBlock.Visibility = string.IsNullOrWhiteSpace(App.MainViewModel.LastErrorHint)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         _progressBar.Visibility = App.MainViewModel.ProgressVisible ? Visibility.Visible : Visibility.Collapsed;
         _progressBar.IsIndeterminate = App.MainViewModel.ProgressIndeterminate;
         _progressBar.Value = App.MainViewModel.ProgressValue;

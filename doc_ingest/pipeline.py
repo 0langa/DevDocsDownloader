@@ -15,6 +15,8 @@ from .models import (
     BulkConcurrencyPolicy,
     CrawlMode,
     DocumentArtifactCheckpoint,
+    DryRunResult,
+    FailureDetail,
     LanguageRunCheckpoint,
     LanguageRunReport,
     LanguageRunState,
@@ -37,6 +39,7 @@ from .sources.base import (
     DocumentWarningEvent,
     LanguageCatalog,
     SkippedEvent,
+    SourceError,
     SourceStatsEvent,
     WarningEvent,
     document_events,
@@ -56,6 +59,8 @@ class DocumentationPipeline:
         self.runtime = SourceRuntime(
             cache_policy=config.cache_policy,
             cache_ttl_hours=config.cache_ttl_hours,
+            cache_root=config.paths.cache_dir,
+            max_cache_size_bytes=config.max_cache_size_mb * 1024 * 1024,
         )
         self.registry = SourceRegistry(cache_dir=config.paths.cache_dir, runtime=self.runtime)
 
@@ -192,7 +197,14 @@ class DocumentationPipeline:
                 source="none",
                 source_slug="",
                 mode=mode,
-                failures=[f"No source provides '{language_name}'. Closest matches: {hint}."],
+                failures=[
+                    FailureDetail(
+                        code="not_found",
+                        message=f"No source provides '{language_name}'. Closest matches: {hint}.",
+                        hint="Choose one of the suggested languages or refresh catalogs.",
+                        is_retriable=False,
+                    )
+                ],
             )
             summary.reports.append(report)
             if _write_reports:
@@ -214,6 +226,41 @@ class DocumentationPipeline:
         if _write_reports:
             write_reports(summary, self.config.paths.reports_dir)
         return summary
+
+    async def dry_run(
+        self,
+        *,
+        language_name: str,
+        mode: CrawlMode = "important",
+        source_name: str | None = None,
+        force_refresh: bool = False,
+        include_topics: list[str] | None = None,
+        exclude_topics: list[str] | None = None,
+    ) -> DryRunResult:
+        resolution = await self.registry.resolve(
+            language_name,
+            source_name=source_name,
+            force_refresh=force_refresh,
+        )
+        if resolution is None:
+            suggestions = await self.registry.suggest(language_name)
+            hint = ", ".join(f"{display} ({src})" for src, display in suggestions) or "none"
+            raise SourceError(
+                "not_found",
+                f"No source provides '{language_name}'. Closest matches: {hint}.",
+                hint="Language not found in any source catalog.",
+                is_retriable=False,
+            )
+        source, catalog = resolution
+        include_topic_set = _normalize_topic_filter(include_topics)
+        exclude_topic_set = _normalize_topic_filter(exclude_topics)
+        return await source.preview(
+            catalog,
+            mode,
+            force_refresh=force_refresh,
+            include_topics=include_topic_set,
+            exclude_topics=exclude_topic_set,
+        )
 
     def _validate_local_output(self, *, language_name: str, mode: CrawlMode) -> LanguageRunReport | None:
         language_slug = slugify(language_name)
@@ -266,7 +313,14 @@ class DocumentationPipeline:
         )
         started = time.perf_counter()
         if report.output_path is None:
-            report.failures.append("No compiled output found for this language.")
+            report.failures.append(
+                FailureDetail(
+                    code="missing_output",
+                    message="No compiled output found for this language.",
+                    hint="Run failed before compilation; check the run log.",
+                    is_retriable=False,
+                )
+            )
         else:
             report.validation = validate_output(
                 language=report.language,
@@ -340,7 +394,14 @@ class DocumentationPipeline:
         if validate_only:
             report.output_path = consolidated_path if consolidated_path.exists() else None
             if report.output_path is None:
-                report.failures.append("No compiled output found for this language.")
+                report.failures.append(
+                    FailureDetail(
+                        code="missing_output",
+                        message="No compiled output found for this language.",
+                        hint="Run failed before compilation; check the run log.",
+                        is_retriable=False,
+                    )
+                )
             else:
                 prior = state_store.load(
                     default=LanguageRunState(
@@ -455,7 +516,7 @@ class DocumentationPipeline:
             )
         except Exception as exc:
             LOGGER.exception("Failed to compile %s from %s", catalog.display_name, source.name)
-            report.failures.append(f"{type(exc).__name__}: {exc}")
+            report.failures.append(_failure_detail_from_exception(exc))
             report.document_warnings = document_warnings
             checkpoint_store.record_failure(
                 checkpoint,
@@ -519,7 +580,7 @@ class DocumentationPipeline:
             )
         except Exception as exc:
             LOGGER.exception("Failed to finalize %s from %s", catalog.display_name, source.name)
-            report.failures.append(f"{type(exc).__name__}: {exc}")
+            report.failures.append(_failure_detail_from_exception(exc))
             checkpoint_store.record_failure(
                 checkpoint,
                 phase=checkpoint.phase,
@@ -598,6 +659,23 @@ def _telemetry_snapshot(runtime: SourceRuntime) -> RuntimeTelemetrySnapshot:
         failures=telemetry.failures,
         cache_hits=telemetry.cache_hits,
         cache_refreshes=telemetry.cache_refreshes,
+        circuit_breaker_rejections=telemetry.circuit_breaker_rejections,
+    )
+
+
+def _failure_detail_from_exception(exc: Exception) -> FailureDetail:
+    if isinstance(exc, SourceError):
+        return FailureDetail(
+            code=exc.code,
+            message=exc.message,
+            hint=exc.hint,
+            is_retriable=exc.is_retriable,
+        )
+    return FailureDetail(
+        code="runtime_error",
+        message=f"{type(exc).__name__}: {exc}",
+        hint="Check the run log for the full stack trace.",
+        is_retriable=False,
     )
 
 

@@ -1,10 +1,10 @@
 # Development Progress
 
-## Current state summary (v1.1.1)
+## Current state summary (post-1.1.5 development)
 
 The repository ships as a working Windows desktop application backed by a frozen Python FastAPI process. The active Python package is a source-adapter ingestion pipeline for DevDocs, MDN, and Dash/Kapeli. The WinUI3 shell covers all operator workflows: Languages, Run, Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings.
 
-Highlights shipped in `v1.1.1`:
+Highlights shipped in `v1.1.5`:
 - Cooperative cancellation via `asyncio.sleep(0)` in the event sink between documents
 - Job history persisted to `logs/job_history.jsonl` and restored on backend startup
 - 30s backend health monitor with dispatcher-safe UI updates on failure/recovery
@@ -16,6 +16,15 @@ Highlights shipped in `v1.1.1`:
 - weighted validation score with additive component scores
 - bounded live Dash acceptance probe that extracts a real docset, validates SQLite traversal, and converts one indexed document
 - output storage management in the desktop shell: bundle sizes, safe bundle deletion, and report-history pruning
+- low-memory streamed compilation with raw-document temp artifacts instead of in-memory whole-language retention
+- MDN archive indexing, on-demand member reads, and commit-SHA delta detection
+- per-domain source-runtime circuit breakers plus adaptive memory-pressure emergency throttling
+- bounded desktop job queue with queued-position status instead of 409 conflicts
+- structured source failures with actionable hints in the shell and reports
+- cache management UI with per-source summaries, per-entry refresh/delete, source clear, and full cache clear
+- cache budget enforcement plus budget display in Settings and Cache
+- dry-run preview jobs that resolve a source and show estimated document inventory before a real run
+- focused unit suites for conversion, cache policy/metadata, adaptive scheduling, backend job lifecycle, and mocked source adapters
 
 ## What works today
 
@@ -48,8 +57,8 @@ Highlights shipped in `v1.1.1`:
 ### MDN adapter
 
 - Dynamic catalog discovery with cached-manifest fallback
-- GitHub tarball download with checksum and area-readiness metadata
-- Selective tar extraction (only relevant `files/en-us` trees)
+- GitHub tarball download with checksum, cached commit SHA, and delta detection against `commits/main`
+- Archive index built by streaming the tarball once; `index.md` members read on demand without extracting the full tree
 - Safe YAML frontmatter parsing with recoverable malformed input
 - Important/full mode filtering via `page-type`
 
@@ -66,6 +75,7 @@ Highlights shipped in `v1.1.1`:
 - Per-topic directories, per-document Markdown, topic `_section.md`, language `index.md`, consolidated language Markdown, and `_meta.json`
 - Windows-reserved filename normalization through `slugify()`
 - Collision-safe consolidated anchors via shared unique-anchor registry
+- Streaming consolidated-file and chunk-manifest writes; whole-language content no longer retained in memory
 - Optional YAML frontmatter per document (`--document-frontmatter`)
 - Optional retrieval chunk export with JSONL manifest (`--chunks`)
 - Optional tokenizer-aware chunking via tiktoken (`--chunk-strategy tokens`)
@@ -86,10 +96,10 @@ Highlights shipped in `v1.1.1`:
 ### Desktop backend and WinUI shell
 
 - FastAPI loopback backend on `127.0.0.1:{random-port}` with bearer-token auth
-- Single active job queue (409 on conflict); SSE event streaming with 15s heartbeat
+- Bounded desktop job queue (max 10 pending) with automatic dequeue and SSE event streaming with 15s heartbeat
 - Job history persisted to `logs/job_history.jsonl`; reloaded on backend startup
 - Cooperative cancellation: `asyncio.sleep(0)` in event sink allows `CancelledError` propagation at document boundaries
-- Health/version/shutdown, run/bulk/validate, output/reports/checkpoints/cache/settings endpoints
+- Health/version/shutdown, run/bulk/validate, queue, output/reports/checkpoints/cache/settings endpoints
 - WinUI3 shell: persistent tab state, shared live progress and activity log, cancel button with immediate feedback
 - SSE client reconnects on stream drop using `from_index` cursor (5 retries, exponential backoff)
 - 30s health monitor detects backend crash and updates shell status
@@ -97,8 +107,16 @@ Highlights shipped in `v1.1.1`:
 - Language tree: searchable source-first and category-first views
 - Output Browser, Reports, Checkpoints, Cache, Settings pages all present and functional
 - Output Browser shows managed storage totals, bundle sizes, safe delete, and report-history pruning
+- Queued jobs show `Queued (position N)` instead of throwing a busy error
+- Failure events carry structured `code` / `message` / `hint` payloads; the shell shows the hint in a distinct warning block
+- Reports page renders validation suggestions and failure hints inline
 - Desktop default output root: `%UserProfile%\Documents\DevDocsDownloader`
 - Desktop per-user storage: `%LocalAppData%\DevDocsDownloader\{cache,state,logs,tmp,settings}`
+
+### Runtime resilience
+
+- `SourceRuntime` keeps per-domain circuit breakers for repeated upstream failures and backs off before retrying affected domains
+- Adaptive bulk scheduling can emergency-drop concurrency to `1` when memory pressure crosses the configured threshold
 
 ### Tests
 
@@ -111,9 +129,10 @@ Highlights shipped in `v1.1.1`:
 
 Layered and pragmatic — not semantic.
 
-- detects missing/tiny output, unbalanced code fences, required sections, unresolved links, HTML leftovers, malformed tables, definition-list artifacts
+- detects missing/tiny output, unbalanced code fences, required sections, unresolved links, HTML artifacts, malformed tables, definition-list artifacts
 - checks internal anchors, duplicate sections/document headings, source inventory reconciliation
 - weights validation scores by bundle size and emits component scores instead of flat per-issue deductions
+- emits actionable suggestions for the common issue classes the desktop report preview surfaces directly
 - emits per-document validation records
 
 Does **not** verify:
@@ -129,7 +148,6 @@ Cooperative cancel improved: `asyncio.sleep(0)` between events allows `Cancelled
 
 See `documentation/roadmap.md` for the full prioritized list. Summary of remaining open issues:
 
-- Single-job queue with no queuing UI (High)
 - Dash source still lacks broad full-language acceptance coverage (High)
 - Some language normalization edge cases may still exist outside the common alias set (Medium)
 - Settings changes don't affect already-running jobs (Medium)
@@ -145,7 +163,7 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 | Config/paths | Working | Repo and desktop modes |
 | Registry | Working | Normalization, exact/family/prefix/contains matching, plugins |
 | DevDocs adapter | Working | Best-aligned source |
-| MDN adapter | Working with caveats | Heavy archive; simple frontmatter |
+| MDN adapter | Working with caveats | Heavy archive but now archive-indexed; frontmatter still simple |
 | Dash adapter | Working with caveats | Bounded live acceptance exists; full language coverage still not in routine CI |
 | Compiler | Working | Chunking, asset inventory, link rewriting |
 | Validator | Working | Structural, anchor, inventory, per-document records |
@@ -169,10 +187,9 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 
 ### Medium priority (v1.1.x - v1.2.0)
 
-1. Job queue UI (show pending state instead of 409 error)
-2. Better desktop cleanup breadth (cache + richer retention controls)
-3. Broader Dash acceptance depth in CI
-4. Packaging/distribution cleanup around desktop release reliability
+1. Better desktop cleanup breadth (cache + richer retention controls)
+2. Broader Dash acceptance depth in CI
+3. Packaging/distribution cleanup around desktop release reliability
 
 ### Lower priority (v1.2.0+)
 

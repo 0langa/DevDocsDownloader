@@ -21,7 +21,14 @@
                 </Grid.ColumnDefinitions>
                 <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                     <StackPanel Spacing="12">
-                        <TextBox x:Name="LanguageBox" Header="Language" PlaceholderText="python" TextChanged="OnFormChanged" />
+                        <AutoSuggestBox
+                            x:Name="LanguageBox"
+                            Header="Language"
+                            PlaceholderText="Search catalog (e.g. python, angular, react)..."
+                            TextChanged="OnLanguageTextChanged"
+                            SuggestionChosen="OnLanguageSuggestionChosen"
+                            QuerySubmitted="OnLanguageQuerySubmitted"
+                            UpdateTextOnSelect="False" />
                         <ComboBox x:Name="ModeBox" Header="Mode" SelectionChanged="OnFormChanged">
                             <x:String>important</x:String>
                             <x:String>full</x:String>
@@ -31,6 +38,7 @@
                         <CheckBox x:Name="ForceRefreshBox" Content="Force refresh source cache" Checked="OnFormChanged" Unchecked="OnFormChanged" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button x:Name="StartRunButton" Content="Start run" Click="OnStartRun" />
+                            <Button x:Name="PreviewButton" Content="Preview" Click="OnPreview" />
                             <Button Content="Cancel active job" Click="OnCancelJob" />
                         </StackPanel>
                         <TextBlock Text="Language lookup uses the merged source catalog. You can pick a language directly from the Languages tab to prefill this form." Opacity="0.7" TextWrapping="WrapWholeWords" />

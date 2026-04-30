@@ -29,6 +29,9 @@ public partial class MainWindowViewModel : ObservableObject
     private int? _cacheTtlHours;
 
     [ObservableProperty]
+    private int _maxCacheSizeMb = 2048;
+
+    [ObservableProperty]
     private string _defaultMode = "important";
 
     [ObservableProperty]
@@ -158,15 +161,20 @@ public partial class MainWindowViewModel : ObservableObject
         ApplySettings(saved);
     }
 
-    public async Task StartTrackingJobAsync(string jobId, string label, string kind)
+    public async Task StartTrackingJobAsync(string jobId, string label, string kind, string initialStatus = "running", int? queuePosition = null)
     {
         CancelTracking();
         ResetProgress();
         ActiveJobId = jobId;
-        ActiveJobLabel = label;
+        ActiveJobLabel = initialStatus == "pending" && queuePosition.HasValue
+            ? $"Queued (position {queuePosition.Value}) — {label}"
+            : label;
         ActiveJobKind = kind;
         ProgressVisible = true;
-        LatestActivity = $"Starting {label}";
+        ProgressIndeterminate = initialStatus == "pending";
+        LatestActivity = initialStatus == "pending" && queuePosition.HasValue
+            ? $"Queued (position {queuePosition.Value})"
+            : $"Starting {label}";
         AppendActivity(LatestActivity);
         _jobMonitorCts = new CancellationTokenSource();
         _jobMonitorTask = MonitorJobAsync(jobId, _jobMonitorCts.Token);
@@ -223,7 +231,13 @@ public partial class MainWindowViewModel : ObservableObject
             var language = job["language"]?.GetValue<string>() ?? "";
             var detail = job["detail"]?.GetValue<string>() ?? language;
             var kind = job["kind"]?.GetValue<string>() ?? "";
-            await StartTrackingJobAsync(id, string.IsNullOrWhiteSpace(detail) ? "active job" : detail, kind);
+            var queuePosition = job["queue_position"]?.GetValue<int?>();
+            await StartTrackingJobAsync(
+                id,
+                string.IsNullOrWhiteSpace(detail) ? "active job" : detail,
+                kind,
+                status,
+                queuePosition);
             return;
         }
     }
@@ -342,7 +356,17 @@ public partial class MainWindowViewModel : ObservableObject
         }
         var status = job["status"]?.GetValue<string>() ?? "";
         var detail = job["detail"]?.GetValue<string>() ?? ActiveJobLabel;
-        ActiveJobLabel = detail;
+        var queuePosition = job["queue_position"]?.GetValue<int?>();
+        ActiveJobLabel = status == "pending" && queuePosition.HasValue
+            ? $"Queued (position {queuePosition.Value}) — {detail}"
+            : detail;
+        if (status == "pending" && queuePosition.HasValue)
+        {
+            LatestActivity = $"Queued (position {queuePosition.Value})";
+            ProgressVisible = true;
+            ProgressIndeterminate = true;
+            return;
+        }
         if (status is "completed" or "failed" or "cancelled")
         {
             ProgressIndeterminate = false;
@@ -368,6 +392,7 @@ public partial class MainWindowViewModel : ObservableObject
         CurrentOutputRoot = settings["output_dir"]?.GetValue<string>() ?? CurrentOutputRoot;
         CachePolicy = settings["cache_policy"]?.GetValue<string>() ?? CachePolicy;
         CacheTtlHours = settings["cache_ttl_hours"]?.GetValue<int?>();
+        MaxCacheSizeMb = settings["max_cache_size_mb"]?.GetValue<int?>() ?? MaxCacheSizeMb;
         DefaultMode = settings["default_mode"]?.GetValue<string>() ?? DefaultMode;
         SourcePreference = settings["source_preference"]?.GetValue<string>() ?? SourcePreference;
         LanguageTreeMode = settings["language_tree_mode"]?.GetValue<string>() ?? LanguageTreeMode;
@@ -407,12 +432,21 @@ public partial class MainWindowViewModel : ObservableObject
                 if (ProgressPhase is "validating")
                 {
                     ProgressIndeterminate = false;
-                    ProgressValue = Math.Max(ProgressValue, 90);
+                ProgressValue = Math.Max(ProgressValue, 90);
                 }
                 if (!string.IsNullOrWhiteSpace(LatestActivity))
                 {
                     AppendActivity(LatestActivity);
                 }
+                break;
+            case "failure":
+                var failurePayload = payload["payload"] as JsonObject;
+                FailureCount += 1;
+                ProgressVisible = true;
+                ProgressIndeterminate = false;
+                LatestActivity = payload["message"]?.GetValue<string>() ?? "Job failed.";
+                LastErrorHint = failurePayload?["hint"]?.GetValue<string>() ?? "";
+                AppendActivity($"Failure: {LatestActivity}");
                 break;
             case "activity":
                 LatestActivity = payload["message"]?.GetValue<string>() ?? "";
@@ -451,13 +485,6 @@ public partial class MainWindowViewModel : ObservableObject
                 LatestActivity = $"Validation complete. Score {score:0.00}.";
                 AppendActivity(LatestActivity);
                 break;
-            case "failure":
-                FailureCount += 1;
-                ProgressVisible = true;
-                ProgressIndeterminate = false;
-                LatestActivity = payload["message"]?.GetValue<string>() ?? "Job failed.";
-                AppendActivity($"Failure: {LatestActivity}");
-                break;
         }
     }
 
@@ -473,6 +500,7 @@ public partial class MainWindowViewModel : ObservableObject
         WarningCount = 0;
         FailureCount = 0;
         RuntimeTelemetryText = "";
+        LastErrorHint = "";
         ActivityLines.Clear();
     }
 

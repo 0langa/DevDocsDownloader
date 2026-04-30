@@ -97,4 +97,5 @@ def test_pipeline_run_records_resolution_failure_and_report(monkeypatch: pytest.
     assert report.source == "none"
     assert report.failures == ["No source provides 'Missing Lang'. Closest matches: Synthetic Lang (devdocs)."]
     report_json = read_json(config.paths.reports_dir / "run_summary.json", {})
-    assert report_json["reports"][0]["failures"] == report.failures
+    assert report_json["reports"][0]["failures"][0]["code"] == "not_found"
+    assert report_json["reports"][0]["failures"][0]["message"] == str(report.failures[0])

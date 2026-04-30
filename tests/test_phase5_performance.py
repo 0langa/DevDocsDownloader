@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import io
+import sys
 import tarfile
 import time
 from pathlib import Path
 
 import httpx
 
+from doc_ingest.adaptive import AdaptiveBulkController, AdaptiveBulkPolicy
 from doc_ingest.config import load_config
-from doc_ingest.models import ResumeBoundary
+from doc_ingest.models import LanguageRunReport, ResumeBoundary
 from doc_ingest.pipeline import DocumentationPipeline
 from doc_ingest.runtime import SourceRuntime, SourceRuntimePolicy
 from doc_ingest.sources.base import Document, LanguageCatalog
@@ -18,6 +20,18 @@ from doc_ingest.sources.mdn import MdnContentSource
 from doc_ingest.utils.filesystem import read_json, write_text
 
 from .helpers import long_markdown
+
+
+def _write_mdn_archive(target: Path, files: dict[str, str]) -> None:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, text in files.items():
+            payload = text.encode("utf-8")
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(buffer.getvalue())
 
 
 class ResumeFixtureSource:
@@ -261,75 +275,139 @@ def test_source_runtime_policy_applies_minimum_delay_between_starts() -> None:
     assert elapsed >= 0.025
 
 
-def test_mdn_metadata_skips_reextract_when_archive_and_area_are_ready(tmp_path: Path, monkeypatch) -> None:
+def test_source_runtime_circuit_breaker_opens_after_repeated_failures() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, content=b"nope")
+
+    runtime = SourceRuntime(policies={"default": SourceRuntimePolicy(max_concurrency=1, min_delay_seconds=0)})
+    runtime._clients["default"] = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    breaker = runtime.breaker("https://example.invalid/a")
+    breaker.backoff_seconds = 5
+
+    async def run() -> None:
+        try:
+            for _ in range(3):
+                try:
+                    await runtime.request("GET", "https://example.invalid/a")
+                except httpx.HTTPStatusError:
+                    pass
+            try:
+                await runtime.request("GET", "https://example.invalid/a")
+            except RuntimeError as exc:
+                assert "Source circuit open" in str(exc)
+            else:  # pragma: no cover
+                raise AssertionError("expected circuit breaker rejection")
+        finally:
+            await runtime.close()
+
+    asyncio.run(run())
+    assert runtime.telemetry.circuit_breaker_rejections == 1
+
+
+def test_adaptive_controller_emergency_drops_to_one_on_memory_pressure(monkeypatch) -> None:
+    class FakeMemory:
+        percent = 92.0
+
+    class FakePsutil:
+        @staticmethod
+        def virtual_memory():
+            return FakeMemory()
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil())
+    controller = AdaptiveBulkController(AdaptiveBulkPolicy(initial_concurrency=4, max_concurrency=6))
+    controller.observe(LanguageRunReport(language="Python", slug="python", source="fixture", source_slug="python"))
+
+    assert controller.current_concurrency == 1
+    assert any(reason.startswith("emergency_decrease:memory_pressure") for reason in controller.adjustment_reasons)
+
+
+def test_mdn_commit_sha_skips_redundant_redownload(tmp_path: Path, monkeypatch) -> None:
     source = MdnContentSource(cache_dir=tmp_path)
-    archive = source.archive_path
-    archive.parent.mkdir(parents=True)
-    archive.write_bytes(b"archive")
-    area_dir = source.extracted_root / "content-main" / "files" / "en-us" / "web" / "html"
-    area_dir.mkdir(parents=True)
-    source._write_cache_metadata()
+    _write_mdn_archive(
+        source.archive_path,
+        {
+            "content-main/files/en-us/web/html/index.md": "---\ntitle: HTML\nslug: Web/HTML\n---\nBody",
+        },
+    )
+    from doc_ingest.cache import write_cache_metadata
 
-    def fail_extract(*_args, **_kwargs) -> None:
-        raise AssertionError("valid MDN metadata should skip extraction")
+    write_cache_metadata(
+        source.archive_path,
+        source="mdn",
+        cache_key="content-archive",
+        url="https://example.invalid/mdn.tar.gz",
+        policy="ttl",
+        mdn_commit_sha="sha-same",
+    )
 
-    monkeypatch.setattr("doc_ingest.sources.mdn._extract_tarball", fail_extract)
-    root = asyncio.run(source._ensure_content(area="web/html"))
-
-    assert root == source.extracted_root
-
-
-def test_mdn_changed_checksum_triggers_reextract(tmp_path: Path, monkeypatch) -> None:
-    source = MdnContentSource(cache_dir=tmp_path)
-    source.archive_path.parent.mkdir(parents=True)
-    source.archive_path.write_bytes(b"old")
-    (source.extracted_root / "content-main" / "files" / "en-us" / "web" / "html").mkdir(parents=True)
-    source._write_cache_metadata()
-    source.archive_path.write_bytes(b"new")
-    extracted = False
-
-    def fake_extract(_archive: Path, dest: Path) -> None:
-        nonlocal extracted
-        extracted = True
-        (dest / "content-main" / "files" / "en-us" / "web" / "html").mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr("doc_ingest.sources.mdn._extract_tarball", fake_extract)
-    asyncio.run(source._ensure_content(area="web/html"))
-
-    assert extracted is True
-
-
-def test_mdn_force_refresh_redownloads_archive(tmp_path: Path, monkeypatch) -> None:
-    source = MdnContentSource(cache_dir=tmp_path)
-    source.archive_path.parent.mkdir(parents=True)
-    source.archive_path.write_bytes(b"old")
+    async def fake_sha() -> str:
+        return "sha-same"
 
     async def fake_stream(_url: str, target: Path, **_kwargs) -> None:
-        target.write_bytes(b"new")
+        raise AssertionError("matching commit SHA should skip download")
 
-    def fake_extract(_archive: Path, dest: Path) -> None:
-        (dest / "content-main" / "files" / "en-us" / "web" / "html").mkdir(parents=True, exist_ok=True)
-
+    monkeypatch.setattr(source, "_latest_commit_sha", fake_sha)
     source.runtime.stream_to_file = fake_stream  # type: ignore[method-assign]
-    monkeypatch.setattr("doc_ingest.sources.mdn._extract_tarball", fake_extract)
+    index = asyncio.run(source._ensure_archive_index(area="web/html"))
 
-    asyncio.run(source._ensure_content(area="web/html", force_refresh=True))
-    assert source.archive_path.read_bytes() == b"new"
+    assert "web/html" in index.ready_areas
+    assert index.mdn_commit_sha == "sha-same"
 
 
-def test_mdn_extract_still_rejects_path_traversal(tmp_path: Path) -> None:
-    archive = tmp_path / "bad.tar.gz"
-    payload = b"unsafe"
-    with tarfile.open(archive, "w:gz") as tar:
-        member = tarfile.TarInfo("../evil.txt")
-        member.size = len(payload)
-        tar.addfile(member, io.BytesIO(payload))
+def test_mdn_force_refresh_redownloads_archive_and_indexes_members(tmp_path: Path, monkeypatch) -> None:
+    source = MdnContentSource(cache_dir=tmp_path)
+    source.archive_path.parent.mkdir(parents=True)
+    source.archive_path.write_bytes(b"old")
 
-    from doc_ingest.sources.mdn import _extract_tarball
+    async def fake_sha() -> str:
+        return "sha-new"
 
-    try:
-        _extract_tarball(archive, tmp_path / "out")
-    except RuntimeError as exc:
-        assert "Unsafe tar member path" in str(exc)
-    else:  # pragma: no cover
-        raise AssertionError("unsafe tar member was not rejected")
+    async def fake_stream(_url: str, target: Path, **_kwargs) -> None:
+        _write_mdn_archive(
+            target,
+            {
+                "content-main/files/en-us/web/html/index.md": "---\ntitle: HTML\nslug: Web/HTML\n---\nBody",
+                "content-main/files/en-us/web/html/elements/a/index.md": "---\ntitle: A\nslug: Web/HTML/Element/a\npage-type: html-element\n---\nA body",
+            },
+        )
+
+    monkeypatch.setattr(source, "_latest_commit_sha", fake_sha)
+    source.runtime.stream_to_file = fake_stream  # type: ignore[method-assign]
+
+    index = asyncio.run(source._ensure_archive_index(area="web/html", force_refresh=True))
+
+    assert source.archive_path.read_bytes() != b"old"
+    assert index.ready_areas["web/html"] == sorted(index.ready_areas["web/html"])
+    assert any(member.endswith("/elements/a/index.md") for member in index.ready_areas["web/html"])
+
+
+def test_mdn_fetch_reads_documents_on_demand_from_archive(tmp_path: Path, monkeypatch) -> None:
+    source = MdnContentSource(cache_dir=tmp_path)
+    _write_mdn_archive(
+        source.archive_path,
+        {
+            "content-main/files/en-us/web/html/index.md": "---\ntitle: HTML\nslug: Web/HTML\npage-type: landing-page\n---\nRoot",
+            "content-main/files/en-us/web/html/elements/a/index.md": "---\ntitle: Anchor\nslug: Web/HTML/Element/a\npage-type: html-element\n---\n[Link](/en-US/docs/Web/HTML)",
+        },
+    )
+
+    async def fake_sha() -> str:
+        return "sha-fetch"
+
+    monkeypatch.setattr(source, "_latest_commit_sha", fake_sha)
+    catalog = LanguageCatalog(
+        source="mdn",
+        slug="html",
+        display_name="HTML",
+        core_topics=["html-element"],
+        discovery_metadata={"area": "web/html"},
+    )
+
+    async def collect() -> list[Document]:
+        return [doc async for doc in source.fetch(catalog, "full")]
+
+    docs = asyncio.run(collect())
+
+    assert len(docs) == 2
+    assert docs[1].title == "Anchor"
+    assert "https://developer.mozilla.org/en-US/docs/Web/HTML" in docs[1].markdown

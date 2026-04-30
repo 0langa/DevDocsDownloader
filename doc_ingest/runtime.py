@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
-from .models import CacheDecision, CacheFreshnessPolicy
+from .models import CacheFreshnessPolicy
 from .utils.http import RetryConfig, request_with_retries, stream_to_file_with_retries
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; DocIngestBot/1.0)"
@@ -23,12 +25,61 @@ class SourceRuntimeTelemetry:
     failures: int = 0
     cache_hits: int = 0
     cache_refreshes: int = 0
+    circuit_breaker_rejections: int = 0
 
 
 @dataclass(frozen=True)
 class SourceRuntimePolicy:
     max_concurrency: int = 4
     min_delay_seconds: float = 0.05
+
+
+class CircuitBreakerOpenError(RuntimeError):
+    pass
+
+
+@dataclass(slots=True)
+class SourceCircuitBreaker:
+    threshold: int = 3
+    window_seconds: float = 60.0
+    backoff_seconds: float = 60.0
+    state: str = "closed"
+    opened_until: float = 0.0
+    _failures: deque[float] = field(default_factory=deque)
+    _probe_in_flight: bool = False
+
+    def allow_request(self) -> None:
+        now = time.monotonic()
+        self._trim(now)
+        if self.state == "open":
+            if now < self.opened_until:
+                raise CircuitBreakerOpenError(f"Source circuit open for {max(0.0, self.opened_until - now):.1f}s")
+            self.state = "half-open"
+            self._probe_in_flight = False
+        if self.state == "half-open":
+            if self._probe_in_flight:
+                raise CircuitBreakerOpenError("Source circuit is probing recovery")
+            self._probe_in_flight = True
+
+    def record_success(self) -> None:
+        self._failures.clear()
+        self.state = "closed"
+        self._probe_in_flight = False
+        self.opened_until = 0.0
+
+    def record_failure(self) -> None:
+        now = time.monotonic()
+        self._trim(now)
+        self._probe_in_flight = False
+        self._failures.append(now)
+        if self.state == "half-open" or len(self._failures) >= self.threshold:
+            self.state = "open"
+            self.opened_until = now + self.backoff_seconds
+
+    def _trim(self, now: float) -> None:
+        cutoff = now - self.window_seconds
+        while self._failures and self._failures[0] < cutoff:
+            self._failures.popleft()
 
 
 class _RuntimeLimiter:
@@ -56,15 +107,20 @@ class SourceRuntime:
         policies: dict[str, SourceRuntimePolicy] | None = None,
         cache_policy: CacheFreshnessPolicy = "use-if-present",
         cache_ttl_hours: int | None = None,
+        cache_root: Path | None = None,
+        max_cache_size_bytes: int | None = None,
     ) -> None:
         self.user_agent = user_agent
         self.retry_config = retry_config or RetryConfig()
         self.cache_policy = cache_policy
         self.cache_ttl_hours = cache_ttl_hours
+        self.cache_root = cache_root
+        self.max_cache_size_bytes = max_cache_size_bytes
         self.telemetry = SourceRuntimeTelemetry()
         self.policies = policies or _default_policies_from_env()
         self._limiters: dict[str, _RuntimeLimiter] = {}
         self._clients: dict[str, httpx.AsyncClient] = {}
+        self._breakers: dict[str, SourceCircuitBreaker] = {}
         self.closed = False
 
     def client(self, profile: str = "default") -> httpx.AsyncClient:
@@ -96,7 +152,15 @@ class SourceRuntime:
             self._limiters[key] = limiter
         return limiter
 
-    def record_cache_decision(self, decision: CacheDecision) -> None:
+    def breaker(self, url: str) -> SourceCircuitBreaker:
+        domain = _domain_for_url(url)
+        breaker = self._breakers.get(domain)
+        if breaker is None:
+            breaker = SourceCircuitBreaker()
+            self._breakers[domain] = breaker
+        return breaker
+
+    def record_cache_decision(self, decision) -> None:
         if decision.should_refresh:
             self.telemetry.cache_refreshes += 1
         else:
@@ -112,9 +176,16 @@ class SourceRuntime:
         **kwargs: Any,
     ) -> httpx.Response:
         limiter = self.limiter(profile)
+        breaker = self.breaker(url)
 
         def on_retry() -> None:
             self.telemetry.retries += 1
+
+        try:
+            breaker.allow_request()
+        except CircuitBreakerOpenError:
+            self.telemetry.circuit_breaker_rejections += 1
+            raise
 
         try:
             async with limiter.semaphore:
@@ -128,9 +199,12 @@ class SourceRuntime:
                     on_retry=on_retry,
                     **kwargs,
                 )
+                response.raise_for_status()
         except Exception:
             self.telemetry.failures += 1
+            breaker.record_failure()
             raise
+        breaker.record_success()
         self.telemetry.bytes_observed += len(response.content)
         return response
 
@@ -143,9 +217,16 @@ class SourceRuntime:
         retry_config: RetryConfig | None = None,
     ) -> None:
         limiter = self.limiter(profile)
+        breaker = self.breaker(url)
 
         def on_retry() -> None:
             self.telemetry.retries += 1
+
+        try:
+            breaker.allow_request()
+        except CircuitBreakerOpenError:
+            self.telemetry.circuit_breaker_rejections += 1
+            raise
 
         try:
             async with limiter.semaphore:
@@ -160,7 +241,9 @@ class SourceRuntime:
                 )
         except Exception:
             self.telemetry.failures += 1
+            breaker.record_failure()
             raise
+        breaker.record_success()
         if target.exists():
             self.telemetry.bytes_observed += target.stat().st_size
 
@@ -188,6 +271,11 @@ def _default_policies_from_env() -> dict[str, SourceRuntimePolicy]:
             for key, policy in defaults.items()
         }
     return defaults
+
+
+def _domain_for_url(url: str) -> str:
+    parsed = urlparse(url)
+    return parsed.netloc.lower() or "default"
 
 
 def _env_int(name: str) -> int | None:

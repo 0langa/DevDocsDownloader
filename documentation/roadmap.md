@@ -1,7 +1,7 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.1.2  
-> **Document scope:** All planned work from 1.1.2 through the 2.0.0 premium release.  
+> **Current release:** 1.1.5  
+> **Document scope:** All planned work from 1.1.5 through the 2.0.0 premium release.  
 > **Last updated:** 2026-04-30
 
 ---
@@ -26,7 +26,7 @@ By 2.0.0 the product:
 
 ## Milestone Philosophy
 
-Each **minor version** (1.2.0, 1.3.0, …) is a named major milestone with a clear theme and a concrete "done" definition. The **patch versions** between milestones (1.1.2, 1.1.3, …) are focused, releasable increments that each add one meaningful capability or fix one meaningful class of problem. No patch version is a grab-bag.
+Each **minor version** (1.2.0, 1.3.0, …) is a named major milestone with a clear theme and a concrete "done" definition. The **patch versions** between milestones (1.1.5, 1.1.6, …) are focused, releasable increments that each add one meaningful capability or fix one meaningful class of problem. No patch version is a grab-bag.
 
 Every patch version:
 - Passes all existing tests plus any new tests written for its changes.
@@ -50,8 +50,8 @@ Before planning forward, an honest accounting of current state.
 - Weighted validation scoring across 5 quality dimensions.
 
 **Critical gaps going into 1.2.0:**
-- All documents held in memory during compilation; large docsets (MDN) risk OOM.
-- MDN ~500MB tarball re-downloaded in full on every cache refresh; blocks for minutes.
+- Streaming writes now cap compilation memory near one document, but HTML site / future secondary outputs still need the same treatment.
+- MDN now uses commit-SHA delta checks and archive indexing, but archive scans are still serial and can remain slow on very large refreshes.
 - No job queue; desktop returns 409 if the user tries to run while another job is active.
 - Empty `doc_key` in DevDocs single-page manuals (bash, etc.) emitted 0 documents until 1.0.9.2 fix — similar edge cases may exist elsewhere.
 - Conversion quality is uneven; no per-source conversion profile tuning exposed to users.
@@ -103,7 +103,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.3 — Streaming Pipeline & MDN Efficiency
+### 1.1.3 — Streaming Pipeline & MDN Efficiency ✅ IMPLEMENTED
 
 **Goal:** Prevent OOM for large docsets. Make MDN refresh non-blocking.
 
@@ -130,27 +130,29 @@ Before planning forward, an honest accounting of current state.
 
 **Goal:** Never tell the user "busy, try again." Make error messages actionable.
 
-**Changes:**
+**Status:** Implemented
+
+**Delivered:**
 
 1. **Job queue in `desktop_backend.py`**  
-   Replace single-job enforcement (409 Conflict) with a bounded queue (max 10 pending). `BackendJobManager` grows a `_queue: asyncio.Queue[BackendJob]` alongside `_active_job`. A background `_queue_worker` coroutine drains the queue; when the active job completes, it picks the next automatically. New `GET /jobs/queue` endpoint returns queue depth and pending summaries. SSE events for queued jobs include `status: pending` until the job starts. Desktop shows "Queued (position N)" instead of an error.
+   `BackendJobManager` now keeps a bounded pending queue (max 10), drains it in the background, and automatically starts the next job when the active one completes. `GET /jobs/queue` returns queue depth plus pending summaries. SSE updates now broadcast queued position changes with `status: pending`, and the desktop shell shows `Queued (position N)` instead of failing with a busy error.
 
 2. **Structured error payloads from sources**  
-   Introduce `SourceError(code, message, hint, is_retriable)` in `sources/base.py`. Sources raise `SourceError` with specific codes: `network_timeout`, `rate_limited`, `not_found`, `invalid_format`, `checksum_mismatch`. `pipeline.py` catches `SourceError` and populates `report.failures` with `[{code, message, hint}]` rather than a stringified exception. Desktop `RunPage` shows the `hint` field next to the error status.
+   `sources/base.py` now exposes `SourceError(code, message, hint, is_retriable)`. DevDocs, Dash, and MDN raise it for common failures such as `network_timeout`, `rate_limited`, `not_found`, and `invalid_format`. `pipeline.py` converts those into structured `report.failures` payloads, and service events preserve the same shape through the backend.
 
 3. **Specific error messages in desktop UI**  
-   `MainWindowViewModel.HandleJobEvent` parses `failure` events for a `hint` field and sets `LastErrorHint` with that value. Common hints: "Check your internet connection." / "DevDocs rate limit hit — wait 60 seconds." / "Dash docset archive is corrupt — clear cache and retry." / "Language not found in any source catalog." Hint displays in a distinct amber block below status.
+   `MainWindowViewModel.HandleJobEvent` now parses `failure` payloads for `hint` and stores it in `LastErrorHint`. The shell renders that hint in a distinct amber block below the active-job status, so rate limits, cache corruption, and missing-language failures are directly actionable.
 
 4. **Actionable warnings in validation output**  
-   `ValidationIssue` gains a `suggestion` field (nullable string). Populate `suggestion` for the most common issues: `relative_link` → "Rerun with a newer cache; source HTML may have changed." / `html_artifact` → "Conversion profile may need tuning for this source." / `missing_output` → "Run failed before compilation; check the run log." `ReportsPage` shows `suggestion` inline with each issue.
+   `ValidationIssue` now carries an optional `suggestion` field. Common issues such as `relative_link`, `html_artifact`, and `missing_output` ship with concrete next steps, and `ReportsPage` renders those suggestions inline alongside failure hints.
 
 ---
 
-### 1.1.5 — Cache Management Desktop UI
+### 1.1.5 — Cache Management Desktop UI ✅ IMPLEMENTED
 
 **Goal:** Users can see, understand, and clean up cached source data without touching the filesystem.
 
-**Changes:**
+**Delivered:**
 
 1. **`CachePage` full implementation**  
    Currently a stub. Implement summary cards per source (DevDocs, MDN, Dash): total disk usage, number of cached entries, oldest/newest entry age. Per-entry table: language slug, cached size, last refreshed, TTL policy, next refresh due. Action buttons: "Refresh now" (force-refresh one entry), "Delete entry", "Clear all [source] cache" (with confirmation), "Clear all cache" (nuclear option with confirmation + warning). Backend endpoints: `GET /cache/summary`, `DELETE /cache/entry?source=devdocs&slug=bash`.
@@ -163,11 +165,11 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.6 — Test Coverage Expansion
+### 1.1.6 — Test Coverage Expansion ✅ IMPLEMENTED
 
 **Goal:** Converter functions, adapter edge cases, and backend job logic all have unit tests.
 
-**Changes:**
+**Delivered:**
 
 1. **Unit tests for `conversion.py`** — `tests/test_conversion_unit.py`: parametrized tests for `convert_html_to_markdown()` (headings, lists, tables, code blocks, nesting), `rewrite_markdown_links()` (code fence edge cases, protocol-relative URLs, anchor-only links), `resolve_source_link()` (relative, absolute, `dash://`, malformed), noise removal (nav/aside/footer stripped), and content root selection per profile.
 
@@ -1242,10 +1244,10 @@ All `documentation/` files reviewed, updated, and consistent with 2.0.0 feature 
 
 | Patch | Parent milestone | Focus |
 |-------|-----------------|-------|
-| 1.1.2 | → 1.2.0 | Streaming writes, MDN delta, circuit breaker |
-| 1.1.3 | → 1.2.0 | Job queue, structured errors, error messaging |
-| 1.1.4 | → 1.2.0 | Cache management UI, dry-run mode |
-| 1.1.5 | → 1.2.0 | Unit test coverage expansion |
+| 1.1.2 | → 1.2.0 | Catalog-driven language selection and source dropdowns |
+| 1.1.3 | → 1.2.0 | Streaming writes, MDN delta, circuit breaker |
+| 1.1.4 | → 1.2.0 | Job queue and actionable error messaging |
+| 1.1.5 | → 1.2.0 | Cache management UI, cache budgets, dry-run previews, test coverage expansion |
 | 1.1.6 | → 1.2.0 | Resume hardening, checkpoint integrity |
 | 1.2.1 | → 1.3.0 | Conditional GET caching |
 | 1.2.2 | → 1.3.0 | Dash pre-download intelligence |

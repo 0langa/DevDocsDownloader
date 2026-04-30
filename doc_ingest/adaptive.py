@@ -13,7 +13,7 @@ class AdaptiveBulkPolicy:
     max_concurrency: int = 6
     success_window: int = 2
     retry_threshold: int = 2
-    pressure_memory_percent: float = 90.0
+    pressure_memory_percent: float = 85.0
     pressure_disk_free_percent: float = 5.0
 
 
@@ -38,6 +38,10 @@ class AdaptiveBulkController:
         self.observed_windows += 1
         reasons = self._pressure_reasons(report)
         if reasons:
+            if any(reason.startswith("memory_pressure") for reason in reasons):
+                self._emergency_drop("; ".join(reasons))
+                self._success_streak = 0
+                return
             if report.failures:
                 self.failed_languages += 1
             if any(reason.startswith("retry_pressure") for reason in reasons):
@@ -88,6 +92,11 @@ class AdaptiveBulkController:
         if next_value != self.current_concurrency:
             self.current_concurrency = next_value
             self.adjustment_reasons.append(f"increase:{reason}:to:{next_value}")
+
+    def _emergency_drop(self, reason: str) -> None:
+        if self.current_concurrency != 1:
+            self.current_concurrency = 1
+            self.adjustment_reasons.append(f"emergency_decrease:{reason}:to:1")
 
 
 def static_bulk_telemetry(*, concurrency: int) -> AdaptiveBulkTelemetry:

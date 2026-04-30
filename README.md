@@ -1,5 +1,5 @@
 # DevDocsDownloader	
-## Public Version: 1.1.1
+## Public Version: 1.1.5
 
 `DevDocsDownloader` is a documentation ingestion engine with a Windows desktop release path and a Python automation surface. The active implementation resolves a language against catalogs from DevDocs, MDN, and Dash/Kapeli, fetches source data, converts or normalizes content into Markdown, organizes documents by topic, emits a consolidated language file, and writes validation, diagnostics, and run reports.
 
@@ -25,6 +25,7 @@ The runtime path is usable today for those three source families. The repository
 - Produces JSON and Markdown run summaries in `output/reports/`
 - Produces additive per-document validation, report history, and quality trend artifacts
 - Writes active per-language checkpoints under `state/checkpoints/` during runs and removes them after successful completion
+- Protects upstream fetches with per-domain circuit breakers and adaptive memory-pressure throttling
 
 ## Current feature set
 
@@ -37,7 +38,8 @@ The runtime path is usable today for those three source families. The repository
 - **MDN**
 	- Discovers documentation families by scanning the MDN content tree and writes a generated manifest under `cache/catalogs/mdn.json`
 	- Uses live discovery plus cached-manifest fallback; supported families currently include JavaScript, HTML, CSS, Web APIs, HTTP, and WebAssembly, while newly discovered families remain visible as experimental entries in catalog audits
-	- Downloads the MDN content repository tarball from GitHub and extracts only the relevant `files/en-us/...` trees into cache, guarded by checksum and area-readiness metadata
+	- Downloads the MDN content repository tarball from GitHub only when the upstream commit SHA changes; unchanged TTL refreshes reuse the cached archive
+	- Builds an archive index by streaming the tarball once, then reads `index.md` members on demand directly from the archive instead of extracting the whole tree to disk
 	- Reads frontmatter from `index.md` files and filters by `page-type` in `important` mode
 - **Dash / Kapeli**
 	- Discovers docsets from Kapeli’s official cheat-sheet index and writes a generated manifest under `cache/catalogs/dash.json`
@@ -394,13 +396,13 @@ Common skip reasons include mode filtering, duplicate paths, missing content, em
 
 Generated Markdown files are still written through atomic temp-file replacement, but they use balanced durability by default to avoid an `fsync()` on every per-document file and fragment. State files, active checkpoints, reports, downloaded archives, and cache payloads keep strict durability.
 
-`SourceRuntime` applies conservative source-profile throttling around HTTP requests and archive downloads. Operational overrides are available through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`.
+`SourceRuntime` applies conservative source-profile throttling around HTTP requests and archive downloads. It also keeps per-domain circuit breakers so repeated upstream failures stop consuming concurrency slots for a bounded backoff window. Operational overrides are available through `DEVDOCS_SOURCE_CONCURRENCY` and `DEVDOCS_SOURCE_MIN_DELAY`.
 
-Bulk runs default to static language concurrency. `--concurrency-policy adaptive` enables conservative adaptive scheduling that reduces new language starts after failures, retry pressure, or local resource pressure, and increases slowly after successful windows. Adaptive mode remains opt-in.
+Bulk runs default to static language concurrency. `--concurrency-policy adaptive` enables conservative adaptive scheduling that reduces new language starts after failures, retry pressure, or local resource pressure, increases slowly after successful windows, and emergency-drops concurrency to `1` under sustained memory pressure. Adaptive mode remains opt-in.
 
 ### Output and downstream consumption behavior
 
-Consolidated manuals include explicit stable anchors before topic and document headings. The table of contents uses the same anchor registry, so repeated headings receive deterministic suffixes such as `repeat` and `repeat-2`.
+Consolidated manuals include explicit stable anchors before topic and document headings. The table of contents uses the same anchor registry, so repeated headings receive deterministic suffixes such as `repeat` and `repeat-2`. The compiler writes per-document files immediately, keeps raw document payloads only as short-lived temp artifacts, and streams the consolidated manual and chunk manifest to disk instead of holding whole-language content in memory.
 
 Optional per-document YAML frontmatter is enabled with `--document-frontmatter`. It records language/source identity, topic, slug, title, order hint, mode, source URL, and generation timestamp while preserving the existing human-readable metadata lines.
 
@@ -503,19 +505,20 @@ The current tests focus on:
 - slug safety on Windows paths
 - docset/tarball failure handling
 - source-specific HTML cleanup, MDN YAML frontmatter parsing, link rewriting, and conversion-quality validation
-- collision-safe consolidated anchors, optional document frontmatter, optional chunk exports, cache freshness policy, and service-layer wiring
+- collision-safe consolidated anchors, low-memory streamed compilation, optional document frontmatter, optional chunk exports, cache freshness policy, and service-layer wiring
 - Service artifact readers, checkpoint/cache inspection, desktop-backend job queue transitions, and path-safety coverage
 - source plugin registration, exact cross-document link rewriting, asset inventory, and optional tokenizer chunking
-- adaptive bulk scheduling, deterministic source suggestions, and opt-in live extraction sanity hooks
-- dynamic DevDocs/MDN/Dash catalog discovery manifests, alias-aware resolution, cached-manifest fallback, and fragment-reference preservation
+- adaptive bulk scheduling with memory-pressure guard, source-runtime circuit breakers, deterministic source suggestions, and opt-in live extraction sanity hooks
+- dynamic DevDocs/MDN/Dash catalog discovery manifests, alias-aware resolution, cached-manifest fallback, fragment-reference preservation, and structured source failure hints
+- dry-run previews, cache budget enforcement, cache summary/delete/refresh endpoints, and unit coverage for conversion/cache/adaptive/backend lifecycle
 
 ## Future direction
 
 See `documentation/roadmap.md` for the full prioritized list. Near-term:
 
-1. Job queue UI and richer cleanup breadth
-2. Dash acceptance hardening and packaging polish
-3. Code signing, auto-update notification
+1. Resume hardening and checkpoint integrity
+2. Broader Dash acceptance depth and packaging polish
+3. Code signing and auto-update notification
 
 ## Release readiness
 

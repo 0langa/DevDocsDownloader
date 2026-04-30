@@ -43,6 +43,7 @@ class CompilationDocument:
     order_hint: int
     path: Path
     fragment_path: Path | None = None
+    raw_path: Path | None = None
     document: Document | None = None
 
 
@@ -150,6 +151,7 @@ class LanguageOutputBuilder:
         topic_dir = self.language_dir / topic_slug
         per_doc_path = topic_dir / f"{document.slug}.md"
         fragment_path = self.fragments_dir / f"{self.total_documents:08d}-{topic_slug}-{document.slug}.md"
+        raw_path = _raw_fragment_path(fragment_path)
         write_text(
             per_doc_path,
             render_document(
@@ -165,6 +167,7 @@ class LanguageOutputBuilder:
             durability=self.durability,
         )
         write_text(fragment_path, render_consolidated_document_fragment(document), durability=self.durability)
+        write_text(raw_path, document.markdown, durability=self.durability)
         artifact = CompilationDocument(
             title=document.title,
             slug=document.slug,
@@ -172,7 +175,8 @@ class LanguageOutputBuilder:
             order_hint=document.order_hint,
             path=per_doc_path,
             fragment_path=fragment_path,
-            document=document,
+            raw_path=raw_path,
+            document=None,
         )
         self._topic_docs[topic].append(artifact)
         self.total_documents += 1
@@ -194,6 +198,7 @@ class LanguageOutputBuilder:
                 order_hint=artifact.order_hint,
                 path=Path(artifact.path),
                 fragment_path=fragment_path if fragment_path.exists() else None,
+                raw_path=_raw_fragment_path(fragment_path) if fragment_path.exists() else None,
                 document=None,
             )
         )
@@ -249,18 +254,7 @@ class LanguageOutputBuilder:
 def render_compilation(plan: CompilationPlan) -> RenderedCompilation:
     files: dict[Path, str] = {}
     topic_docs = {
-        topic.name: [
-            item.document
-            or Document(
-                topic=topic.name,
-                slug=item.slug,
-                title=item.title,
-                markdown=_artifact_fragment_text(item),
-                source_url=item.source_url,
-                order_hint=item.order_hint,
-            )
-            for item in topic.documents
-        ]
+        topic.name: [_document_from_compilation_document(item, topic=topic.name) for item in topic.documents]
         for topic in plan.topics
     }
     topic_order = [topic.name for topic in plan.topics]
@@ -275,18 +269,17 @@ def render_compilation(plan: CompilationPlan) -> RenderedCompilation:
             "",
         ]
         for planned_doc in topic.documents:
-            doc = planned_doc.document
-            if doc is not None:
-                files[planned_doc.path] = render_document(
-                    doc,
-                    topic=topic.name,
-                    language=plan.language_display,
-                    language_slug=plan.language_slug,
-                    source=plan.source,
-                    source_slug=plan.source_slug,
-                    mode=plan.mode,
-                    emit_frontmatter=plan.emit_document_frontmatter,
-                )
+            doc = _document_from_compilation_document(planned_doc, topic=topic.name)
+            files[planned_doc.path] = render_document(
+                doc,
+                topic=topic.name,
+                language=plan.language_display,
+                language_slug=plan.language_slug,
+                source=plan.source,
+                source_slug=plan.source_slug,
+                mode=plan.mode,
+                emit_frontmatter=plan.emit_document_frontmatter,
+            )
             section_lines.append(f"- [{planned_doc.title}]({planned_doc.slug}.md)")
         section_lines.append("")
         files[topic.directory / "_section.md"] = "\n".join(section_lines) + "\n"
@@ -345,42 +338,42 @@ def write_streamed_compilation(
         ]
         for planned_doc in topic.documents:
             section_lines.append(f"- [{planned_doc.title}]({planned_doc.slug}.md)")
-            if planned_doc.document is not None:
-                markdown = _rewrite_document_markdown(
-                    planned_doc.document.markdown,
-                    current_path=planned_doc.path,
-                    language_dir=plan.language_dir,
-                    target_map=target_map,
-                    asset_rewrites=asset_rewrites,
-                )
-                rewritten_doc = Document(
-                    topic=planned_doc.document.topic,
-                    slug=planned_doc.document.slug,
-                    title=planned_doc.document.title,
-                    markdown=markdown,
-                    source_url=planned_doc.document.source_url,
-                    order_hint=planned_doc.document.order_hint,
-                )
+            raw_doc = _document_from_compilation_document(planned_doc, topic=topic.name)
+            markdown = _rewrite_document_markdown(
+                raw_doc.markdown,
+                current_path=planned_doc.path,
+                language_dir=plan.language_dir,
+                target_map=target_map,
+                asset_rewrites=asset_rewrites,
+            )
+            rewritten_doc = Document(
+                topic=raw_doc.topic,
+                slug=raw_doc.slug,
+                title=raw_doc.title,
+                markdown=markdown,
+                source_url=raw_doc.source_url,
+                order_hint=raw_doc.order_hint,
+            )
+            write_text(
+                planned_doc.path,
+                render_document(
+                    rewritten_doc,
+                    topic=topic.name,
+                    language=plan.language_display,
+                    language_slug=plan.language_slug,
+                    source=plan.source,
+                    source_slug=plan.source_slug,
+                    mode=plan.mode,
+                    emit_frontmatter=plan.emit_document_frontmatter,
+                ),
+                durability=durability,
+            )
+            if planned_doc.fragment_path is not None:
                 write_text(
-                    planned_doc.path,
-                    render_document(
-                        rewritten_doc,
-                        topic=topic.name,
-                        language=plan.language_display,
-                        language_slug=plan.language_slug,
-                        source=plan.source,
-                        source_slug=plan.source_slug,
-                        mode=plan.mode,
-                        emit_frontmatter=plan.emit_document_frontmatter,
-                    ),
+                    planned_doc.fragment_path,
+                    render_consolidated_document_fragment(rewritten_doc),
                     durability=durability,
                 )
-                if planned_doc.fragment_path is not None:
-                    write_text(
-                        planned_doc.fragment_path,
-                        render_consolidated_document_fragment(rewritten_doc),
-                        durability=durability,
-                    )
         section_lines.append("")
         write_text(topic.directory / "_section.md", "\n".join(section_lines) + "\n", durability=durability)
 
@@ -614,6 +607,10 @@ def render_consolidated_document_fragment(doc: Document) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _raw_fragment_path(fragment_path: Path) -> Path:
+    return fragment_path.with_name(f"{fragment_path.stem}.raw.md")
+
+
 def _artifact_fragment_text(document: CompilationDocument) -> str:
     if document.fragment_path is not None and document.fragment_path.exists():
         return document.fragment_path.read_text(encoding="utf-8")
@@ -622,8 +619,39 @@ def _artifact_fragment_text(document: CompilationDocument) -> str:
     return ""
 
 
+def _document_from_compilation_document(document: CompilationDocument, *, topic: str) -> Document:
+    if document.document is not None:
+        return document.document
+    if document.raw_path is not None and document.raw_path.exists():
+        markdown = document.raw_path.read_text(encoding="utf-8")
+    elif document.path.exists():
+        markdown = _document_body_from_rendered_file(document.path)
+    else:
+        markdown = ""
+    return Document(
+        topic=topic,
+        slug=document.slug,
+        title=document.title,
+        markdown=markdown,
+        source_url=document.source_url,
+        order_hint=document.order_hint,
+    )
+
+
 def _rebuild_fragment_from_document_file(document: CompilationDocument) -> str:
-    text = document.path.read_text(encoding="utf-8")
+    rebuilt = Document(
+        topic="",
+        slug=document.slug,
+        title=document.title,
+        markdown=_document_body_from_rendered_file(document.path),
+        source_url=document.source_url,
+        order_hint=document.order_hint,
+    )
+    return render_consolidated_document_fragment(rebuilt)
+
+
+def _document_body_from_rendered_file(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
     if text.startswith("---\n"):
         parts = text.split("\n---\n", 1)
         if len(parts) == 2:
@@ -637,16 +665,7 @@ def _rebuild_fragment_from_document_file(document: CompilationDocument) -> str:
         lines = lines[1:]
         while lines and not lines[0].strip():
             lines = lines[1:]
-    body = "\n".join(lines).strip()
-    rebuilt = Document(
-        topic="",
-        slug=document.slug,
-        title=document.title,
-        markdown=body,
-        source_url=document.source_url,
-        order_hint=document.order_hint,
-    )
-    return render_consolidated_document_fragment(rebuilt)
+    return "\n".join(lines).strip()
 
 
 def _render_index(
@@ -1053,7 +1072,6 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
     if chunks_dir.exists():
         shutil.rmtree(chunks_dir)
     chunks_dir.mkdir(parents=True, exist_ok=True)
-    records: list[str] = []
     chunk_count = 0
     token_kwargs = {
         "max_tokens": max(1, plan.chunk_max_tokens),
@@ -1061,47 +1079,55 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
     }
     max_chars = max(500, plan.chunk_max_chars)
     char_kwargs = {"max_chars": max_chars, "overlap": min(max(0, plan.chunk_overlap_chars), max_chars // 2)}
-    for topic in plan.topics:
-        for doc in topic.documents:
-            text = doc.path.read_text(encoding="utf-8")
-            chunk_iterable = (
-                _token_chunks(text, **token_kwargs)
-                if plan.chunk_strategy == "tokens"
-                else _char_chunks(text, **char_kwargs)
-            )
-            for chunk in chunk_iterable:
-                index, start, end, chunk_text, token_start, token_end = chunk
-                chunk_id = f"{plan.language_slug}:{topic.slug}:{doc.slug}:{index:04d}"
-                filename = f"{topic.slug}-{doc.slug}-{index:04d}.md"
-                chunk_path = chunks_dir / filename
-                write_text(chunk_path, chunk_text.rstrip() + "\n", durability=durability)
-                record = {
-                    "chunk_id": chunk_id,
-                    "language": plan.language_display,
-                    "source": plan.source,
-                    "source_slug": plan.source_slug,
-                    "topic": topic.name,
-                    "document_slug": doc.slug,
-                    "document_title": doc.title,
-                    "source_url": doc.source_url,
-                    "order_hint": doc.order_hint,
-                    "chunk_index": index,
-                    "text_path": f"chunks/{filename}",
-                    "char_start": start,
-                    "char_end": end,
-                    "chunk_strategy": plan.chunk_strategy,
-                }
-                if plan.chunk_strategy == "tokens":
-                    record.update(
-                        {
-                            "token_start": token_start,
-                            "token_end": token_end,
-                            "token_count": token_end - token_start,
-                        }
-                    )
-                records.append(json.dumps(record, ensure_ascii=False))
-                chunk_count += 1
-    write_text(chunks_dir / "manifest.jsonl", "\n".join(records) + ("\n" if records else ""), durability=durability)
+    manifest_path = chunks_dir / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
+    with temp_path.open("wb") as handle:
+        for topic in plan.topics:
+            for doc in topic.documents:
+                text = doc.path.read_text(encoding="utf-8")
+                chunk_iterable = (
+                    _token_chunks(text, **token_kwargs)
+                    if plan.chunk_strategy == "tokens"
+                    else _char_chunks(text, **char_kwargs)
+                )
+                for chunk in chunk_iterable:
+                    index, start, end, chunk_text, token_start, token_end = chunk
+                    chunk_id = f"{plan.language_slug}:{topic.slug}:{doc.slug}:{index:04d}"
+                    filename = f"{topic.slug}-{doc.slug}-{index:04d}.md"
+                    chunk_path = chunks_dir / filename
+                    write_text(chunk_path, chunk_text.rstrip() + "\n", durability=durability)
+                    record = {
+                        "chunk_id": chunk_id,
+                        "language": plan.language_display,
+                        "source": plan.source,
+                        "source_slug": plan.source_slug,
+                        "topic": topic.name,
+                        "document_slug": doc.slug,
+                        "document_title": doc.title,
+                        "source_url": doc.source_url,
+                        "order_hint": doc.order_hint,
+                        "chunk_index": index,
+                        "text_path": f"chunks/{filename}",
+                        "char_start": start,
+                        "char_end": end,
+                        "chunk_strategy": plan.chunk_strategy,
+                    }
+                    if plan.chunk_strategy == "tokens":
+                        record.update(
+                            {
+                                "token_start": token_start,
+                                "token_end": token_end,
+                                "token_count": token_end - token_start,
+                            }
+                        )
+                    handle.write(json.dumps(record, ensure_ascii=False).encode("utf-8"))
+                    handle.write(b"\n")
+                    chunk_count += 1
+        handle.flush()
+        if durability == "strict":
+            os.fsync(handle.fileno())
+    temp_path.replace(manifest_path)
     return chunk_count
 
 

@@ -9,14 +9,15 @@ import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
 from bs4 import BeautifulSoup  # type: ignore[import-untyped]
 
 from ..cache import decide_cache_refresh, write_cache_metadata, write_cache_metadata_for_bytes
 from ..conversion import DASH_PROFILE, convert_html_to_markdown
-from ..models import ResumeBoundary, SourceRunDiagnostics
+from ..models import DryRunResult, ResumeBoundary, SourceRunDiagnostics
 from ..runtime import SourceRuntime
 from ..utils.archive import safe_extract_tar
-from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
+from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, SourceError, document_events
 from .catalog_manifest import DiscoveryManifest, load_manifest, manifest_languages, save_manifest
 
 LOGGER = logging.getLogger("doc_ingest.sources.dash")
@@ -70,8 +71,17 @@ class DashFeedSource:
             policy=self.runtime.cache_policy,
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
+            cache_root=self.runtime.cache_root,
+            max_cache_size_bytes=self.runtime.max_cache_size_bytes,
         )
         self.runtime.record_cache_decision(decision)
+        if not decision.should_refresh and not self.catalog_path.exists():
+            raise SourceError(
+                "cache_budget_exceeded",
+                "Cache budget prevents refreshing the Dash catalog.",
+                hint="Clear cache entries or raise the cache budget in Settings.",
+                is_retriable=False,
+            )
         if not decision.should_refresh and self.catalog_path.exists():
             cached = manifest_languages(self.catalog_path)
             if cached:
@@ -79,10 +89,14 @@ class DashFeedSource:
 
         try:
             response = await self.runtime.request("GET", CHEATSHEETS_URL, profile="default")
-            response.raise_for_status()
             catalogs = self._discover_catalog_entries(response.text)
             if not catalogs:
-                raise ValueError("Kapeli cheat sheets page did not expose any docset entries")
+                raise SourceError(
+                    "invalid_format",
+                    "Kapeli cheat sheets page did not expose any docset entries.",
+                    hint="Dash feed page may have changed. Refresh again later.",
+                    is_retriable=True,
+                )
             save_manifest(
                 self.catalog_path,
                 DiscoveryManifest(
@@ -159,16 +173,27 @@ class DashFeedSource:
             policy=self.runtime.cache_policy,
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
+            cache_root=self.runtime.cache_root,
+            max_cache_size_bytes=self.runtime.max_cache_size_bytes,
         )
         self.runtime.record_cache_decision(decision)
+        if not decision.should_refresh and not any(target_dir.glob("*.docset")):
+            raise SourceError(
+                "cache_budget_exceeded",
+                f"Cache budget prevents refreshing the Dash docset for {slug}.",
+                hint="Clear cache entries or raise the cache budget in Settings.",
+                is_retriable=False,
+            )
         if not decision.should_refresh and any(target_dir.glob("*.docset")):
             return next(target_dir.glob("*.docset"))
         target_dir.mkdir(parents=True, exist_ok=True)
 
         tarball_url = f"{FEED_BASE}/{slug}.tgz"
         LOGGER.info("Downloading Dash docset %s", tarball_url)
-        resp = await self.runtime.request("GET", tarball_url, profile="dash")
-        resp.raise_for_status()
+        try:
+            resp = await self.runtime.request("GET", tarball_url, profile="dash")
+        except Exception as exc:
+            raise _dash_source_error_from_http(exc, slug=slug) from exc
         tar_bytes = resp.content
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".tgz") as handle:
@@ -180,14 +205,24 @@ class DashFeedSource:
                 with tarfile.open(tar_path, "r:gz") as archive:
                     safe_extract_tar(archive, target_dir)
             except tarfile.TarError as exc:
-                raise RuntimeError(f"Dash feed for {slug} is not a valid gzip/tar archive") from exc
+                raise SourceError(
+                    "invalid_format",
+                    f"Dash feed for {slug} is not a valid gzip/tar archive.",
+                    hint="Dash docset archive is corrupt — clear cache and retry.",
+                    is_retriable=False,
+                ) from exc
         finally:
             tar_path.unlink(missing_ok=True)
 
         matches = list(target_dir.glob("*.docset"))
         if not matches:
-            raise RuntimeError(f"No .docset found after extracting {slug}")
-        metadata_target.write_bytes(b"metadata marker")
+            raise SourceError(
+                "invalid_format",
+                f"No .docset found after extracting {slug}.",
+                hint="Dash docset archive is corrupt — clear cache and retry.",
+                is_retriable=False,
+            )
+        metadata_target.write_bytes(tar_bytes)
         write_cache_metadata_for_bytes(
             metadata_target,
             tar_bytes,
@@ -213,7 +248,12 @@ class DashFeedSource:
         docs_root = docset_path / "Contents" / "Resources" / "Documents"
 
         if not dsidx.exists():
-            raise RuntimeError(f"Missing docSet.dsidx for {language.slug}")
+            raise SourceError(
+                "invalid_format",
+                f"Missing docSet.dsidx for {language.slug}.",
+                hint="Dash docset archive is corrupt — clear cache and retry.",
+                is_retriable=False,
+            )
 
         core = {t.lower() for t in (language.core_topics or [])} or {t.lower() for t in CORE_TYPES}
 
@@ -290,6 +330,48 @@ class DashFeedSource:
     ) -> AsyncIterator[AdapterEvent]:
         return document_events(self.fetch(language, mode, diagnostics=diagnostics, resume_boundary=resume_boundary))
 
+    async def preview(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        *,
+        force_refresh: bool = False,
+        include_topics: set[str] | None = None,
+        exclude_topics: set[str] | None = None,
+    ) -> DryRunResult:
+        topics = list(language.core_topics or sorted(CORE_TYPES))
+        include_topics = include_topics or set()
+        exclude_topics = exclude_topics or set()
+        if include_topics:
+            topics = [topic for topic in topics if topic.lower() in include_topics]
+        if exclude_topics:
+            topics = [topic for topic in topics if topic.lower() not in exclude_topics]
+
+        target_dir = self.docsets_dir / language.slug
+        matches = list(target_dir.glob("*.docset"))
+        if matches:
+            count = await asyncio.to_thread(
+                _count_dash_entries, matches[0], mode, include_topics, exclude_topics, topics
+            )
+            return DryRunResult(
+                language=language.display_name,
+                source=self.name,
+                slug=language.slug,
+                estimated_document_count=count,
+                estimated_size_hint=language.size_hint or None,
+                topics=sorted(set(topics)),
+            )
+
+        return DryRunResult(
+            language=language.display_name,
+            source=self.name,
+            slug=language.slug,
+            estimated_document_count=None,
+            estimated_size_hint=language.size_hint or None,
+            topics=sorted(set(topics)),
+            notes=["Dash previews use cached docset metadata when available; no cached docset exists yet."],
+        )
+
 
 def _convert_html(html: str, base_url: str = "dash://docset/index.html") -> str:
     return convert_html_to_markdown(html, base_url=base_url, profile=DASH_PROFILE)
@@ -323,3 +405,69 @@ def _append_fragment_reference_notes(markdown: str, fragment_refs: list[tuple[st
         lines.append(f"- {title} (`#{fragment}`)")
     lines.append("")
     return "\n".join(lines)
+
+
+def _dash_source_error_from_http(exc: Exception, *, slug: str) -> SourceError:
+    if isinstance(exc, httpx.TimeoutException):
+        return SourceError(
+            "network_timeout",
+            f"Dash request timed out for {slug}.",
+            hint="Check your internet connection.",
+            is_retriable=True,
+        )
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 404:
+            return SourceError(
+                "not_found",
+                f"Dash docset was not found for {slug}.",
+                hint="The docset may have been removed upstream.",
+                is_retriable=False,
+            )
+        if status == 429:
+            return SourceError(
+                "rate_limited",
+                f"Dash rate limit hit while fetching {slug}.",
+                hint="Dash source rate limit hit — wait 60 seconds.",
+                is_retriable=True,
+            )
+    return SourceError(
+        "network_timeout",
+        f"Dash request failed for {slug}: {type(exc).__name__}: {exc}",
+        hint="Check your internet connection.",
+        is_retriable=True,
+    )
+
+
+def _count_dash_entries(
+    docset_path: Path,
+    mode: CrawlMode,
+    include_topics: set[str],
+    exclude_topics: set[str],
+    topics: list[str],
+) -> int:
+    dsidx = docset_path / "Contents" / "Resources" / "docSet.dsidx"
+    if not dsidx.exists():
+        return 0
+    core = {topic.lower() for topic in topics} or {topic.lower() for topic in CORE_TYPES}
+    connection = sqlite3.connect(dsidx)
+    try:
+        rows = connection.execute("SELECT type, path FROM searchIndex ORDER BY type, name").fetchall()
+    finally:
+        connection.close()
+    seen_paths: set[str] = set()
+    count = 0
+    for entry_type, path in rows:
+        doc_key = str(path).split("#", 1)[0] if path else ""
+        if not path or not entry_type or doc_key in seen_paths:
+            continue
+        topic = str(entry_type).lower()
+        if mode == "important" and topic not in core:
+            continue
+        if include_topics and topic not in include_topics:
+            continue
+        if exclude_topics and topic in exclude_topics:
+            continue
+        seen_paths.add(doc_key)
+        count += 1
+    return count

@@ -9,6 +9,8 @@ namespace DevDocsDownloader.Desktop.Pages;
 
 public sealed partial class BulkPage : Page
 {
+    private static readonly string[] FallbackSources = ["Any (auto)", "dash", "devdocs", "mdn"];
+
     // ---------------------------------------------------------------------------
     // Inner model
     // ---------------------------------------------------------------------------
@@ -46,6 +48,7 @@ public sealed partial class BulkPage : Page
         InitializeComponent();
         App.MainViewModel.PropertyChanged += OnShellPropertyChanged;
         EventsList.ItemsSource = App.MainViewModel.ActivityLines;
+        SourceBox.ItemsSource = FallbackSources;
     }
 
     // ---------------------------------------------------------------------------
@@ -69,11 +72,7 @@ public sealed partial class BulkPage : Page
         PolicyBox.SelectedItem = App.MainViewModel.BulkConcurrencyPolicy;
 
         // Source dropdown
-        SourceBox.Items.Add("Any (auto)");
-        SourceBox.Items.Add("devdocs");
-        SourceBox.Items.Add("mdn");
-        SourceBox.Items.Add("dash");
-        SourceBox.SelectedIndex = 0;
+        PopulateSourceBox();
 
         RefreshProgress();
         ValidateForm();
@@ -127,11 +126,13 @@ public sealed partial class BulkPage : Page
                     Version = string.IsNullOrWhiteSpace(version) ? "latest" : version,
                 });
             }
+            PopulateSourceBox();
             ValidateForm();
         }
         catch
         {
             // Catalog is best-effort — user can still type slugs manually
+            PopulateSourceBox();
         }
     }
 
@@ -163,11 +164,9 @@ public sealed partial class BulkPage : Page
 
     private void OnLanguageSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
     {
-        // Prevent the chosen item's text from appearing in the box.
-        // QuerySubmitted fires immediately after and handles the actual add + clear.
         if (args.SelectedItem is CatalogEntry entry)
         {
-            sender.Text = entry.Language; // Show display name briefly until QuerySubmitted clears it
+            AddSelectedEntry(entry);
         }
     }
 
@@ -184,14 +183,15 @@ public sealed partial class BulkPage : Page
             }
         }
 
-        sender.Text = "";
-        sender.ItemsSource = null;
-
         if (entry is not null)
         {
-            AddEntryToSelection(entry);
-            ValidateForm();
+            AddSelectedEntry(entry);
+            return;
         }
+
+        sender.Text = "";
+        sender.ItemsSource = null;
+        ValidateForm();
     }
 
     // ---------------------------------------------------------------------------
@@ -384,11 +384,18 @@ public sealed partial class BulkPage : Page
 
         var result = await App.BackendHost.Client.StartBulkAsync(payload);
         var jobId = result?["id"]?.GetValue<string>() ?? "";
+        var status = result?["status"]?.GetValue<string>() ?? "running";
+        var queuePosition = result?["queue_position"]?.GetValue<int?>();
         App.MainViewModel.LanguageConcurrency = int.TryParse(ConcurrencyBox.Text, out var parsed)
             ? parsed : App.MainViewModel.LanguageConcurrency;
         App.MainViewModel.BulkConcurrencyPolicy = payload["concurrency_policy"]?.GetValue<string>()
             ?? App.MainViewModel.BulkConcurrencyPolicy;
-        await App.MainViewModel.StartTrackingJobAsync(jobId, $"{slugs.Length} language(s)", "run_bulk");
+        await App.MainViewModel.StartTrackingJobAsync(
+            jobId,
+            $"{slugs.Length} language(s)",
+            "run_bulk",
+            status,
+            queuePosition);
         RefreshProgress();
     }
 
@@ -409,6 +416,26 @@ public sealed partial class BulkPage : Page
     {
         var selected = SourceBox.SelectedItem?.ToString();
         return selected == "Any (auto)" || string.IsNullOrWhiteSpace(selected) ? null : selected;
+    }
+
+    private void PopulateSourceBox()
+    {
+        var current = GetSelectedSource() ?? App.MainViewModel.SourcePreference;
+        var sources = _catalog
+            .Select(item => item.Source)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        sources.Insert(0, "Any (auto)");
+        if (sources.Count == 1)
+        {
+            sources = [..FallbackSources];
+        }
+
+        SourceBox.ItemsSource = sources;
+        SourceBox.SelectedItem = sources.FirstOrDefault(item => item.Equals(current, StringComparison.OrdinalIgnoreCase))
+            ?? sources.First();
     }
 
     // ---------------------------------------------------------------------------
@@ -487,5 +514,13 @@ public sealed partial class BulkPage : Page
         }
         return nameMatches.FirstOrDefault(item => item.Version == "latest")
             ?? nameMatches.OrderByDescending(item => MajorVersion(item.Version)).First();
+    }
+
+    private void AddSelectedEntry(CatalogEntry entry)
+    {
+        AddEntryToSelection(entry);
+        LanguageSearchBox.Text = "";
+        LanguageSearchBox.ItemsSource = null;
+        ValidateForm();
     }
 }

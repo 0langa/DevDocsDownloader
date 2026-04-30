@@ -246,7 +246,7 @@ def test_document_validation_jsonl_maps_issues_to_document_paths(tmp_path: Path)
     records = [json.loads(line) for line in (reports_dir / "validation_documents.jsonl").read_text().splitlines()]
 
     assert records[0]["document_path"].endswith("alpha.md")
-    assert {issue["code"] for issue in records[0]["issues"]} >= {"relative_link", "html_leftover"}
+    assert {issue["code"] for issue in records[0]["issues"]} >= {"relative_link", "html_artifact"}
 
 
 def test_document_warning_event_persists_structured_records_and_report_text(tmp_path: Path) -> None:

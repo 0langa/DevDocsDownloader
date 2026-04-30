@@ -7,7 +7,7 @@ from pathlib import Path
 import doc_ingest.adaptive as adaptive_module
 from doc_ingest.adaptive import AdaptiveBulkController, AdaptiveBulkPolicy
 from doc_ingest.config import load_config
-from doc_ingest.models import LanguageRunReport, RunSummary, RuntimeTelemetrySnapshot
+from doc_ingest.models import FailureDetail, LanguageRunReport, RunSummary, RuntimeTelemetrySnapshot
 from doc_ingest.pipeline import DocumentationPipeline
 from doc_ingest.sources.base import LanguageCatalog
 from doc_ingest.sources.registry import SourceRegistry
@@ -53,7 +53,7 @@ def test_adaptive_bulk_policy_reduces_after_failure_and_preserves_order(monkeypa
         language = kwargs["language_name"]
         report = LanguageRunReport(language=language, slug=language, source="fixture", source_slug=language)
         if language == "a":
-            report.failures.append("failed")
+            report.failures.append(FailureDetail(code="runtime_error", message="failed"))
             report.runtime_telemetry = RuntimeTelemetrySnapshot(retries=4, failures=1)
         return RunSummary(reports=[report])
 

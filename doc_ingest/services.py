@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,6 +15,8 @@ from .models import (
     CacheEntryMetadata,
     CacheFreshnessPolicy,
     CrawlMode,
+    DryRunResult,
+    FailureDetail,
     LanguageRunCheckpoint,
     RunSummary,
 )
@@ -61,6 +64,7 @@ class RunLanguageRequest(BaseModel):
     chunk_overlap_tokens: int = 100
     cache_policy: CacheFreshnessPolicy = "use-if-present"
     cache_ttl_hours: int | None = None
+    dry_run: bool = False
 
 
 class BulkRunRequest(BaseModel):
@@ -235,6 +239,37 @@ class CacheMetadataSummary(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+class CacheEntrySummary(BaseModel):
+    source: str
+    slug: str
+    cache_key: str
+    path: str
+    byte_count: int = 0
+    fetched_at: str = ""
+    policy: str = ""
+    next_refresh_due: str = ""
+    source_version: str = ""
+    checksum: str = ""
+    refreshed_by_force: bool = False
+
+
+class CacheSourceSummary(BaseModel):
+    source: str
+    total_bytes: int = 0
+    entry_count: int = 0
+    oldest_entry_at: str = ""
+    newest_entry_at: str = ""
+
+
+class CacheSummaryBundle(BaseModel):
+    cache_root: Path
+    total_bytes: int = 0
+    max_cache_size_mb: int = 2048
+    max_cache_size_bytes: int = 2_147_483_648
+    sources: list[CacheSourceSummary] = Field(default_factory=list)
+    entries: list[CacheEntrySummary] = Field(default_factory=list)
+
+
 class DocumentationService:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -245,12 +280,36 @@ class DocumentationService:
         *,
         progress_tracker: CrawlProgressTracker | None = None,
         event_sink: ServiceEventSink | None = None,
-    ) -> RunSummary:
+    ) -> RunSummary | DryRunResult:
         self._apply_output_options(request)
         await _emit(event_sink, ServiceEvent(event_type="phase_change", language=request.language, phase="started"))
         progress_tracker = progress_tracker or _DesktopProgressTracker(event_sink)
         pipeline = DocumentationPipeline(self.config)
         try:
+            if request.dry_run:
+                result = await pipeline.dry_run(
+                    language_name=request.language,
+                    mode=request.mode,
+                    source_name=request.source,
+                    force_refresh=request.force_refresh,
+                    include_topics=request.include_topics,
+                    exclude_topics=request.exclude_topics,
+                )
+                await _emit(
+                    event_sink,
+                    ServiceEvent(
+                        event_type="activity",
+                        language=request.language,
+                        message=(
+                            f"Preview ready: {result.source} / {result.slug} "
+                            f"({result.estimated_document_count if result.estimated_document_count is not None else 'unknown'} docs)"
+                        ),
+                    ),
+                )
+                await _emit(
+                    event_sink, ServiceEvent(event_type="phase_change", language=request.language, phase="completed")
+                )
+                return result
             summary = await pipeline.run(
                 language_name=request.language,
                 mode=request.mode,
@@ -269,7 +328,19 @@ class DocumentationService:
         except Exception as exc:
             await _emit(
                 event_sink,
-                ServiceEvent(event_type="failure", language=request.language, message=f"{type(exc).__name__}: {exc}"),
+                ServiceEvent(
+                    event_type="failure",
+                    language=request.language,
+                    message=f"{type(exc).__name__}: {exc}",
+                    payload=_failure_payload(
+                        FailureDetail(
+                            code="runtime_error",
+                            message=f"{type(exc).__name__}: {exc}",
+                            hint="Check the run log for the full stack trace.",
+                            is_retriable=False,
+                        )
+                    ),
+                ),
             )
             raise
         finally:
@@ -310,7 +381,21 @@ class DocumentationService:
             await _emit(event_sink, ServiceEvent(event_type="phase_change", phase="bulk_completed"))
             return summary
         except Exception as exc:
-            await _emit(event_sink, ServiceEvent(event_type="failure", message=f"{type(exc).__name__}: {exc}"))
+            await _emit(
+                event_sink,
+                ServiceEvent(
+                    event_type="failure",
+                    message=f"{type(exc).__name__}: {exc}",
+                    payload=_failure_payload(
+                        FailureDetail(
+                            code="runtime_error",
+                            message=f"{type(exc).__name__}: {exc}",
+                            hint="Check the run log for the full stack trace.",
+                            is_retriable=False,
+                        )
+                    ),
+                ),
+            )
             raise
         finally:
             await pipeline.close()
@@ -671,6 +756,103 @@ class DocumentationService:
             )
         return summaries
 
+    def cache_summary(self) -> CacheSummaryBundle:
+        entries: list[CacheEntrySummary] = []
+        total_bytes = 0
+        grouped: dict[str, list[CacheEntrySummary]] = {}
+        for item in self.list_cache_metadata():
+            slug = _slug_from_cache_metadata(item)
+            next_refresh_due = _next_refresh_due(item.fetched_at, item.policy, self.config.cache_ttl_hours)
+            entry = CacheEntrySummary(
+                source=item.source or _source_from_cache_path(item.path),
+                slug=slug,
+                cache_key=item.cache_key,
+                path=str(item.path),
+                byte_count=item.byte_count,
+                fetched_at=item.fetched_at,
+                policy=item.policy,
+                next_refresh_due=next_refresh_due,
+                source_version=item.source_version,
+                checksum=item.checksum,
+                refreshed_by_force=item.refreshed_by_force,
+            )
+            entries.append(entry)
+            total_bytes += entry.byte_count
+            grouped.setdefault(entry.source or "unknown", []).append(entry)
+        source_rows: list[CacheSourceSummary] = []
+        for source_name, source_entries in sorted(grouped.items()):
+            timestamps = [entry.fetched_at for entry in source_entries if entry.fetched_at]
+            source_rows.append(
+                CacheSourceSummary(
+                    source=source_name,
+                    total_bytes=sum(entry.byte_count for entry in source_entries),
+                    entry_count=len(source_entries),
+                    oldest_entry_at=min(timestamps) if timestamps else "",
+                    newest_entry_at=max(timestamps) if timestamps else "",
+                )
+            )
+        return CacheSummaryBundle(
+            cache_root=self.config.paths.cache_dir,
+            total_bytes=total_bytes,
+            max_cache_size_mb=self.config.max_cache_size_mb,
+            max_cache_size_bytes=self.config.max_cache_size_mb * 1024 * 1024,
+            sources=source_rows,
+            entries=sorted(entries, key=lambda item: (item.source, item.slug, item.cache_key)),
+        )
+
+    async def refresh_cache_entry(self, *, source: str, slug: str) -> CacheEntrySummary:
+        registry = self._registry()
+        try:
+            if source == "catalog":
+                raise ValueError("Use refresh catalogs for shared catalog entries.")
+            match = await registry.resolve(slug, source_name=source, force_refresh=True)
+            if match is None:
+                raise FileNotFoundError(f"Cache entry not found in catalog: {source}/{slug}")
+            resolved_source, catalog = match
+            result = await resolved_source.preview(catalog, "important", force_refresh=True)
+            summary = self.cache_summary()
+            for entry in summary.entries:
+                if entry.source == source and entry.slug == result.slug:
+                    return entry
+            raise FileNotFoundError(f"Cache metadata not found after refresh: {source}/{slug}")
+        finally:
+            await registry.runtime.close()
+
+    def delete_cache_entry(self, *, source: str, slug: str) -> StorageCleanupResult:
+        target = _cache_entry_root(self.config.paths.cache_dir, source=source, slug=slug)
+        if target is None or not target.exists():
+            return StorageCleanupResult(target=f"{source}/{slug}", deleted=False)
+        freed_bytes, deleted_files, deleted_directories = _path_usage_with_directories(target)
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink(missing_ok=True)
+        return StorageCleanupResult(
+            target=f"{source}/{slug}",
+            deleted=True,
+            freed_bytes=freed_bytes,
+            deleted_files=deleted_files,
+            deleted_directories=deleted_directories,
+        )
+
+    def clear_cache(self, *, source: str | None = None) -> StorageCleanupResult:
+        target_root = _cache_entry_root(self.config.paths.cache_dir, source=source, slug=None)
+        if target_root is None or not target_root.exists():
+            return StorageCleanupResult(target=source or "cache", deleted=False)
+        freed_bytes, deleted_files, deleted_directories = _path_usage_with_directories(target_root)
+        if source is None:
+            shutil.rmtree(target_root)
+            self.config.paths.cache_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            shutil.rmtree(target_root)
+        return StorageCleanupResult(
+            target=source or "cache",
+            deleted=True,
+            freed_bytes=freed_bytes,
+            deleted_files=deleted_files,
+            deleted_directories=deleted_directories,
+        )
+
     def _apply_output_options(self, request: RunLanguageRequest | BulkRunRequest) -> None:
         self.config.emit_document_frontmatter = request.emit_document_frontmatter
         self.config.emit_chunks = request.emit_chunks
@@ -688,6 +870,8 @@ class DocumentationService:
             runtime=SourceRuntime(
                 cache_policy=self.config.cache_policy,
                 cache_ttl_hours=self.config.cache_ttl_hours,
+                cache_root=self.config.paths.cache_dir,
+                max_cache_size_bytes=self.config.max_cache_size_mb * 1024 * 1024,
             ),
         )
 
@@ -821,8 +1005,19 @@ class DocumentationService:
                 )
             if report.failures:
                 for failure in report.failures:
+                    detail = (
+                        failure
+                        if isinstance(failure, FailureDetail)
+                        else FailureDetail(code="runtime_error", message=failure)
+                    )
                     await _emit(
-                        event_sink, ServiceEvent(event_type="failure", language=report.language, message=failure)
+                        event_sink,
+                        ServiceEvent(
+                            event_type="failure",
+                            language=report.language,
+                            message=detail.message,
+                            payload=_failure_payload(detail),
+                        ),
                     )
 
 
@@ -925,6 +1120,10 @@ def _media_type(path: Path) -> str:
     return "text/plain"
 
 
+def _failure_payload(failure: FailureDetail) -> dict[str, Any]:
+    return failure.model_dump(mode="json")
+
+
 def _path_usage(path: Path) -> tuple[int, int]:
     if path.is_file():
         return path.stat().st_size, 1
@@ -943,3 +1142,46 @@ def _path_usage_with_directories(path: Path) -> tuple[int, int, int]:
         return total_bytes, file_count, 0
     directory_count = 1 + sum(1 for child in path.rglob("*") if child.is_dir())
     return total_bytes, file_count, directory_count
+
+
+def _slug_from_cache_metadata(item: CacheMetadataSummary) -> str:
+    cache_key = item.cache_key or ""
+    if not cache_key:
+        return item.path.stem.replace(".meta", "")
+    return cache_key.split("/", 1)[0]
+
+
+def _source_from_cache_path(path: Path) -> str:
+    parts = {part.lower() for part in path.parts}
+    for source in ("devdocs", "mdn", "dash", "catalogs"):
+        if source in parts:
+            return "catalog" if source == "catalogs" else source
+    return "unknown"
+
+
+def _next_refresh_due(fetched_at: str, policy: str, ttl_hours: int | None) -> str:
+    if policy != "ttl" or not fetched_at:
+        return ""
+    try:
+        fetched = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    hours = ttl_hours if ttl_hours is not None else 24
+    return (fetched + timedelta(hours=max(0, hours))).isoformat()
+
+
+def _cache_entry_root(cache_root: Path, *, source: str | None, slug: str | None) -> Path | None:
+    if source is None:
+        return cache_root
+    normalized = source.strip().lower()
+    if normalized == "devdocs":
+        return cache_root / "devdocs" / slug if slug else cache_root / "devdocs"
+    if normalized == "dash":
+        return cache_root / "dash" / slug if slug else cache_root / "dash"
+    if normalized == "mdn":
+        if slug:
+            return cache_root / "mdn"
+        return cache_root / "mdn"
+    if normalized == "catalog":
+        return cache_root / "catalogs"
+    return None

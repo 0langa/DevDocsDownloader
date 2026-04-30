@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..models import RunSummary
+from ..models import FailureDetail, RunSummary
 from ..utils.filesystem import read_json, write_text
 
 
@@ -62,7 +62,10 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
             if report.validation.issues:
                 lines.append("- Validation issues:")
                 for issue in report.validation.issues:
-                    lines.append(f"  - [{issue.level}] {issue.code}: {issue.message}")
+                    text = f"  - [{issue.level}] {issue.code}: {issue.message}"
+                    if issue.suggestion:
+                        text += f" Suggestion: {issue.suggestion}"
+                    lines.append(text)
             if report.validation.document_results:
                 lines.append(f"- Document validation records: {len(report.validation.document_results)}")
         if report.runtime_telemetry is not None:
@@ -73,6 +76,7 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
             lines.append(f"  - Failures: {report.runtime_telemetry.failures}")
             lines.append(f"  - Cache hits: {report.runtime_telemetry.cache_hits}")
             lines.append(f"  - Cache refreshes: {report.runtime_telemetry.cache_refreshes}")
+            lines.append(f"  - Circuit breaker rejections: {report.runtime_telemetry.circuit_breaker_rejections}")
         if report.asset_inventory is not None:
             lines.append("- Asset inventory:")
             lines.append(f"  - Total: {report.asset_inventory.total}")
@@ -103,7 +107,10 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
         if report.failures:
             lines.append("- Failures:")
             for failure in report.failures:
-                lines.append(f"  - {failure}")
+                detail = _coerce_failure_detail(failure)
+                lines.append(f"  - [{detail.code}] {detail.message}")
+                if detail.hint:
+                    lines.append(f"    - Hint: {detail.hint}")
         lines.append("")
 
     write_text(md_path, "\n".join(lines))
@@ -151,6 +158,7 @@ def _write_trends(reports_dir: Path) -> None:
                 "failures": 0,
                 "cache_hits": 0,
                 "cache_refreshes": 0,
+                "circuit_breaker_rejections": 0,
             },
         }
     )
@@ -219,3 +227,9 @@ def _write_trends(reports_dir: Path) -> None:
                 lines.append(f"  - {code}: {count}")
         lines.append("")
     write_text(reports_dir / "trends.md", "\n".join(lines))
+
+
+def _coerce_failure_detail(value: FailureDetail | str) -> FailureDetail:
+    if isinstance(value, FailureDetail):
+        return value
+    return FailureDetail(code="runtime_error", message=value)

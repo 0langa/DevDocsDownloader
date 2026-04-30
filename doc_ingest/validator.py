@@ -43,7 +43,7 @@ _ISSUE_BASE_WEIGHTS = {
     "relative_link": 0.35,
     "relative_image": 0.2,
     "empty_link_target": 0.2,
-    "html_leftover": 0.35,
+    "html_artifact": 0.35,
     "malformed_table": 0.3,
     "definition_list_artifact": 0.2,
     "duplicate_section_link": 0.2,
@@ -62,11 +62,16 @@ _COMPONENT_CODES = {
         "relative_link",
         "relative_image",
         "empty_link_target",
-        "html_leftover",
+        "html_artifact",
         "malformed_table",
         "definition_list_artifact",
     },
     "consistency": {"topic_total_mismatch", "source_inventory_mismatch", "emitted_less_than_compiled"},
+}
+_ISSUE_SUGGESTIONS = {
+    "relative_link": "Rerun with a newer cache; source HTML may have changed.",
+    "html_artifact": "Conversion profile may need tuning for this source.",
+    "missing_output": "Run failed before compilation; check the run log.",
 }
 
 
@@ -84,7 +89,12 @@ def validate_output(
 
     if not output_path.exists():
         issues.append(
-            ValidationIssue(level="error", code="missing_output", message="Consolidated markdown file is missing.")
+            ValidationIssue(
+                level="error",
+                code="missing_output",
+                message="Consolidated markdown file is missing.",
+                suggestion=_ISSUE_SUGGESTIONS["missing_output"],
+            )
         )
         zero_scores = ValidationScoreComponents()
         return ValidationResult(
@@ -244,6 +254,7 @@ def _validate_links(text: str) -> list[ValidationIssue]:
                 level="warning",
                 code="relative_link",
                 message=f"{relative_links} unresolved relative Markdown link(s) detected.",
+                suggestion=_ISSUE_SUGGESTIONS["relative_link"],
             )
         )
     if relative_images:
@@ -443,8 +454,9 @@ def _validate_conversion_quality(text: str) -> list[ValidationIssue]:
         issues.append(
             ValidationIssue(
                 level="warning",
-                code="html_leftover",
+                code="html_artifact",
                 message="Likely HTML tag leftovers detected in generated Markdown.",
+                suggestion=_ISSUE_SUGGESTIONS["html_artifact"],
             )
         )
     if _has_malformed_table(without_code):

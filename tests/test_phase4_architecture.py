@@ -106,8 +106,8 @@ def test_compiler_plan_and_renderer_are_deterministic_without_writes(tmp_path: P
     rendered = render_compilation(plan)
 
     assert [topic.name for topic in plan.topics] == ["Reference", "Guides"]
-    assert [doc.document.slug for doc in plan.topics[0].documents] == ["std-vector", "std-vector-2"]
-    assert [doc.document.slug for doc in plan.topics[1].documents] == ["com1-item"]
+    assert [doc.slug for doc in plan.topics[0].documents] == ["std-vector", "std-vector-2"]
+    assert [doc.slug for doc in plan.topics[1].documents] == ["com1-item"]
     assert rendered.output_path == tmp_path / "plan-lang" / "plan-lang.md"
     assert tmp_path / "plan-lang" / "index.md" in rendered.files
     assert tmp_path / "plan-lang" / "reference" / "std-vector.md" in rendered.files
@@ -132,8 +132,7 @@ def test_compiler_streams_documents_before_finalize_and_writes_from_fragments(tm
     assert not (tmp_path / "stream-lang" / "stream-lang.md").exists()
 
     plan = builder.build_plan()
-    assert plan.topics[0].documents[0].document is not None
-    plan.topics[0].documents[0].document = None
+    assert plan.topics[0].documents[0].document is None
 
     write_streamed_compilation(plan)
 

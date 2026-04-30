@@ -35,20 +35,23 @@ class BackendJobSummary(BaseModel):
     language: str = ""
     detail: str = ""
     error: str = ""
+    queue_position: int | None = None
     summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class BackendJob:
-    def __init__(self, *, job_id: str, kind: str, language: str, detail: str) -> None:
+    def __init__(self, *, job_id: str, kind: str, language: str, detail: str, runner: Any) -> None:
         self.id = job_id
         self.kind = kind
         self.language = language
         self.detail = detail
+        self.runner = runner
         self.status: Literal["pending", "running", "cancelling", "completed", "failed", "cancelled"] = "pending"
         self.created_at = datetime.now(UTC)
         self.started_at: datetime | None = None
         self.completed_at: datetime | None = None
         self.error = ""
+        self.queue_position: int | None = None
         self.summary: dict[str, Any] = {}
         self.events: list[ServiceEvent] = []
         self._event_queue: asyncio.Queue[ServiceEvent | None] = asyncio.Queue()
@@ -65,6 +68,7 @@ class BackendJob:
             language=self.language,
             detail=self.detail,
             error=self.error,
+            queue_position=self.queue_position,
             summary=self.summary,
         )
 
@@ -105,6 +109,10 @@ class BackendJobManager:
         self.jobs: dict[str, BackendJob] = {}
         self.active_job_id: str | None = None
         self._lock = asyncio.Lock()
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._queued_ids: list[str] = []
+        self._queue_worker_task: asyncio.Task[None] | None = None
+        self._queue_limit = 10
         self._history_path = history_path
         self._historical_summaries: list[BackendJobSummary] = []
         if history_path is not None:
@@ -169,22 +177,33 @@ class BackendJobManager:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
 
+    def queue_snapshot(self) -> dict[str, Any]:
+        pending = [
+            self.jobs[job_id].snapshot()
+            for job_id in self._queued_ids
+            if job_id in self.jobs and self.jobs[job_id].status == "pending"
+        ]
+        return {"depth": len(pending), "pending": [item.model_dump(mode="json") for item in pending]}
+
     async def cancel(self, job_id: str) -> BackendJobSummary:
         job = self.get(job_id)
         if job.status in {"completed", "failed", "cancelled"}:
             return job.snapshot()
-        if job.task is None:
-            raise HTTPException(status_code=409, detail="Job is not running")
         if job.status == "pending":
+            async with self._lock:
+                if job.id in self._queued_ids:
+                    self._queued_ids.remove(job.id)
+                    await self._broadcast_queue_positions_locked()
             job.status = "cancelled"
             job.completed_at = datetime.now(UTC)
             job.error = "Cancelled"
-            if self.active_job_id == job.id:
-                self.active_job_id = None
-            job.task.cancel()
+            job.queue_position = None
             await job.publish(ServiceEvent(event_type="phase_change", language=job.language, phase="cancelled"))
             await job.close_stream()
+            self._persist_summary(job.snapshot())
             return job.snapshot()
+        if job.task is None:
+            raise HTTPException(status_code=409, detail="Job is not running")
         job.status = "cancelling"
         await job.publish(ServiceEvent(event_type="phase_change", language=job.language, phase="cancelling"))
         job.task.cancel()
@@ -192,18 +211,50 @@ class BackendJobManager:
 
     async def _submit(self, *, kind: str, language: str, detail: str, runner) -> BackendJobSummary:
         async with self._lock:
-            active = self._active_job()
-            if active is not None:
-                raise HTTPException(status_code=409, detail=f"Job already running: {active.id}")
-            job = BackendJob(job_id=uuid4().hex, kind=kind, language=language, detail=detail)
+            if len(self._queued_ids) >= self._queue_limit:
+                raise HTTPException(status_code=409, detail=f"Job queue is full ({self._queue_limit} pending).")
+            job = BackendJob(job_id=uuid4().hex, kind=kind, language=language, detail=detail, runner=runner)
             self.jobs[job.id] = job
-            self.active_job_id = job.id
-            job.task = asyncio.create_task(self._run_job(job, runner))
+            self._queued_ids.append(job.id)
+            await self._broadcast_queue_positions_locked()
+            await self._queue.put(job.id)
+            self._ensure_queue_worker_locked()
             return job.snapshot()
 
-    async def _run_job(self, job: BackendJob, runner) -> None:
+    def _ensure_queue_worker_locked(self) -> None:
+        if self._queue_worker_task is None or self._queue_worker_task.done():
+            self._queue_worker_task = asyncio.create_task(self._queue_worker())
+
+    async def _queue_worker(self) -> None:
+        while True:
+            job_id = await self._queue.get()
+            async with self._lock:
+                job = self.jobs.get(job_id)
+                if job is None or job.status != "pending":
+                    self._queue.task_done()
+                    continue
+                if job_id in self._queued_ids:
+                    self._queued_ids.remove(job_id)
+                self.active_job_id = job_id
+                job.queue_position = None
+                await self._broadcast_queue_positions_locked()
+                job.task = asyncio.create_task(self._run_job(job))
+            try:
+                await job.task
+            finally:
+                self._queue.task_done()
+
+    async def _run_job(self, job: BackendJob) -> None:
         job.status = "running"
         job.started_at = datetime.now(UTC)
+        await job.publish(
+            ServiceEvent(
+                event_type="phase_change",
+                language=job.language,
+                phase="running",
+                message=f"Started {job.detail}",
+            )
+        )
 
         async def event_sink(event: ServiceEvent) -> None:
             await job.publish(event)
@@ -212,18 +263,36 @@ class BackendJobManager:
             await asyncio.sleep(0)
 
         try:
-            result = await runner(event_sink)
+            result = await job.runner(event_sink)
         except asyncio.CancelledError:
             job.status = "cancelled"
             job.completed_at = datetime.now(UTC)
             job.error = "Cancelled"
-            await job.publish(ServiceEvent(event_type="failure", language=job.language, message=job.error))
-            raise
+            await job.publish(
+                ServiceEvent(
+                    event_type="failure",
+                    language=job.language,
+                    message=job.error,
+                    payload={"code": "cancelled", "message": job.error, "hint": "", "is_retriable": False},
+                )
+            )
         except Exception as exc:
             job.status = "failed"
             job.completed_at = datetime.now(UTC)
             job.error = f"{type(exc).__name__}: {exc}"
-            await job.publish(ServiceEvent(event_type="failure", language=job.language, message=job.error))
+            await job.publish(
+                ServiceEvent(
+                    event_type="failure",
+                    language=job.language,
+                    message=job.error,
+                    payload={
+                        "code": "runtime_error",
+                        "message": job.error,
+                        "hint": "Check the run log for the full stack trace.",
+                        "is_retriable": False,
+                    },
+                )
+            )
         else:
             job.status = "completed"
             job.completed_at = datetime.now(UTC)
@@ -232,7 +301,9 @@ class BackendJobManager:
             else:
                 job.summary = {"result": result}
         finally:
-            self.active_job_id = None
+            async with self._lock:
+                if self.active_job_id == job.id:
+                    self.active_job_id = None
             await job.close_stream()
             self._persist_summary(job.snapshot())
 
@@ -244,6 +315,22 @@ class BackendJobManager:
             self.active_job_id = None
             return None
         return job
+
+    async def _broadcast_queue_positions_locked(self) -> None:
+        pending_ids = [job_id for job_id in self._queued_ids if self.jobs.get(job_id) is not None]
+        for index, job_id in enumerate(pending_ids, start=1):
+            job = self.jobs[job_id]
+            job.queue_position = index
+            job.summary["queue_position"] = index
+            await job.publish(
+                ServiceEvent(
+                    event_type="phase_change",
+                    language=job.language,
+                    phase="pending",
+                    message=f"Queued (position {index})",
+                    payload={"queue_position": index, "status": "pending"},
+                )
+            )
 
 
 def create_app(
@@ -334,6 +421,10 @@ def create_app(
     async def list_jobs() -> list[dict[str, Any]]:
         return [job.model_dump(mode="json") for job in jobs.list_jobs()]
 
+    @app.get("/jobs/queue", dependencies=[Depends(require_auth)])
+    async def queue_status() -> dict[str, Any]:
+        return jobs.queue_snapshot()
+
     @app.get("/jobs/{job_id}", dependencies=[Depends(require_auth)])
     async def job_status(job_id: str) -> dict[str, Any]:
         return jobs.get(job_id).snapshot().model_dump(mode="json")
@@ -403,6 +494,26 @@ def create_app(
     @app.get("/cache/metadata", dependencies=[Depends(require_auth)])
     async def cache_metadata() -> list[dict[str, Any]]:
         return [item.model_dump(mode="json") for item in service.list_cache_metadata()]
+
+    @app.get("/cache/summary", dependencies=[Depends(require_auth)])
+    async def cache_summary() -> dict[str, Any]:
+        return service.cache_summary().model_dump(mode="json")
+
+    @app.post("/cache/entry/refresh", dependencies=[Depends(require_auth)])
+    async def refresh_cache_entry(source: str, slug: str) -> dict[str, Any]:
+        return (await service.refresh_cache_entry(source=source, slug=slug)).model_dump(mode="json")
+
+    @app.delete("/cache/entry", dependencies=[Depends(require_auth)])
+    async def delete_cache_entry(source: str, slug: str) -> dict[str, Any]:
+        return service.delete_cache_entry(source=source, slug=slug).model_dump(mode="json")
+
+    @app.delete("/cache/source/{source}", dependencies=[Depends(require_auth)])
+    async def clear_source_cache(source: str) -> dict[str, Any]:
+        return service.clear_cache(source=source).model_dump(mode="json")
+
+    @app.delete("/cache", dependencies=[Depends(require_auth)])
+    async def clear_cache() -> dict[str, Any]:
+        return service.clear_cache().model_dump(mode="json")
 
     @app.exception_handler(FileNotFoundError)
     async def handle_missing(_request, exc: FileNotFoundError) -> JSONResponse:

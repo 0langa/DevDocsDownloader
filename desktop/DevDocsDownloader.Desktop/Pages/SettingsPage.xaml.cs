@@ -14,7 +14,7 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         HelpBox.Text = """
-            DevDocsDownloader 1.1.1 desktop shell
+            DevDocsDownloader 1.1.5 desktop shell
 
             What this app does
             - Download official documentation from DevDocs, MDN, and Dash-backed catalogs.
@@ -29,7 +29,7 @@ public sealed partial class SettingsPage : Page
 
             Expected behavior
             - Tabs keep their state when you move around the shell.
-            - Only one backend job runs at a time in the 1.1.x desktop line.
+            - Desktop jobs queue automatically; new runs show queued position instead of failing.
             - If startup fails, the sidebar shows the backend failure and the desktop log path.
             - Checkpoints are safe resume boundaries, not final output.
 
@@ -88,6 +88,7 @@ public sealed partial class SettingsPage : Page
                 ["source_preference"] = string.IsNullOrWhiteSpace(SourcePreferenceBox.Text) ? null : SourcePreferenceBox.Text,
                 ["cache_policy"] = CachePolicyBox.SelectedItem?.ToString() ?? "use-if-present",
                 ["cache_ttl_hours"] = int.TryParse(CacheTtlBox.Text, out var ttl) ? ttl : null,
+                ["max_cache_size_mb"] = int.TryParse(MaxCacheSizeBox.Text, out var maxCacheSize) ? maxCacheSize : 2048,
                 ["language_tree_mode"] = App.MainViewModel.LanguageTreeMode,
                 ["language_search"] = App.MainViewModel.LanguageSearch,
                 ["last_output_language_slug"] = App.MainViewModel.LastOutputLanguageSlug,
@@ -120,6 +121,7 @@ public sealed partial class SettingsPage : Page
             SourcePreferenceBox.Text = App.MainViewModel.SourcePreference;
             CachePolicyBox.SelectedItem = App.MainViewModel.CachePolicy;
             CacheTtlBox.Text = App.MainViewModel.CacheTtlHours?.ToString() ?? "";
+            MaxCacheSizeBox.Text = App.MainViewModel.MaxCacheSizeMb.ToString();
             StatusText.Text = $"Loaded settings from desktop backend. Log path: {App.MainViewModel.BackendLogPath}";
         }
         catch (Exception exc)

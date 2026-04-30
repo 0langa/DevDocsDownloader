@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
@@ -10,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import load_config
-from .models import BulkConcurrencyPolicy, CacheFreshnessPolicy, CrawlMode
+from .models import BulkConcurrencyPolicy, CacheFreshnessPolicy, CrawlMode, RunSummary
 from .progress import CrawlProgressTracker
 from .runtime import SourceRuntime
 from .services import BulkRunRequest, DocumentationService, RunLanguageRequest
@@ -145,7 +146,7 @@ def _execute_run(
         tracker = CrawlProgressTracker(console=console)
         service = DocumentationService(config)
         with tracker.live():
-            summary = await service.run_language(
+            result = await service.run_language(
                 RunLanguageRequest(
                     language=language,
                     mode=mode,
@@ -166,6 +167,7 @@ def _execute_run(
                 ),
                 progress_tracker=tracker,
             )
+        summary = cast(RunSummary, result)
 
         table = Table(title="Documentation Download Summary")
         table.add_column("Language")
@@ -188,7 +190,12 @@ def _execute_run(
             if report.failures:
                 console.print(f"[red]Failures for {report.language}:[/red]")
                 for failure in report.failures:
-                    console.print(f"  - {failure}")
+                    if isinstance(failure, str):
+                        console.print(f"  - [runtime_error] {failure}")
+                    else:
+                        console.print(f"  - [{failure.code}] {failure.message}")
+                        if failure.hint:
+                            console.print(f"    hint: {failure.hint}")
 
     asyncio.run(_runner())
 
@@ -632,7 +639,13 @@ def bulk(
             console.print(f"[yellow]{len(missing)} language(s) had issues:[/yellow]")
             for report in missing:
                 for failure in report.failures:
-                    console.print(f"  - {report.language}: {failure}")
+                    if isinstance(failure, str):
+                        line = f"  - {report.language}: [runtime_error] {failure}"
+                    else:
+                        line = f"  - {report.language}: [{failure.code}] {failure.message}"
+                        if failure.hint:
+                            line += f" | hint: {failure.hint}"
+                    console.print(line)
 
     asyncio.run(_runner())
 

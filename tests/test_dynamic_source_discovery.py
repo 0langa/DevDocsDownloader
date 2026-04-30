@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import tarfile
 from pathlib import Path
 
 import httpx
@@ -14,27 +16,24 @@ from doc_ingest.sources.registry import SourceRegistry
 
 def test_mdn_list_languages_discovers_supported_families_and_cached_fallback(tmp_path: Path, monkeypatch) -> None:
     source = MdnContentSource(cache_dir=tmp_path)
-    area_root = source.extracted_root / "content-main" / "files" / "en-us"
-    (area_root / "web" / "html").mkdir(parents=True)
-    (area_root / "web" / "api").mkdir(parents=True)
-    (area_root / "web" / "svg").mkdir(parents=True)
-    (area_root / "web" / "html" / "index.md").write_text(
-        "---\ntitle: HTML\nslug: Web/HTML\npage-type: landing-page\n---\nBody",
-        encoding="utf-8",
-    )
-    (area_root / "web" / "api" / "index.md").write_text(
-        "---\ntitle: Web APIs\nslug: Web/API\npage-type: landing-page\n---\nBody",
-        encoding="utf-8",
-    )
-    (area_root / "web" / "svg" / "index.md").write_text(
-        "---\ntitle: SVG\nslug: Web/SVG\npage-type: landing-page\n---\nBody",
-        encoding="utf-8",
-    )
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, payload in {
+            "content-main/files/en-us/web/html/index.md": "---\ntitle: HTML\nslug: Web/HTML\npage-type: landing-page\n---\nBody",
+            "content-main/files/en-us/web/api/index.md": "---\ntitle: Web APIs\nslug: Web/API\npage-type: landing-page\n---\nBody",
+            "content-main/files/en-us/web/svg/index.md": "---\ntitle: SVG\nslug: Web/SVG\npage-type: landing-page\n---\nBody",
+        }.items():
+            data = payload.encode("utf-8")
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+    source.archive_path.parent.mkdir(parents=True, exist_ok=True)
+    source.archive_path.write_bytes(buffer.getvalue())
 
-    async def fake_ensure(*, area: str | None = None, force_refresh: bool = False) -> Path:
-        return source.extracted_root
+    async def fake_sha() -> str:
+        return "sha-html"
 
-    monkeypatch.setattr(source, "_ensure_content", fake_ensure)
+    monkeypatch.setattr(source, "_latest_commit_sha", fake_sha)
     entries = asyncio.run(source.list_languages(force_refresh=True))
 
     by_slug = {entry.slug: entry for entry in entries}
@@ -45,10 +44,10 @@ def test_mdn_list_languages_discovers_supported_families_and_cached_fallback(tmp
     assert by_slug["web-apis"].aliases[0] == "web-apis"
     assert by_slug["svg"].support_level == "experimental"
 
-    async def fail_ensure(*, area: str | None = None, force_refresh: bool = False) -> Path:
+    async def fail_ensure(*, area: str | None = None, force_refresh: bool = False):
         raise RuntimeError("upstream unavailable")
 
-    monkeypatch.setattr(source, "_ensure_content", fail_ensure)
+    monkeypatch.setattr(source, "_ensure_archive_index", fail_ensure)
     fallback_entries = asyncio.run(source.list_languages(force_refresh=True))
     assert {entry.slug for entry in fallback_entries} >= {"html", "web-apis"}
 

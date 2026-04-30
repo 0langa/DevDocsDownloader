@@ -6,12 +6,14 @@ import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
+
 from ..cache import decide_cache_refresh, write_cache_metadata
 from ..conversion import DEVDOCS_PROFILE, convert_html_to_markdown
-from ..models import ResumeBoundary, SourceRunDiagnostics
+from ..models import DryRunResult, ResumeBoundary, SourceRunDiagnostics
 from ..runtime import SourceRuntime
 from ..utils.filesystem import write_bytes
-from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, document_events
+from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, SourceError, document_events
 from .catalog_manifest import DiscoveryManifest, load_manifest, manifest_languages, save_manifest
 
 LOGGER = logging.getLogger("doc_ingest.sources.devdocs")
@@ -50,8 +52,17 @@ class DevDocsSource:
             policy=self.runtime.cache_policy,
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
+            cache_root=self.runtime.cache_root,
+            max_cache_size_bytes=self.runtime.max_cache_size_bytes,
         )
         self.runtime.record_cache_decision(decision)
+        if not decision.should_refresh and not self.catalog_path.exists():
+            raise SourceError(
+                "cache_budget_exceeded",
+                "Cache budget prevents refreshing the DevDocs catalog.",
+                hint="Clear cache entries or raise the cache budget in Settings.",
+                is_retriable=False,
+            )
         if not decision.should_refresh and self.catalog_path.exists():
             cached = manifest_languages(self.catalog_path)
             if cached:
@@ -59,13 +70,22 @@ class DevDocsSource:
 
         try:
             response = await self.runtime.request("GET", DOCS_INDEX_URL, profile="default")
-            response.raise_for_status()
             entries = response.json()
             if not isinstance(entries, list):
-                raise ValueError("DevDocs catalog did not return a list")
+                raise SourceError(
+                    "invalid_format",
+                    "DevDocs catalog did not return a list.",
+                    hint="DevDocs may have changed its catalog format. Try again later.",
+                    is_retriable=True,
+                )
             catalogs = [self._catalog_from_entry(entry) for entry in entries if isinstance(entry, dict)]
             if not catalogs:
-                raise ValueError("DevDocs catalog returned no valid entries")
+                raise SourceError(
+                    "invalid_format",
+                    "DevDocs catalog returned no valid entries.",
+                    hint="Refresh again later; upstream catalog may be temporarily malformed.",
+                    is_retriable=True,
+                )
             save_manifest(
                 self.catalog_path,
                 DiscoveryManifest(
@@ -142,16 +162,27 @@ class DevDocsSource:
             policy=self.runtime.cache_policy,
             ttl_hours=self.runtime.cache_ttl_hours,
             force_refresh=force_refresh,
+            cache_root=self.runtime.cache_root,
+            max_cache_size_bytes=self.runtime.max_cache_size_bytes,
         )
         self.runtime.record_cache_decision(decision)
+        if not decision.should_refresh and not path.exists():
+            raise SourceError(
+                "cache_budget_exceeded",
+                f"Cache budget prevents refreshing DevDocs data for {slug}.",
+                hint="Clear cache entries or raise the cache budget in Settings.",
+                is_retriable=False,
+            )
         if not decision.should_refresh and path.exists() and self._is_valid_json_file(path):
             return
         if path.exists():
             LOGGER.warning("Refreshing corrupt DevDocs %s cache for %s", filename, slug)
         LOGGER.info("Downloading DevDocs %s for %s", filename.replace(".json", ""), slug)
         url = f"{DOCUMENTS_BASE}/{slug}/{filename}"
-        resp = await self.runtime.request("GET", url, profile="default")
-        resp.raise_for_status()
+        try:
+            resp = await self.runtime.request("GET", url, profile="default")
+        except Exception as exc:
+            raise _source_error_from_http(exc, source="DevDocs", slug=slug) from exc
         write_bytes(path, resp.content)
         write_cache_metadata(
             path,
@@ -174,9 +205,19 @@ class DevDocsSource:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
-            raise RuntimeError(f"DevDocs {label} cache is invalid for {slug}: {path}") from exc
+            raise SourceError(
+                "invalid_format",
+                f"DevDocs {label} cache is invalid for {slug}: {path}",
+                hint="Clear the cached DevDocs dataset and retry.",
+                is_retriable=False,
+            ) from exc
         if not isinstance(payload, dict):
-            raise RuntimeError(f"DevDocs {label} cache has unexpected format for {slug}: {path}")
+            raise SourceError(
+                "invalid_format",
+                f"DevDocs {label} cache has unexpected format for {slug}: {path}",
+                hint="Clear the cached DevDocs dataset and retry.",
+                is_retriable=False,
+            )
         return payload
 
     async def fetch(
@@ -246,6 +287,51 @@ class DevDocsSource:
                 order_hint=order,
             )
 
+    async def preview(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        *,
+        force_refresh: bool = False,
+        include_topics: set[str] | None = None,
+        exclude_topics: set[str] | None = None,
+    ) -> DryRunResult:
+        dataset_dir = self.data_cache / language.slug
+        index_path = dataset_dir / "index.json"
+        await self._ensure_json_dataset(language.slug, index_path, "index.json", force_refresh=force_refresh)
+        index = self._load_json_cache(index_path, slug=language.slug, label="index")
+        entries = index.get("entries", [])
+        core_topics = {topic.lower() for topic in language.core_topics}
+        include_topics = include_topics or set()
+        exclude_topics = exclude_topics or set()
+        seen_doc_keys: set[str] = set()
+        count = 0
+        topics: set[str] = set()
+        for entry in entries:
+            raw_path = str(entry.get("path") or "")
+            doc_key = raw_path.split("#", 1)[0]
+            entry_type = str(entry.get("type") or "Documentation")
+            topic = entry_type.lower()
+            if mode == "important" and core_topics and topic not in core_topics:
+                continue
+            if include_topics and topic not in include_topics:
+                continue
+            if exclude_topics and topic in exclude_topics:
+                continue
+            if doc_key in seen_doc_keys:
+                continue
+            seen_doc_keys.add(doc_key)
+            count += 1
+            topics.add(entry_type)
+        return DryRunResult(
+            language=language.display_name,
+            source=self.name,
+            slug=language.slug,
+            estimated_document_count=count,
+            estimated_size_hint=language.size_hint or None,
+            topics=sorted(topics),
+        )
+
     def events(
         self,
         language: LanguageCatalog,
@@ -290,3 +376,35 @@ def _append_fragment_reference_notes(markdown: str, fragment_refs: list[tuple[st
         lines.append(f"- {title} (`#{fragment}`)")
     lines.append("")
     return "\n".join(lines)
+
+
+def _source_error_from_http(exc: Exception, *, source: str, slug: str) -> SourceError:
+    if isinstance(exc, httpx.TimeoutException):
+        return SourceError(
+            "network_timeout",
+            f"{source} request timed out for {slug}.",
+            hint="Check your internet connection.",
+            is_retriable=True,
+        )
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 404:
+            return SourceError(
+                "not_found",
+                f"{source} dataset was not found for {slug}.",
+                hint="The language may have been removed or renamed upstream.",
+                is_retriable=False,
+            )
+        if status == 429:
+            return SourceError(
+                "rate_limited",
+                f"{source} rate limit hit while fetching {slug}.",
+                hint="DevDocs rate limit hit — wait 60 seconds.",
+                is_retriable=True,
+            )
+    return SourceError(
+        "network_timeout",
+        f"{source} request failed for {slug}: {type(exc).__name__}: {exc}",
+        hint="Check your internet connection.",
+        is_retriable=True,
+    )

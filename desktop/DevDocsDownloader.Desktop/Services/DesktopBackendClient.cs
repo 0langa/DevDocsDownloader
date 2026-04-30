@@ -57,6 +57,9 @@ public sealed class DesktopBackendClient
     public Task<JsonArray?> GetJobsAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/jobs", cancellationToken);
 
+    public Task<JsonNode?> GetJobQueueAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync("/jobs/queue", cancellationToken);
+
     public Task<JsonNode?> GetJobAsync(string jobId, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/jobs/{jobId}", cancellationToken);
 
@@ -259,6 +262,21 @@ public sealed class DesktopBackendClient
 
     public Task<JsonArray?> GetCacheMetadataAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/cache/metadata", cancellationToken);
+
+    public Task<JsonNode?> GetCacheSummaryAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync("/cache/summary", cancellationToken);
+
+    public Task<JsonNode?> RefreshCacheEntryAsync(string source, string slug, CancellationToken cancellationToken = default) =>
+        PostJsonAsync($"/cache/entry/refresh?source={Uri.EscapeDataString(source)}&slug={Uri.EscapeDataString(slug)}", null, cancellationToken);
+
+    public Task<JsonNode?> DeleteCacheEntryAsync(string source, string slug, CancellationToken cancellationToken = default) =>
+        DeleteJsonAsync($"/cache/entry?source={Uri.EscapeDataString(source)}&slug={Uri.EscapeDataString(slug)}", cancellationToken);
+
+    public Task<JsonNode?> ClearSourceCacheAsync(string source, CancellationToken cancellationToken = default) =>
+        DeleteJsonAsync($"/cache/source/{Uri.EscapeDataString(source)}", cancellationToken);
+
+    public Task<JsonNode?> ClearAllCacheAsync(CancellationToken cancellationToken = default) =>
+        DeleteJsonAsync("/cache", cancellationToken);
 
     private async Task<JsonNode?> GetJsonAsync(string path, CancellationToken cancellationToken)
     {

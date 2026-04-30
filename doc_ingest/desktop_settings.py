@@ -13,6 +13,7 @@ class DesktopSettings(BaseModel):
     output_dir: Path | None = None
     cache_policy: CacheFreshnessPolicy = "use-if-present"
     cache_ttl_hours: int | None = None
+    max_cache_size_mb: int = 2048
     default_mode: CrawlMode = "important"
     source_preference: str | None = None
     language_tree_mode: str = "source"
@@ -56,6 +57,7 @@ def settings_from_config(config: AppConfig) -> DesktopSettings:
         output_dir=config.paths.output_dir,
         cache_policy=config.cache_policy,
         cache_ttl_hours=config.cache_ttl_hours,
+        max_cache_size_mb=config.max_cache_size_mb,
         default_mode="important",
         emit_document_frontmatter=config.emit_document_frontmatter,
         emit_chunks=config.emit_chunks,

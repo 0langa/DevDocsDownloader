@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 CrawlMode = Literal["important", "full"]
 CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "cancelling", "completed", "failed"]
@@ -30,6 +30,25 @@ class ValidationIssue(BaseModel):
     level: Literal["info", "warning", "error"]
     code: str
     message: str
+    suggestion: str | None = None
+
+
+class FailureDetail(BaseModel):
+    code: str
+    message: str
+    hint: str = ""
+    is_retriable: bool = False
+
+    def display_text(self) -> str:
+        return self.message if not self.hint else f"{self.message} Hint: {self.hint}"
+
+    def __str__(self) -> str:
+        return self.message
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self.message == other
+        return super().__eq__(other)
 
 
 class DocumentValidationResult(BaseModel):
@@ -80,6 +99,7 @@ class RuntimeTelemetrySnapshot(BaseModel):
     failures: int = 0
     cache_hits: int = 0
     cache_refreshes: int = 0
+    circuit_breaker_rejections: int = 0
 
 
 class AdaptiveBulkTelemetry(BaseModel):
@@ -113,6 +133,16 @@ class AssetInventorySummary(BaseModel):
     manifest_path: str | None = None
 
 
+class DryRunResult(BaseModel):
+    language: str
+    source: str
+    slug: str
+    estimated_document_count: int | None = None
+    estimated_size_hint: int | None = None
+    topics: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class LanguageRunState(BaseModel):
     language: str
     slug: str
@@ -131,7 +161,17 @@ class LanguageRunState(BaseModel):
     document_warnings: list[SourceWarningRecord] = Field(default_factory=list)
     runtime_telemetry: RuntimeTelemetrySnapshot | None = None
     asset_inventory: AssetInventorySummary | None = None
-    failures: list[str] = Field(default_factory=list)
+    failures: list[FailureDetail] = Field(default_factory=list)
+
+    @field_validator("failures", mode="before")
+    @classmethod
+    def _coerce_failures(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return [
+            item if isinstance(item, FailureDetail) else FailureDetail(code="runtime_error", message=str(item))
+            for item in value
+        ]
 
 
 class DocumentCheckpoint(BaseModel):
@@ -164,6 +204,7 @@ class CacheEntryMetadata(BaseModel):
     byte_count: int = 0
     policy: CacheFreshnessPolicy = "use-if-present"
     refreshed_by_force: bool = False
+    mdn_commit_sha: str = ""
 
 
 class CacheDecision(BaseModel):
@@ -216,8 +257,18 @@ class LanguageRunReport(BaseModel):
     document_warnings: list[SourceWarningRecord] = Field(default_factory=list)
     runtime_telemetry: RuntimeTelemetrySnapshot | None = None
     asset_inventory: AssetInventorySummary | None = None
-    failures: list[str] = Field(default_factory=list)
+    failures: list[FailureDetail] = Field(default_factory=list)
     duration_seconds: float = 0.0
+
+    @field_validator("failures", mode="before")
+    @classmethod
+    def _coerce_failures(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return [
+            item if isinstance(item, FailureDetail) else FailureDetail(code="runtime_error", message=str(item))
+            for item in value
+        ]
 
 
 class RunSummary(BaseModel):

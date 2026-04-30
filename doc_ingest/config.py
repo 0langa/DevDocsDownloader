@@ -84,6 +84,7 @@ class AppConfig(BaseModel):
     chunk_overlap_tokens: int = 100
     cache_policy: Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"] = "use-if-present"
     cache_ttl_hours: int | None = None
+    max_cache_size_mb: int = 2048
 
 
 def load_config(

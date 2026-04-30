@@ -23,10 +23,16 @@ def decide_cache_refresh(
     ttl_hours: int | None = None,
     force_refresh: bool = False,
     now: datetime | None = None,
+    cache_root: Path | None = None,
+    max_cache_size_bytes: int | None = None,
 ) -> CacheDecision:
     if force_refresh:
         return CacheDecision(should_refresh=True, reason="force_refresh", policy=policy)
     if not path.exists():
+        if max_cache_size_bytes is not None and cache_root is not None:
+            current_usage = _directory_usage(cache_root)
+            if current_usage >= max_cache_size_bytes:
+                return CacheDecision(should_refresh=False, reason="cache_budget_exceeded", policy=policy)
         return CacheDecision(should_refresh=True, reason="missing_cache", policy=policy)
     metadata = read_cache_metadata(path)
     if metadata is None:
@@ -61,7 +67,15 @@ def read_cache_metadata(path: Path) -> CacheEntryMetadata | None:
         payload = read_json(cache_metadata_path(path), {})
         if not payload:
             return None
-        return CacheEntryMetadata.model_validate(payload)
+        metadata = CacheEntryMetadata.model_validate(payload)
+        if path.exists():
+            raw = path.read_bytes()
+            checksum = hashlib.sha256(raw).hexdigest() if raw else ""
+            if metadata.checksum and checksum and metadata.checksum != checksum:
+                return None
+            if metadata.byte_count and metadata.byte_count != len(raw):
+                return None
+        return metadata
     except Exception:
         return None
 
@@ -76,6 +90,7 @@ def write_cache_metadata(
     response: httpx.Response | None = None,
     source_version: str = "",
     refreshed_by_force: bool = False,
+    mdn_commit_sha: str = "",
 ) -> CacheEntryMetadata:
     payload = path.read_bytes() if path.exists() else b""
     metadata = CacheEntryMetadata(
@@ -89,6 +104,7 @@ def write_cache_metadata(
         byte_count=len(payload),
         policy=policy,
         refreshed_by_force=refreshed_by_force,
+        mdn_commit_sha=mdn_commit_sha,
     )
     write_json(cache_metadata_path(path), metadata.model_dump(mode="json"))
     return metadata
@@ -105,6 +121,7 @@ def write_cache_metadata_for_bytes(
     response: httpx.Response | None = None,
     source_version: str = "",
     refreshed_by_force: bool = False,
+    mdn_commit_sha: str = "",
 ) -> CacheEntryMetadata:
     metadata = CacheEntryMetadata(
         source=source,
@@ -117,6 +134,17 @@ def write_cache_metadata_for_bytes(
         byte_count=len(payload),
         policy=policy,
         refreshed_by_force=refreshed_by_force,
+        mdn_commit_sha=mdn_commit_sha,
     )
     write_json(cache_metadata_path(metadata_target), metadata.model_dump(mode="json"))
     return metadata
+
+
+def _directory_usage(root: Path) -> int:
+    if not root.exists():
+        return 0
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_file():
+            total += path.stat().st_size
+    return total

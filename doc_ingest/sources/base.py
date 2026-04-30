@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeAlias
 
-from ..models import ResumeBoundary, SourceRunDiagnostics
+from ..models import DryRunResult, ResumeBoundary, SourceRunDiagnostics
 
 CrawlMode = Literal["important", "full"]
 
@@ -45,6 +45,15 @@ class WarningEvent:
     message: str
     source_url: str = ""
     code: str = "source_warning"
+
+
+class SourceError(RuntimeError):
+    def __init__(self, code: str, message: str, *, hint: str = "", is_retriable: bool = False) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+        self.is_retriable = is_retriable
 
 
 @dataclass(slots=True)
@@ -112,3 +121,13 @@ class DocumentationSource(Protocol):
         resume_boundary: ResumeBoundary | None = None,
         force_refresh: bool = False,
     ) -> AsyncIterator[AdapterEvent]: ...
+
+    async def preview(
+        self,
+        language: LanguageCatalog,
+        mode: CrawlMode,
+        *,
+        force_refresh: bool = False,
+        include_topics: set[str] | None = None,
+        exclude_topics: set[str] | None = None,
+    ) -> DryRunResult: ...
