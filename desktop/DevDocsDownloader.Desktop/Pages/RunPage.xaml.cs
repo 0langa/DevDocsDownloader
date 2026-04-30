@@ -24,7 +24,7 @@ public sealed partial class RunPage : Page
         {
             _initialized = true;
             LanguageBox.Text = "";
-            SourceBox.Text = App.MainViewModel.SourcePreference;
+            PopulateSourceBox();
             ModeBox.SelectedItem = App.MainViewModel.DefaultMode;
             ValidateOnlyBox.IsChecked = false;
             ForceRefreshBox.IsChecked = false;
@@ -42,7 +42,7 @@ public sealed partial class RunPage : Page
     public void ApplySuggestedLanguage(string language, string source)
     {
         LanguageBox.Text = language;
-        SourceBox.Text = source;
+        SetSourceSelection(source);
         ValidateForm();
     }
 
@@ -50,11 +50,12 @@ public sealed partial class RunPage : Page
     {
         try
         {
+            var source = GetSelectedSource();
             var payload = new JsonObject
             {
                 ["language"] = LanguageBox.Text.Trim(),
                 ["mode"] = ModeBox.SelectedItem?.ToString() ?? "important",
-                ["source"] = string.IsNullOrWhiteSpace(SourceBox.Text) ? null : SourceBox.Text.Trim(),
+                ["source"] = source,
                 ["validate_only"] = ValidateOnlyBox.IsChecked == true,
                 ["force_refresh"] = ForceRefreshBox.IsChecked == true,
             };
@@ -62,7 +63,7 @@ public sealed partial class RunPage : Page
             var jobId = result?["id"]?.GetValue<string>() ?? "";
             var language = payload["language"]?.GetValue<string>() ?? "language";
             App.MainViewModel.DefaultMode = payload["mode"]?.GetValue<string>() ?? App.MainViewModel.DefaultMode;
-            App.MainViewModel.SourcePreference = payload["source"]?.GetValue<string>() ?? "";
+            App.MainViewModel.SourcePreference = source ?? "";
             await App.MainViewModel.StartTrackingJobAsync(jobId, language, "run_language");
             RefreshProgress();
         }
@@ -99,10 +100,6 @@ public sealed partial class RunPage : Page
         {
             ModeBox.SelectedItem = App.MainViewModel.DefaultMode;
         }
-        if (string.IsNullOrWhiteSpace(SourceBox.Text))
-        {
-            SourceBox.Text = App.MainViewModel.SourcePreference;
-        }
         ProgressBar.Visibility = App.MainViewModel.ProgressVisible ? Visibility.Visible : Visibility.Collapsed;
         ProgressBar.IsIndeterminate = App.MainViewModel.ProgressIndeterminate;
         ProgressBar.Value = App.MainViewModel.ProgressValue;
@@ -120,6 +117,28 @@ public sealed partial class RunPage : Page
         WarningsText.Text = App.MainViewModel.WarningCount > 0 || App.MainViewModel.FailureCount > 0
             ? $"Warnings: {App.MainViewModel.WarningCount}   Failures: {App.MainViewModel.FailureCount}"
             : "";
+    }
+
+    private void PopulateSourceBox()
+    {
+        SourceBox.Items.Add("Any (auto)");
+        SourceBox.Items.Add("devdocs");
+        SourceBox.Items.Add("mdn");
+        SourceBox.Items.Add("dash");
+        SetSourceSelection(App.MainViewModel.SourcePreference);
+    }
+
+    private void SetSourceSelection(string source)
+    {
+        var item = SourceBox.Items.Cast<object?>().FirstOrDefault(
+            item => item?.ToString()?.Equals(source, StringComparison.OrdinalIgnoreCase) == true);
+        SourceBox.SelectedItem = item ?? SourceBox.Items.FirstOrDefault();
+    }
+
+    private string? GetSelectedSource()
+    {
+        var selected = SourceBox.SelectedItem?.ToString();
+        return selected == "Any (auto)" || string.IsNullOrWhiteSpace(selected) ? null : selected;
     }
 
     private void ValidateForm()

@@ -26,7 +26,7 @@
                             <x:String>important</x:String>
                             <x:String>full</x:String>
                         </ComboBox>
-                        <TextBox x:Name="SourceBox" Header="Preferred source" PlaceholderText="devdocs, mdn, dash" TextChanged="OnFormChanged" />
+                        <ComboBox x:Name="SourceBox" Header="Preferred source" SelectionChanged="OnFormChanged" />
                         <CheckBox x:Name="ValidateOnlyBox" Content="Validate only existing output" Checked="OnFormChanged" Unchecked="OnFormChanged" />
                         <CheckBox x:Name="ForceRefreshBox" Content="Force refresh source cache" Checked="OnFormChanged" Unchecked="OnFormChanged" />
                         <StackPanel Orientation="Horizontal" Spacing="8">

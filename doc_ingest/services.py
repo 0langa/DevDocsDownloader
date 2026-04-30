@@ -66,6 +66,7 @@ class RunLanguageRequest(BaseModel):
 class BulkRunRequest(BaseModel):
     languages: list[str]
     mode: CrawlMode = "important"
+    source: str | None = None
     force_refresh: bool = False
     language_concurrency: int = 3
     concurrency_policy: BulkConcurrencyPolicy = "static"
@@ -295,6 +296,7 @@ class DocumentationService:
             summary = await pipeline.run_many(
                 language_names=request.languages,
                 mode=request.mode,
+                source_name=request.source,
                 force_refresh=request.force_refresh,
                 progress_tracker=progress_tracker,
                 language_concurrency=request.language_concurrency,
