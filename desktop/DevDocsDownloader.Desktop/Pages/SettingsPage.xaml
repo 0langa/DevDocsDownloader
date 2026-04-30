@@ -36,6 +36,10 @@
                         </ComboBox>
                         <TextBox x:Name="CacheTtlBox" Header="Cache TTL hours" />
                         <TextBox x:Name="MaxCacheSizeBox" Header="Max cache size (MB)" />
+                        <TextBox x:Name="CatalogStaleDaysBox" Header="Catalog stale warning days" />
+                        <TextBox x:Name="DashLargeWarningMbBox" Header="Dash large-docset warning (MB)" />
+                        <TextBox x:Name="DashSuppressedSlugsBox" Header="Dash warning-suppressed slugs (comma-separated)" />
+                        <TextBox x:Name="DashProfileOverridesBox" Header="Dash profile overrides JSON" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Load settings" Click="OnLoadSettings" />
                             <Button Content="Save settings" Click="OnSaveSettings" />

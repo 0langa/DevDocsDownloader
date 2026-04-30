@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Linq;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -14,6 +15,8 @@ public sealed partial class RunPage : Page
         public required string Source { get; init; }
         public required string Slug { get; init; }
         public string Version { get; init; } = "latest";
+        public int SizeHint { get; init; }
+        public string Confidence { get; init; } = "";
 
         public string DisplayText => Version == "latest"
             ? $"{Language} ({Source})"
@@ -27,6 +30,7 @@ public sealed partial class RunPage : Page
     private readonly List<CatalogEntry> _catalog = [];
     private bool _initialized;
     private CatalogEntry? _selectedLanguage;
+    private Task? _catalogLoadTask;
 
     public RunPage()
     {
@@ -50,10 +54,14 @@ public sealed partial class RunPage : Page
             OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
             RefreshProgress();
             ValidateForm();
-            await LoadCatalogAsync();
+            await EnsureCatalogLoadedAsync();
             return;
         }
 
+        if (_catalog.Count == 0 && App.MainViewModel.BackendReady)
+        {
+            await EnsureCatalogLoadedAsync();
+        }
         OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
         RefreshProgress();
     }
@@ -68,6 +76,19 @@ public sealed partial class RunPage : Page
             SetSourceSelection(source);
         }
         ValidateForm();
+    }
+
+    private async Task EnsureCatalogLoadedAsync()
+    {
+        if (_catalog.Count > 0)
+        {
+            return;
+        }
+        if (_catalogLoadTask is null || _catalogLoadTask.IsCompleted)
+        {
+            _catalogLoadTask = LoadCatalogAsync();
+        }
+        await _catalogLoadTask;
     }
 
     private async Task LoadCatalogAsync()
@@ -96,6 +117,8 @@ public sealed partial class RunPage : Page
                     Source = source,
                     Slug = slug,
                     Version = string.IsNullOrWhiteSpace(version) ? "latest" : version,
+                    SizeHint = row["size_hint"]?.GetValue<int?>() ?? 0,
+                    Confidence = row["confidence"]?.GetValue<string>() ?? "",
                 });
             }
 
@@ -116,6 +139,10 @@ public sealed partial class RunPage : Page
     {
         try
         {
+            if (!await ConfirmLargeDashDocsetIfNeededAsync())
+            {
+                return;
+            }
             var source = GetSelectedSource();
             var payload = BuildRunPayload(source, dryRun: false);
             var result = await App.BackendHost.Client.StartRunLanguageAsync(payload);
@@ -138,6 +165,10 @@ public sealed partial class RunPage : Page
     {
         try
         {
+            if (!await ConfirmLargeDashDocsetIfNeededAsync())
+            {
+                return;
+            }
             var source = GetSelectedSource();
             var payload = BuildRunPayload(source, dryRun: true);
             var result = await App.BackendHost.Client.StartRunLanguageAsync(payload);
@@ -184,6 +215,10 @@ public sealed partial class RunPage : Page
             sender.ItemsSource = null;
             ValidateForm();
             return;
+        }
+        if (_catalog.Count == 0 && App.MainViewModel.BackendReady)
+        {
+            _ = EnsureCatalogLoadedAsync();
         }
 
         sender.ItemsSource = _catalog
@@ -245,6 +280,62 @@ public sealed partial class RunPage : Page
         LanguageBox.ItemsSource = null;
         SetSourceSelection(entry.Source);
         ValidateForm();
+    }
+
+    private async Task<bool> ConfirmLargeDashDocsetIfNeededAsync()
+    {
+        if (_selectedLanguage is null || !_selectedLanguage.Source.Equals("dash", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        var threshold = App.MainViewModel.DashLargeDocsetWarningMb * 1024 * 1024;
+        if (_selectedLanguage.SizeHint <= 0 || _selectedLanguage.SizeHint < threshold)
+        {
+            return true;
+        }
+        var suppressed = App.MainViewModel.DashWarningSuppressedSlugs
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(slug => slug.Equals(_selectedLanguage.Slug, StringComparison.OrdinalIgnoreCase));
+        if (suppressed)
+        {
+            return true;
+        }
+
+        var dontAsk = new CheckBox { Content = "Don't ask again for this docset" };
+        var content = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                new TextBlock { Text = $"This docset is approximately {FormatBytes(_selectedLanguage.SizeHint)}. Continue?", TextWrapping = TextWrapping.Wrap },
+                dontAsk,
+            },
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Large Dash docset",
+            Content = content,
+            PrimaryButtonText = "Continue",
+            CloseButtonText = "Cancel",
+            XamlRoot = XamlRoot,
+        };
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary)
+        {
+            return false;
+        }
+        if (dontAsk.IsChecked == true)
+        {
+            var slugs = App.MainViewModel.DashWarningSuppressedSlugs
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            slugs.Add(_selectedLanguage.Slug);
+            App.MainViewModel.DashWarningSuppressedSlugs = string.Join(",", slugs.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+            var settings = await App.BackendHost.Client.GetSettingsAsync() as JsonObject ?? new JsonObject();
+            settings["dash_warning_suppressed_slugs"] = new JsonArray(slugs.Select(s => JsonValue.Create(s)).ToArray());
+            await App.MainViewModel.SaveSettingsAsync(settings);
+        }
+        return true;
     }
 
     private void OnShellPropertyChanged(object? sender, PropertyChangedEventArgs e)

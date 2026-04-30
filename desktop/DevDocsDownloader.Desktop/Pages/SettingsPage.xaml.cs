@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Linq;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -14,7 +15,7 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         HelpBox.Text = """
-            DevDocsDownloader 1.2.0 desktop shell
+            DevDocsDownloader 1.2.5 desktop shell
 
             What this app does
             - Download official documentation from DevDocs, MDN, and Dash-backed catalogs.
@@ -98,6 +99,14 @@ public sealed partial class SettingsPage : Page
                 ["bulk_concurrency_policy"] = App.MainViewModel.BulkConcurrencyPolicy,
                 ["emit_document_frontmatter"] = App.MainViewModel.EmitDocumentFrontmatter,
                 ["emit_chunks"] = App.MainViewModel.EmitChunks,
+                ["catalog_stale_warning_days"] = int.TryParse(CatalogStaleDaysBox.Text, out var staleDays) ? staleDays : 7,
+                ["dash_large_docset_warning_mb"] = int.TryParse(DashLargeWarningMbBox.Text, out var dashMb) ? dashMb : 50,
+                ["dash_warning_suppressed_slugs"] = new JsonArray(
+                    DashSuppressedSlugsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(x => JsonValue.Create(x))
+                        .ToArray()
+                ),
+                ["dash_profile_overrides"] = ParseJsonObjectOrEmpty(DashProfileOverridesBox.Text),
             });
             App.MainWindow.GetCachedPage<OutputBrowserPage>()?.UpdateOutputRoot();
             var outputChanged = !string.Equals(previousOutputRoot, App.MainViewModel.CurrentOutputRoot, StringComparison.OrdinalIgnoreCase);
@@ -122,11 +131,31 @@ public sealed partial class SettingsPage : Page
             CachePolicyBox.SelectedItem = App.MainViewModel.CachePolicy;
             CacheTtlBox.Text = App.MainViewModel.CacheTtlHours?.ToString() ?? "";
             MaxCacheSizeBox.Text = App.MainViewModel.MaxCacheSizeMb.ToString();
+            CatalogStaleDaysBox.Text = App.MainViewModel.CatalogStaleWarningDays.ToString();
+            DashLargeWarningMbBox.Text = App.MainViewModel.DashLargeDocsetWarningMb.ToString();
+            DashSuppressedSlugsBox.Text = App.MainViewModel.DashWarningSuppressedSlugs;
+            DashProfileOverridesBox.Text = "{}";
             StatusText.Text = $"Loaded settings from desktop backend. Log path: {App.MainViewModel.BackendLogPath}";
         }
         catch (Exception exc)
         {
             StatusText.Text = exc.Message;
+        }
+    }
+
+    private static JsonObject ParseJsonObjectOrEmpty(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new JsonObject();
+        }
+        try
+        {
+            return JsonNode.Parse(text) as JsonObject ?? new JsonObject();
+        }
+        catch
+        {
+            return new JsonObject();
         }
     }
 }

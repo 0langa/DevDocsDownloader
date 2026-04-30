@@ -1,6 +1,6 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.2.0  
+> **Current release:** 1.2.5  
 > **Document scope:** All planned work from 1.2.0 through the 2.0.0 premium release.  
 > **Last updated:** 2026-04-30
 
@@ -77,52 +77,34 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.2 — Catalog-Driven Language Selection & Source Dropdowns ✅ SHIPPED
+### 1.1.2 — Catalog-Driven Language Selection & Source Dropdowns
 
 **Goal:** Replace error-prone free-text inputs with catalog-backed dropdowns. Make "download everything" a single click.
 
-**Changes (shipped):**
+**Status:** ✅ Done
 
-1. **Source dropdown on Run page**  
-   Replaced the freeform `TextBox` for "Preferred source" with a `ComboBox` populated with `Any (auto)`, `devdocs`, `mdn`, `dash`. Eliminates typos; selection is persisted to `SourcePreference` in the ViewModel.
-
-2. **Searchable multi-select language picker on Bulk page**  
-   Replaced the comma-separated `TextBox` with an `AutoSuggestBox` backed by the live catalog (`/languages`). Typing filters by language name or slug; selecting from suggestions adds an item to a scrollable selected-languages list with per-item ✕ removal and a "Clear all" button. Catalog loads asynchronously on first navigation — UI remains usable while loading.
-
-3. **Version filter on Bulk page**  
-   New `ComboBox` with two options: `Latest only` groups entries by slug family (part before `~`) and picks the versionless entry or highest major version per family. `All versions` passes all catalog entries through. Filter applies to both the autocomplete suggestions and "Download all".
-
-4. **Download All button**  
-   One-click "Download all" fetches all catalog entries, applies the version filter, populates the selected-languages list, and immediately submits a bulk job. Works across any catalog size.
-
-5. **Source dropdown on Bulk page**  
-   New `ComboBox` with `Any (auto)`, `devdocs`, `mdn`, `dash`. Selection is forwarded to `BulkRunRequest.source` which passes it to `pipeline.run_many` as `source_name`. Previously `BulkRunRequest` had no source field.
-
-6. **Backend: `BulkRunRequest.source` field**  
-   Added `source: str | None = None` to `BulkRunRequest` in `services.py`. `run_bulk()` passes it to `pipeline.run_many(source_name=...)`. No other backend changes.
+**Delivered:**
+- Run page source input switched to catalog-backed dropdown.
+- Bulk page switched to searchable multi-select from live `/languages` catalog.
+- Added version filtering (`Latest only` / `All versions`) for suggestions and `Download all`.
+- Added one-click `Download all` that fills selection and starts bulk run.
+- Bulk source dropdown added and wired end-to-end.
+- Added `BulkRunRequest.source` and passed through to pipeline source resolution.
 
 ---
 
-### 1.1.3 — Streaming Pipeline & MDN Efficiency ✅ IMPLEMENTED
+### 1.1.3 — Streaming Pipeline & MDN Efficiency
 
 **Goal:** Prevent OOM for large docsets. Make MDN refresh non-blocking.
 
-**Changes:**
+**Status:** ✅ Done
 
-1. **Streaming markdown writes in `compiler.py`**  
-   Replace `write_text_parts()` accumulation with a generator-based flush strategy. `LanguageOutputBuilder.flush_document()` writes each document to disk as it arrives from the source stream rather than buffering all documents then writing. The consolidated `.md` file is written with a streaming append approach rather than a single `write_text()` call. This reduces peak heap usage from O(total_content) to O(one_document).
-
-2. **MDN extract path: incremental tarball scan**  
-   Instead of extracting the full 500MB tarball into a temp directory, scan tarball members in a single streaming pass using `tarfile.open() as archive: for member in archive`. Write only the `index.md` files needed for catalog discovery. For actual document fetching, read individual members on demand via `archive.extractfile(member)`. Eliminates the full-extract step on first use and on refresh.
-
-3. **MDN delta detection via GitHub API**  
-   Before downloading the MDN tarball, query `https://api.github.com/repos/mdn/content/commits/main`. Compare the returned SHA to the SHA stored in `cache/mdn/cache_meta.json`. Skip the tarball download if the SHA matches. Add `mdn_commit_sha` to `CacheEntryMetadata`. This eliminates redundant 500MB downloads on TTL-triggered refreshes when content has not changed.
-
-4. **Circuit breaker for cascading source failures**  
-   Add `SourceCircuitBreaker` to `runtime.py`. State machine: `closed` → `open` (reject requests for `backoff_seconds`) → `half-open` (probe one request, then reset or re-open). Each `SourceRuntime` holds one breaker per domain (`devdocs.io`, `documents.devdocs.io`, `github.com`, `kapeli.com`). After 3 failures in a 60s window, open the breaker. Prevents one failing source from consuming all concurrency slots.
-
-5. **Memory guard in adaptive concurrency**  
-   Add `_check_available_memory()` to `adaptive.py` alongside the existing disk check. Use `psutil.virtual_memory().percent` (already an optional extra). Emergency-decrease concurrency to 1 when memory exceeds 85%.
+**Delivered:**
+- Compiler switched to streaming writes to keep memory near one-document scale.
+- MDN tarball handling moved to incremental archive scan and on-demand member reads.
+- MDN refresh now checks upstream commit SHA and skips unchanged large downloads.
+- Added per-domain runtime circuit breaker for repeated upstream failures.
+- Added adaptive memory-pressure guard that drops concurrency under high RAM pressure.
 
 ---
 
@@ -130,82 +112,61 @@ Before planning forward, an honest accounting of current state.
 
 **Goal:** Never tell the user "busy, try again." Make error messages actionable.
 
-**Status:** Implemented
+**Status:** ✅ Done
 
 **Delivered:**
-
-1. **Job queue in `desktop_backend.py`**  
-   `BackendJobManager` now keeps a bounded pending queue (max 10), drains it in the background, and automatically starts the next job when the active one completes. `GET /jobs/queue` returns queue depth plus pending summaries. SSE updates now broadcast queued position changes with `status: pending`, and the desktop shell shows `Queued (position N)` instead of failing with a busy error.
-
-2. **Structured error payloads from sources**  
-   `sources/base.py` now exposes `SourceError(code, message, hint, is_retriable)`. DevDocs, Dash, and MDN raise it for common failures such as `network_timeout`, `rate_limited`, `not_found`, and `invalid_format`. `pipeline.py` converts those into structured `report.failures` payloads, and service events preserve the same shape through the backend.
-
-3. **Specific error messages in desktop UI**  
-   `MainWindowViewModel.HandleJobEvent` now parses `failure` payloads for `hint` and stores it in `LastErrorHint`. The shell renders that hint in a distinct amber block below the active-job status, so rate limits, cache corruption, and missing-language failures are directly actionable.
-
-4. **Actionable warnings in validation output**  
-   `ValidationIssue` now carries an optional `suggestion` field. Common issues such as `relative_link`, `html_artifact`, and `missing_output` ship with concrete next steps, and `ReportsPage` renders those suggestions inline alongside failure hints.
+- Added bounded backend job queue with pending-position updates (`Queued (position N)`), plus `/jobs/queue`.
+- Standardized structured `SourceError` payloads (`code`, `message`, `hint`, `is_retriable`) through pipeline and backend events.
+- Desktop shell now surfaces failure hints via `LastErrorHint` in a dedicated warning block.
+- Validation issues now include actionable `suggestion` text, rendered in Reports.
 
 ---
 
-### 1.1.5 — Cache Management Desktop UI ✅ IMPLEMENTED
+### 1.1.5 — Cache Management Desktop UI
 
 **Goal:** Users can see, understand, and clean up cached source data without touching the filesystem.
 
+**Status:** ✅ Done
+
 **Delivered:**
-
-1. **`CachePage` full implementation**  
-   Currently a stub. Implement summary cards per source (DevDocs, MDN, Dash): total disk usage, number of cached entries, oldest/newest entry age. Per-entry table: language slug, cached size, last refreshed, TTL policy, next refresh due. Action buttons: "Refresh now" (force-refresh one entry), "Delete entry", "Clear all [source] cache" (with confirmation), "Clear all cache" (nuclear option with confirmation + warning). Backend endpoints: `GET /cache/summary`, `DELETE /cache/entry?source=devdocs&slug=bash`.
-
-2. **Cache size budgets in settings**  
-   `DesktopSettings` gains `max_cache_size_mb: int = 2048`. When new cache entries would exceed the budget, `decide_cache_refresh()` returns `should_refresh=False` with reason `cache_budget_exceeded`. `CachePage` shows current vs. budgeted usage as a color-coded progress bar.
-
-3. **Dry-run mode**  
-   New `RunLanguageRequest` field `dry_run: bool = False`. When `dry_run=True`, the pipeline resolves the source, fetches the document index only, and returns `DryRunResult(language, source, slug, estimated_document_count, estimated_size_hint, topics)` without downloading or compiling. Desktop `RunPage` gets a "Preview" button that triggers a dry-run job; results display in a modal with document count estimate, source name, and topic list.
+- Implemented full Cache page with per-source summaries, per-entry actions, source clear, and full clear.
+- Added cache budget setting and enforcement (`cache_budget_exceeded`) with UI budget visibility.
+- Added dry-run pipeline/service path and desktop `Preview` workflow.
 
 ---
 
-### 1.1.6 — Test Coverage Expansion ✅ IMPLEMENTED
+### 1.1.6 — Test Coverage Expansion
 
 **Goal:** Converter functions, adapter edge cases, and backend job logic all have unit tests.
 
+**Status:** ✅ Done
+
 **Delivered:**
-
-1. **Unit tests for `conversion.py`** — `tests/test_conversion_unit.py`: parametrized tests for `convert_html_to_markdown()` (headings, lists, tables, code blocks, nesting), `rewrite_markdown_links()` (code fence edge cases, protocol-relative URLs, anchor-only links), `resolve_source_link()` (relative, absolute, `dash://`, malformed), noise removal (nav/aside/footer stripped), and content root selection per profile.
-
-2. **Unit tests for `cache.py`** — `tests/test_cache_unit.py`: all policy/file-state combinations, checksum mismatch detection in `read_cache_metadata()`.
-
-3. **Unit tests for `adaptive.py`** — `tests/test_adaptive_unit.py`: observation sequences verify concurrency adjusts correctly; edge cases: rapid failure bursts, recovery after prolonged low concurrency, min/max bound enforcement.
-
-4. **Backend job lifecycle tests** — `tests/test_backend_job_lifecycle.py`: queue a second job while one is running; cancel a queued job; cancel a running job with cooperative cancellation; SSE reconnection with `from_index` replays missed events.
-
-5. **Mock-based adapter tests** — `tests/test_source_adapters_mocked.py`: mock `SourceRuntime.request()` and assert each adapter handles HTTP 404, corrupt JSON, empty entry lists, and empty `doc_key` blocks correctly.
+- Added focused unit suites for conversion, cache policies/metadata, and adaptive concurrency behavior.
+- Added backend job lifecycle tests for queueing, cancellation, and SSE replay.
+- Added mocked adapter tests for 404/corrupt/empty payload edge cases.
 
 ---
 
-### 1.1.7 — Resume Hardening & Checkpoint Integrity ✅ IMPLEMENTED
+### 1.1.7 — Resume Hardening & Checkpoint Integrity
 
 **Goal:** A resumed run never silently skips or duplicates content.
 
-**Changes:**
+**Status:** ✅ Done
 
-1. **Content hashing in checkpoint artifacts**  
-   `DocumentArtifactCheckpoint` gains `content_sha256: str`. Computed as `sha256(document.markdown)` during compilation. On resume, `_validated_resume()` verifies each artifact file hash matches the checkpoint record. Failed hash checks exclude that artifact; the resume boundary rolls back to the last verified artifact. Dropped artifacts are logged.
-
-2. **Atomic checkpoint writes**  
-   `RunCheckpointStore.save()` currently calls `path.write_text(json.dumps(...))` directly, vulnerable to partial writes on crash. Replace with write-to-temp-then-rename using `os.replace()` (atomic on Windows and POSIX).
-
-3. **Stale checkpoint detection**  
-   `GET /checkpoints` returns all checkpoint files with age, language, phase, emitted count. A checkpoint is "stale" if its language is no longer resolvable or output root no longer exists. `DELETE /checkpoints/{slug}` removes checkpoint and associated state. `CheckpointsPage` shows a badge for stale checkpoints with a "Delete stale" bulk action.
-
-4. **Checkpoint schema versioning**  
-   Add `schema_version: int = 1` to `LanguageRunCheckpoint`. On load, if schema_version is missing or mismatched, discard the checkpoint (log warning, don't crash). Prevents future schema changes from causing silent corruption on resume.
+**Delivered:**
+- Added content hashes to checkpoint artifacts and resume-time hash validation with rollback to last verified artifact.
+- Switched checkpoint persistence to atomic write/replace.
+- Added stale checkpoint detection/listing/deletion and desktop stale-cleanup action.
+- Added checkpoint schema versioning with safe discard on mismatch.
 
 ---
 
-### 1.2.0 — Foundation Milestone Release ✅ SHIPPED
+### 1.2.0 — Foundation Milestone Release
 
-**Summary of what ships:**
+**Status:** ✅ Done
+
+**Delivered:**
 - Streaming compilation (OOM risk eliminated).
 - MDN delta detection (no redundant 500MB downloads).
 - Circuit breaker on all external HTTP calls.
@@ -236,20 +197,18 @@ Before planning forward, an honest accounting of current state.
 
 **Goal:** Honor `ETag` / `Last-Modified` headers to skip downloads when content has not changed.
 
-**Changes:**
+**Status:** ✅ Done
 
-1. **Conditional requests in `SourceRuntime`**  
-   `request()` gains `conditional: bool = False`. When true: read stored `etag`/`last_modified` from `CacheEntryMetadata`, add `If-None-Match` or `If-Modified-Since` header accordingly, return a sentinel `NotModifiedResponse` on HTTP 304. Callers check for `NotModifiedResponse` and skip processing. On 200, update stored headers. Add `conditional_get_skip` counter to `SourceRuntimeTelemetry`.
-
-2. **Wire into DevDocs and Dash adapters**  
-   `_ensure_json_dataset()` in devdocs.py and `_download_docset()` in dash.py: pass `conditional=True` when the file exists and policy is `ttl` or `validate-if-possible`. Skip write and record cache hit on `NotModifiedResponse`.
-
-3. **`validate-if-possible` policy now functional**  
-   Previously behaved like `use-if-present`. Now: send conditional request, use cached content on 304, refresh on 200. Document the change in `CacheFreshnessPolicy` enum docstring.
+**Delivered:**
+- Added conditional runtime requests with `If-None-Match` / `If-Modified-Since` and `NotModifiedResponse` handling.
+- Wired conditional behavior into DevDocs dataset fetches and Dash docset refresh flow.
+- Activated `validate-if-possible` policy to perform conditional validation instead of fallback no-op.
 
 ---
 
 ### 1.2.2 — Dash Pre-Download Intelligence
+
+**Status:** ✅ Done
 
 **Goal:** Show users what they are getting before downloading a Dash docset.
 
@@ -271,6 +230,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.2.3 — Per-Docset Conversion Profiles
 
+**Status:** ✅ Done
+
 **Goal:** Improve Dash conversion quality for specific docsets; expose tunable profiles.
 
 **Changes:**
@@ -287,6 +248,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.2.4 — Direct Web Crawl Source Adapter
+
+**Status:** ✅ Done
 
 **Goal:** Ingest single-page manuals (GNU bash, POSIX spec, Python docs) directly from the web.
 
@@ -324,6 +287,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.2.5 — Source Health Dashboard
+
+**Status:** ✅ Done
 
 **Goal:** Surface real-time source availability and quality in the desktop.
 

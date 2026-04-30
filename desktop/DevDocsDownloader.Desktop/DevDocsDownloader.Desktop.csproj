@@ -6,7 +6,7 @@
     <RootNamespace>DevDocsDownloader.Desktop</RootNamespace>
     <AssemblyName>DevDocsDownloader.Desktop</AssemblyName>
     <UseWinUI>true</UseWinUI>
-    <EnableMsixTooling>false</EnableMsixTooling>
+    <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -14,9 +14,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\DevDocsDownloader.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);MVVMTK0045</NoWarn>
-    <Version>1.2.0</Version>
-    <FileVersion>1.2.0</FileVersion>
-    <AssemblyVersion>1.2.0</AssemblyVersion>
+    <Version>1.2.5</Version>
+    <FileVersion>1.2.5</FileVersion>
+    <AssemblyVersion>1.2.5</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>

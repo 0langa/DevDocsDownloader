@@ -66,9 +66,12 @@ def test_desktop_backend_requires_bearer_token(tmp_path: Path) -> None:
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             denied = await client.get("/health")
             allowed = await client.get("/health", headers={"Authorization": "Bearer secret"})
+            sources = await client.get("/sources/health", headers={"Authorization": "Bearer secret"})
         assert denied.status_code == 401
         assert allowed.status_code == 200
         assert allowed.json()["status"] == "ok"
+        assert sources.status_code == 200
+        assert "devdocs" in sources.json()
 
     asyncio.run(scenario())
 

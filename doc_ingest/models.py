@@ -100,6 +100,7 @@ class RuntimeTelemetrySnapshot(BaseModel):
     failures: int = 0
     cache_hits: int = 0
     cache_refreshes: int = 0
+    conditional_get_skips: int = 0
     circuit_breaker_rejections: int = 0
 
 

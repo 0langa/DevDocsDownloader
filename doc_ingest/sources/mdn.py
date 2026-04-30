@@ -17,7 +17,7 @@ import yaml  # type: ignore[import-untyped]
 from ..cache import decide_cache_refresh, read_cache_metadata, write_cache_metadata
 from ..conversion import rewrite_markdown_links
 from ..models import DryRunResult, ResumeBoundary, SourceRunDiagnostics
-from ..runtime import SourceRuntime
+from ..runtime import NotModifiedResponse, SourceRuntime
 from ..utils.archive import safe_extract_tar
 from ..utils.filesystem import read_json, write_json
 from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, SourceError, document_events
@@ -247,6 +247,8 @@ class MdnContentSource:
     async def _latest_commit_sha(self) -> str:
         try:
             response = await self.runtime.request("GET", COMMITS_API_URL)
+            if isinstance(response, NotModifiedResponse):
+                return ""
             payload = response.json()
         except Exception as exc:
             LOGGER.warning("Failed to query MDN commit SHA: %s", exc)

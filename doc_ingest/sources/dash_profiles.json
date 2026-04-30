@@ -1,0 +1,9 @@
+{
+  "Ruby": {
+    "content_selectors": ["main", "article", ".content", "#content", "body"],
+    "noise_selectors": [".sidebar", ".toc", "nav", "footer"]
+  },
+  "Python 3": {
+    "content_selectors": ["main", ".content", "#content", "body"]
+  }
+}

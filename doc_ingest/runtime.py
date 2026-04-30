@@ -25,6 +25,7 @@ class SourceRuntimeTelemetry:
     failures: int = 0
     cache_hits: int = 0
     cache_refreshes: int = 0
+    conditional_get_skips: int = 0
     circuit_breaker_rejections: int = 0
 
 
@@ -45,6 +46,8 @@ class SourceCircuitBreaker:
     backoff_seconds: float = 60.0
     state: str = "closed"
     opened_until: float = 0.0
+    last_failure_at: float = 0.0
+    last_failure_reason: str = ""
     _failures: deque[float] = field(default_factory=deque)
     _probe_in_flight: bool = False
 
@@ -67,11 +70,13 @@ class SourceCircuitBreaker:
         self._probe_in_flight = False
         self.opened_until = 0.0
 
-    def record_failure(self) -> None:
+    def record_failure(self, *, reason: str = "") -> None:
         now = time.monotonic()
         self._trim(now)
         self._probe_in_flight = False
         self._failures.append(now)
+        self.last_failure_at = now
+        self.last_failure_reason = reason
         if self.state == "half-open" or len(self._failures) >= self.threshold:
             self.state = "open"
             self.opened_until = now + self.backoff_seconds
@@ -173,8 +178,11 @@ class SourceRuntime:
         *,
         profile: str = "default",
         retry_config: RetryConfig | None = None,
+        conditional: bool = False,
+        etag: str = "",
+        last_modified: str = "",
         **kwargs: Any,
-    ) -> httpx.Response:
+    ) -> httpx.Response | NotModifiedResponse:
         limiter = self.limiter(profile)
         breaker = self.breaker(url)
 
@@ -191,18 +199,29 @@ class SourceRuntime:
             async with limiter.semaphore:
                 await limiter.wait_for_slot()
                 self.telemetry.requests += 1
+                request_headers = dict(kwargs.pop("headers", {}) or {})
+                if conditional:
+                    if etag:
+                        request_headers.setdefault("If-None-Match", etag)
+                    if last_modified:
+                        request_headers.setdefault("If-Modified-Since", last_modified)
                 response = await request_with_retries(
                     self.client(profile),
                     method,
                     url,
                     retry_config=retry_config or self.retry_config,
                     on_retry=on_retry,
+                    headers=request_headers or None,
                     **kwargs,
                 )
+                if response.status_code == 304:
+                    breaker.record_success()
+                    self.telemetry.conditional_get_skips += 1
+                    return NotModifiedResponse(headers=dict(response.headers))
                 response.raise_for_status()
-        except Exception:
+        except Exception as exc:
             self.telemetry.failures += 1
-            breaker.record_failure()
+            breaker.record_failure(reason=f"{type(exc).__name__}: {exc}")
             raise
         breaker.record_success()
         self.telemetry.bytes_observed += len(response.content)
@@ -239,9 +258,9 @@ class SourceRuntime:
                     retry_config=retry_config or self.retry_config,
                     on_retry=on_retry,
                 )
-        except Exception:
+        except Exception as exc:
             self.telemetry.failures += 1
-            breaker.record_failure()
+            breaker.record_failure(reason=f"{type(exc).__name__}: {exc}")
             raise
         breaker.record_success()
         if target.exists():
@@ -252,6 +271,18 @@ class SourceRuntime:
             await client.aclose()
         self._clients.clear()
         self.closed = True
+
+    def health_snapshot(self) -> dict[str, dict[str, Any]]:
+        now = time.monotonic()
+        out: dict[str, dict[str, Any]] = {}
+        for domain, breaker in self._breakers.items():
+            open_seconds = max(0.0, breaker.opened_until - now) if breaker.state == "open" else 0.0
+            out[domain] = {
+                "state": breaker.state,
+                "open_seconds_remaining": round(open_seconds, 3),
+                "last_failure_reason": breaker.last_failure_reason,
+            }
+        return out
 
 
 def _default_policies_from_env() -> dict[str, SourceRuntimePolicy]:
@@ -296,3 +327,8 @@ def _env_float(name: str) -> float | None:
         return max(0.0, float(value))
     except ValueError:
         return None
+
+
+@dataclass(frozen=True)
+class NotModifiedResponse:
+    headers: dict[str, str]

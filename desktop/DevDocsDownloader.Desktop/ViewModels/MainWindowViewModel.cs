@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DevDocsDownloader.Desktop.Services;
@@ -105,6 +106,18 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private string _lastErrorHint = "";
+
+    [ObservableProperty]
+    private int _catalogStaleWarningDays = 7;
+
+    [ObservableProperty]
+    private int _dashLargeDocsetWarningMb = 50;
+
+    [ObservableProperty]
+    private string _dashWarningSuppressedSlugs = "";
+
+    [ObservableProperty]
+    private JsonObject _sourceHealth = new();
 
     public ObservableCollection<string> ActivityLines { get; } = [];
 
@@ -285,6 +298,11 @@ public partial class MainWindowViewModel : ObservableObject
                             StatusText = "Ready";
                         });
                     }
+                    var sourcesHealth = await App.BackendHost.Client.GetSourcesHealthAsync(cancellationToken) as JsonObject;
+                    if (sourcesHealth is not null)
+                    {
+                        EnqueueUIUpdate(() => SourceHealth = (JsonObject)sourcesHealth.DeepClone());
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -404,6 +422,12 @@ public partial class MainWindowViewModel : ObservableObject
         BulkConcurrencyPolicy = settings["bulk_concurrency_policy"]?.GetValue<string>() ?? BulkConcurrencyPolicy;
         EmitDocumentFrontmatter = settings["emit_document_frontmatter"]?.GetValue<bool?>() ?? EmitDocumentFrontmatter;
         EmitChunks = settings["emit_chunks"]?.GetValue<bool?>() ?? EmitChunks;
+        CatalogStaleWarningDays = settings["catalog_stale_warning_days"]?.GetValue<int?>() ?? CatalogStaleWarningDays;
+        DashLargeDocsetWarningMb = settings["dash_large_docset_warning_mb"]?.GetValue<int?>() ?? DashLargeDocsetWarningMb;
+        if (settings["dash_warning_suppressed_slugs"] is JsonArray slugs)
+        {
+            DashWarningSuppressedSlugs = string.Join(",", slugs.Select(x => x?.GetValue<string>() ?? "").Where(x => !string.IsNullOrWhiteSpace(x)));
+        }
     }
 
     private void HandleJobEvent(string eventName, JsonObject payload)

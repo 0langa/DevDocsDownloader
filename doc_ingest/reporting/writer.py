@@ -76,6 +76,7 @@ def write_reports(summary: RunSummary, reports_dir: Path) -> tuple[Path, Path]:
             lines.append(f"  - Failures: {report.runtime_telemetry.failures}")
             lines.append(f"  - Cache hits: {report.runtime_telemetry.cache_hits}")
             lines.append(f"  - Cache refreshes: {report.runtime_telemetry.cache_refreshes}")
+            lines.append(f"  - Conditional GET skips: {report.runtime_telemetry.conditional_get_skips}")
             lines.append(f"  - Circuit breaker rejections: {report.runtime_telemetry.circuit_breaker_rejections}")
         if report.asset_inventory is not None:
             lines.append("- Asset inventory:")
@@ -158,6 +159,7 @@ def _write_trends(reports_dir: Path) -> None:
                 "failures": 0,
                 "cache_hits": 0,
                 "cache_refreshes": 0,
+                "conditional_get_skips": 0,
                 "circuit_breaker_rejections": 0,
             },
         }

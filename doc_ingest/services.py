@@ -95,6 +95,18 @@ class LanguageEntry(BaseModel):
     source: str
     slug: str
     version: str = ""
+    size_hint: int | None = None
+    discovery_metadata: dict[str, Any] = Field(default_factory=dict)
+    confidence: str = ""
+
+
+class SourceHealthEntry(BaseModel):
+    status: str
+    last_checked: str
+    catalog_age_hours: float = 0.0
+    circuit_breaker: str = "closed"
+    reason: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuditPresetResult(BaseModel):
@@ -421,9 +433,55 @@ class DocumentationService:
                         source=source_name,
                         slug=entry.slug,
                         version=entry.version or "",
+                        size_hint=entry.size_hint or None,
+                        discovery_metadata=dict(entry.discovery_metadata or {}),
+                        confidence=str(entry.discovery_metadata.get("confidence") or ""),
                     )
                 )
         return sorted(rows, key=lambda item: (item.language.lower(), item.source))
+
+    async def source_health(self) -> dict[str, SourceHealthEntry]:
+        now = datetime.now(UTC)
+        breaker: dict[str, dict[str, Any]] = {}
+        out: dict[str, SourceHealthEntry] = {}
+        for source in ("devdocs", "mdn", "dash", "web_page"):
+            manifest_path = self.config.paths.cache_dir / "catalogs" / f"{source}.json"
+            age_hours = 0.0
+            status = "ok"
+            reason = ""
+            details: dict[str, Any] = {}
+            if manifest_path.exists():
+                payload = read_json(manifest_path, {})
+                fetched_at = str(payload.get("fetched_at") or "")
+                if fetched_at:
+                    try:
+                        fetched = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+                        age_hours = max(0.0, (now - fetched).total_seconds() / 3600.0)
+                    except ValueError:
+                        pass
+                if bool(payload.get("fallback_used", False)):
+                    status = "degraded"
+                    reason = str(payload.get("fallback_reason") or "catalog fallback used")
+                if source == "mdn":
+                    details["commit_sha"] = str(payload.get("diagnostics", {}).get("current_commit", ""))
+            else:
+                status = "degraded"
+                reason = "catalog missing"
+            domain_state = _source_breaker_state(source, breaker)
+            if domain_state["state"] == "open":
+                status = "failed"
+            elif status == "ok" and age_hours > 24 * 7:
+                status = "degraded"
+                reason = reason or "catalog stale"
+            out[source] = SourceHealthEntry(
+                status=status,
+                last_checked=now.isoformat(),
+                catalog_age_hours=round(age_hours, 2),
+                circuit_breaker=domain_state["state"],
+                reason=reason or domain_state["last_failure_reason"],
+                details=details,
+            )
+        return out
 
     async def refresh_catalogs(self) -> list[CatalogRefreshResult]:
         registry = self._registry()
@@ -1232,7 +1290,7 @@ def _slug_from_cache_metadata(item: CacheMetadataSummary) -> str:
 
 def _source_from_cache_path(path: Path) -> str:
     parts = {part.lower() for part in path.parts}
-    for source in ("devdocs", "mdn", "dash", "catalogs"):
+    for source in ("devdocs", "mdn", "dash", "web_page", "catalogs"):
         if source in parts:
             return "catalog" if source == "catalogs" else source
     return "unknown"
@@ -1261,6 +1319,22 @@ def _cache_entry_root(cache_root: Path, *, source: str | None, slug: str | None)
         if slug:
             return cache_root / "mdn"
         return cache_root / "mdn"
+    if normalized == "web_page":
+        return cache_root / "web_page" / slug if slug else cache_root / "web_page"
     if normalized == "catalog":
         return cache_root / "catalogs"
     return None
+
+
+def _source_breaker_state(source: str, breaker: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    domains_by_source = {
+        "devdocs": ("devdocs.io",),
+        "mdn": ("developer.mozilla.org", "github.com"),
+        "dash": ("kapeli.com",),
+        "web_page": (),
+    }
+    domains = domains_by_source.get(source, ())
+    for domain in domains:
+        if domain in breaker:
+            return breaker[domain]
+    return {"state": "closed", "last_failure_reason": ""}

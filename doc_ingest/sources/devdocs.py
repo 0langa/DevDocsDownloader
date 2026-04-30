@@ -11,7 +11,7 @@ import httpx
 from ..cache import decide_cache_refresh, write_cache_metadata
 from ..conversion import DEVDOCS_PROFILE, convert_html_to_markdown
 from ..models import DryRunResult, ResumeBoundary, SourceRunDiagnostics
-from ..runtime import SourceRuntime
+from ..runtime import NotModifiedResponse, SourceRuntime
 from ..utils.filesystem import write_bytes
 from .base import AdapterEvent, CrawlMode, Document, LanguageCatalog, SourceError, document_events
 from .catalog_manifest import DiscoveryManifest, load_manifest, manifest_languages, save_manifest
@@ -70,6 +70,10 @@ class DevDocsSource:
 
         try:
             response = await self.runtime.request("GET", DOCS_INDEX_URL, profile="default")
+            if isinstance(response, NotModifiedResponse):
+                raise SourceError(
+                    "invalid_format", "Unexpected not-modified response for DevDocs catalog.", is_retriable=True
+                )
             entries = response.json()
             if not isinstance(entries, list):
                 raise SourceError(
@@ -179,10 +183,32 @@ class DevDocsSource:
             LOGGER.warning("Refreshing corrupt DevDocs %s cache for %s", filename, slug)
         LOGGER.info("Downloading DevDocs %s for %s", filename.replace(".json", ""), slug)
         url = f"{DOCUMENTS_BASE}/{slug}/{filename}"
+        use_conditional = path.exists() and self.runtime.cache_policy in {"ttl", "validate-if-possible"}
+        metadata = decision.metadata
         try:
-            resp = await self.runtime.request("GET", url, profile="default")
+            resp = await self.runtime.request(
+                "GET",
+                url,
+                profile="default",
+                conditional=use_conditional,
+                etag=metadata.etag if metadata is not None else "",
+                last_modified=metadata.last_modified if metadata is not None else "",
+            )
         except Exception as exc:
             raise _source_error_from_http(exc, source="DevDocs", slug=slug) from exc
+        if isinstance(resp, NotModifiedResponse):
+            write_cache_metadata(
+                path,
+                source=self.name,
+                cache_key=f"{slug}/{filename}",
+                url=url,
+                policy=self.runtime.cache_policy,
+                etag=resp.headers.get("etag") or (metadata.etag if metadata is not None else ""),
+                last_modified=resp.headers.get("last-modified")
+                or (metadata.last_modified if metadata is not None else ""),
+                refreshed_by_force=force_refresh,
+            )
+            return
         write_bytes(path, resp.content)
         write_cache_metadata(
             path,

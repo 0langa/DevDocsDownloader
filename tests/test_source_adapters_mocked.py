@@ -11,6 +11,7 @@ from doc_ingest.sources.base import LanguageCatalog, SourceError
 from doc_ingest.sources.dash import DashFeedSource
 from doc_ingest.sources.devdocs import DevDocsSource
 from doc_ingest.sources.mdn import MdnContentSource
+from doc_ingest.sources.web_page import WebPageSource
 
 
 class DummyResponse:
@@ -35,10 +36,10 @@ class DummyRuntime:
     def record_cache_decision(self, decision) -> None:  # pragma: no cover - noop
         _ = decision
 
-    async def request(self, method: str, url: str, profile: str = "default"):
+    async def request(self, method: str, url: str, profile: str = "default", **kwargs):
         if self._request_impl is None:
             raise AssertionError("unexpected request")
-        return await self._request_impl(method, url, profile)
+        return await self._request_impl(method, url, profile, **kwargs)
 
     async def stream_to_file(self, url: str, target: Path, profile: str = "download") -> None:
         raise AssertionError("unexpected stream_to_file")
@@ -51,7 +52,7 @@ def _http_404(url: str) -> httpx.HTTPStatusError:
 
 
 def test_devdocs_adapter_maps_http_404_to_not_found(tmp_path: Path) -> None:
-    async def request_impl(method: str, url: str, profile: str):
+    async def request_impl(method: str, url: str, profile: str, **kwargs):
         raise _http_404(url)
 
     source = DevDocsSource(
@@ -67,7 +68,7 @@ def test_devdocs_adapter_maps_http_404_to_not_found(tmp_path: Path) -> None:
 
 
 def test_devdocs_adapter_rejects_corrupt_catalog_json(tmp_path: Path) -> None:
-    async def request_impl(method: str, url: str, profile: str):
+    async def request_impl(method: str, url: str, profile: str, **kwargs):
         return DummyResponse(json_payload={"unexpected": True})
 
     source = DevDocsSource(
@@ -81,7 +82,7 @@ def test_devdocs_adapter_rejects_corrupt_catalog_json(tmp_path: Path) -> None:
 
 
 def test_dash_adapter_rejects_empty_entry_lists(tmp_path: Path) -> None:
-    async def request_impl(method: str, url: str, profile: str):
+    async def request_impl(method: str, url: str, profile: str, **kwargs):
         return DummyResponse(text="<html><body><p>no docsets here</p></body></html>")
 
     source = DashFeedSource(cache_dir=tmp_path, runtime=DummyRuntime(request_impl))
@@ -128,3 +129,22 @@ async def _collect(iterator) -> list:
     async for item in iterator:
         items.append(item)
     return items
+
+
+def test_web_page_source_discovers_seed_and_emits_documents(tmp_path: Path) -> None:
+    source = WebPageSource(cache_dir=tmp_path, runtime=DummyRuntime())
+    source.seed_path.write_text(
+        '[{"slug":"manual","display_name":"Manual","doc_url":"https://example.org/manual","content_selector":"body","section_selector":"h2"}]',
+        encoding="utf-8",
+    )
+
+    async def request_impl(method: str, url: str, profile: str, **kwargs):
+        _ = (method, profile, kwargs)
+        return DummyResponse(text="<html><body><h2>Intro</h2><p>Hello</p><h2>Next</h2><p>World</p></body></html>")
+
+    source.runtime = DummyRuntime(request_impl)
+    catalogs = asyncio.run(source.list_languages(force_refresh=True))
+    assert catalogs[0].slug == "manual"
+    docs = asyncio.run(_collect(source.fetch(catalogs[0], "important")))
+    assert len(docs) >= 2
+    assert docs[0].title in {"Intro", "Next"}

@@ -41,6 +41,11 @@ class HtmlCleanupProfile:
     noise_selectors: tuple[str, ...] = tuple(NOISE_SELECTORS)
 
 
+@dataclass(frozen=True)
+class ConversionDiagnostics:
+    matched_selector: str
+
+
 DEVDOCS_PROFILE = HtmlCleanupProfile(
     content_selectors=(
         "main",
@@ -70,11 +75,22 @@ DASH_PROFILE = HtmlCleanupProfile(
 
 def convert_html_to_markdown(html: str, *, base_url: str, profile: HtmlCleanupProfile) -> str:
     soup = _parse_html(html)
-    root = _select_content_root(soup, profile)
+    root, _ = _select_content_root(soup, profile)
     _remove_noise(root, profile)
     _normalize_links(root, base_url=base_url)
     markdown = html_to_md(str(root), heading_style="ATX", strip=["script", "style"])
     return normalize_markdown_quality(markdown)
+
+
+def convert_html_to_markdown_with_diagnostics(
+    html: str, *, base_url: str, profile: HtmlCleanupProfile
+) -> tuple[str, ConversionDiagnostics]:
+    soup = _parse_html(html)
+    root, matched_selector = _select_content_root(soup, profile)
+    _remove_noise(root, profile)
+    _normalize_links(root, base_url=base_url)
+    markdown = html_to_md(str(root), heading_style="ATX", strip=["script", "style"])
+    return normalize_markdown_quality(markdown), ConversionDiagnostics(matched_selector=matched_selector)
 
 
 def rewrite_markdown_links(markdown: str, *, base_url: str) -> str:
@@ -123,8 +139,8 @@ def _select_content_root(soup: BeautifulSoup, profile: HtmlCleanupProfile):
     for selector in profile.content_selectors:
         found = soup.select_one(selector)
         if found is not None:
-            return found
-    return soup
+            return found, selector
+    return soup, "document"
 
 
 def _remove_noise(root, profile: HtmlCleanupProfile) -> None:

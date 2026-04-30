@@ -13,11 +13,22 @@ public sealed partial class LanguagesPage : Page
         public required string Source { get; init; }
         public required string Slug { get; init; }
         public string Version { get; init; } = "";
+        public int SizeHint { get; init; }
+        public string Confidence { get; init; } = "";
         public List<string> Categories { get; init; } = [];
 
         public override string ToString()
         {
-            return string.IsNullOrWhiteSpace(Version) ? Language : $"{Language} {Version}";
+            var baseText = string.IsNullOrWhiteSpace(Version) ? Language : $"{Language} {Version}";
+            if (Source.Equals("dash", StringComparison.OrdinalIgnoreCase) && SizeHint > 0)
+            {
+                baseText += $" [{FormatBytes(SizeHint)}]";
+            }
+            if (!string.IsNullOrWhiteSpace(Confidence))
+            {
+                baseText += $" <{Confidence}>";
+            }
+            return baseText;
         }
     }
 
@@ -129,12 +140,15 @@ public sealed partial class LanguagesPage : Page
                     Source = source,
                     Slug = slug,
                     Version = string.IsNullOrWhiteSpace(version) ? "latest" : version,
+                    SizeHint = row["size_hint"]?.GetValue<int?>() ?? 0,
+                    Confidence = row["confidence"]?.GetValue<string>() ?? "",
                     Categories = ResolveCategories(language),
                 });
             }
 
             LoadSourceFilter();
             RebuildTree();
+            await UpdateStalenessSummaryAsync();
             if (!string.IsNullOrWhiteSpace(refreshSummary))
             {
                 SummaryText.Text = refreshSummary;
@@ -144,6 +158,48 @@ public sealed partial class LanguagesPage : Page
         {
             SummaryText.Text = exc.Message;
         }
+    }
+
+    private async Task UpdateStalenessSummaryAsync()
+    {
+        try
+        {
+            var health = await App.BackendHost.Client.GetSourcesHealthAsync() as JsonObject;
+            if (health is null)
+            {
+                return;
+            }
+            var stale = new List<string>();
+            foreach (var source in new[] { "devdocs", "mdn", "dash", "web_page" })
+            {
+                var entry = health[source] as JsonObject;
+                var age = entry?["catalog_age_hours"]?.GetValue<double?>() ?? 0;
+                if (age >= App.MainViewModel.CatalogStaleWarningDays * 24)
+                {
+                    stale.Add($"{source}:{age / 24:0.#}d");
+                }
+            }
+            if (stale.Count > 0)
+            {
+                SummaryText.Text += $"  |  Stale catalogs: {string.Join(", ", stale)}. Use Refresh.";
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static string FormatBytes(int bytes)
+    {
+        var value = (double)bytes;
+        string[] units = ["B", "KB", "MB", "GB"];
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+        return $"{value:0.#} {units[unit]}";
     }
 
     private void RebuildTree()

@@ -38,6 +38,7 @@ public sealed partial class BulkPage : Page
     private readonly List<CatalogEntry> _catalog = [];
     private readonly List<CatalogEntry> _selectedLanguages = [];
     private bool _initialized;
+    private Task? _catalogLoadTask;
 
     // ---------------------------------------------------------------------------
     // Constructor
@@ -60,6 +61,10 @@ public sealed partial class BulkPage : Page
         base.OnNavigatedTo(e);
         if (_initialized)
         {
+            if (_catalog.Count == 0 && App.MainViewModel.BackendReady)
+            {
+                await EnsureCatalogLoadedAsync();
+            }
             RefreshProgress();
             return;
         }
@@ -78,7 +83,7 @@ public sealed partial class BulkPage : Page
         ValidateForm();
 
         // Load language catalog in the background — UI is usable while loading
-        await LoadCatalogAsync();
+        await EnsureCatalogLoadedAsync();
     }
 
     // ---------------------------------------------------------------------------
@@ -97,6 +102,19 @@ public sealed partial class BulkPage : Page
     // ---------------------------------------------------------------------------
     // Catalog loading
     // ---------------------------------------------------------------------------
+
+    private async Task EnsureCatalogLoadedAsync()
+    {
+        if (_catalog.Count > 0)
+        {
+            return;
+        }
+        if (_catalogLoadTask is null || _catalogLoadTask.IsCompleted)
+        {
+            _catalogLoadTask = LoadCatalogAsync();
+        }
+        await _catalogLoadTask;
+    }
 
     private async Task LoadCatalogAsync()
     {
@@ -151,6 +169,10 @@ public sealed partial class BulkPage : Page
         {
             sender.ItemsSource = null;
             return;
+        }
+        if (_catalog.Count == 0 && App.MainViewModel.BackendReady)
+        {
+            _ = EnsureCatalogLoadedAsync();
         }
         var latestOnly = VersionFilterBox.SelectedIndex == 0;
         var pool = latestOnly ? ApplyLatestFilter(_catalog) : (IEnumerable<CatalogEntry>)_catalog;

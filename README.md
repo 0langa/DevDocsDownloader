@@ -426,7 +426,7 @@ When adapters emit `AssetEvent` records with bytes or safe local files, the comp
 - `use-if-present` keeps the historical default behavior
 - `ttl` refreshes cache entries older than `--cache-ttl-hours`
 - `always-refresh` refreshes source cache artifacts each run
-- `validate-if-possible` records the intent and falls back to local cache when a source-specific validator is unavailable
+- `validate-if-possible` performs conditional requests (`If-None-Match` / `If-Modified-Since`) and reuses cached content on `304 Not Modified`
 
 `--force-refresh` remains the strongest override. Source cache artifacts write sidecar `*.meta.json` files with fetched timestamp, URL, ETag/Last-Modified when available, checksum, byte count, and policy.
 

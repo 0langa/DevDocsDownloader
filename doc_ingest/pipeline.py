@@ -715,6 +715,7 @@ def _telemetry_snapshot(runtime: SourceRuntime) -> RuntimeTelemetrySnapshot:
         failures=telemetry.failures,
         cache_hits=telemetry.cache_hits,
         cache_refreshes=telemetry.cache_refreshes,
+        conditional_get_skips=telemetry.conditional_get_skips,
         circuit_breaker_rejections=telemetry.circuit_breaker_rejections,
     )
 

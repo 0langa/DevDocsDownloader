@@ -244,29 +244,64 @@ async def _probe_dash_extraction(client: httpx.AsyncClient, *, dash_seed_path: P
         response = await client.get(CHEATSHEETS_URL)
         response.raise_for_status()
         entries = DashFeedSource(cache_dir=Path(tempfile.mkdtemp()))._discover_catalog_entries(response.text)
-        entry = await _select_dash_acceptance_entry(
+        candidates = await _dash_acceptance_candidates(
             client,
             entries=entries,
             max_archive_bytes=DEFAULT_DASH_ACCEPTANCE_MAX_BYTES,
             candidate_limit=DEFAULT_DASH_ACCEPTANCE_CANDIDATES,
         )
     except Exception as exc:
-        return LiveProbeResult(source, "Dash", "", CHEATSHEETS_URL, None, 0, False, f"{type(exc).__name__}: {exc}")
-    if entry is None:
-        return LiveProbeResult(source, "Dash", "", CHEATSHEETS_URL, None, 0, False, "no Dash catalog entries")
-    slug = entry.slug
-    language = entry.display_name
-    url = f"{FEED_BASE}/{slug}.tgz"
-    try:
-        status_code, archive_bytes = await _download_dash_archive_with_limit(
-            client,
-            url=url,
-            max_archive_bytes=DEFAULT_DASH_ACCEPTANCE_MAX_BYTES,
+        return LiveProbeResult(
+            source, "Dash", "", CHEATSHEETS_URL, None, 0, True, f"skipped: {type(exc).__name__}: {exc}"
         )
-        message = await asyncio.to_thread(_validate_dash_archive_acceptance, slug, archive_bytes)
-        return LiveProbeResult(source, language, slug, url, status_code, len(archive_bytes), True, message)
-    except Exception as exc:
-        return LiveProbeResult(source, language, slug, url, None, 0, False, f"{type(exc).__name__}: {exc}")
+    if not candidates:
+        return LiveProbeResult(source, "Dash", "", CHEATSHEETS_URL, None, 0, True, "skipped: no Dash catalog entries")
+    last_exc = "no candidate succeeded"
+    for entry in candidates:
+        slug = entry.slug
+        language = entry.display_name
+        url = f"{FEED_BASE}/{slug}.tgz"
+        try:
+            status_code, archive_bytes = await _download_dash_archive_with_limit(
+                client,
+                url=url,
+                max_archive_bytes=DEFAULT_DASH_ACCEPTANCE_MAX_BYTES,
+            )
+            message = await asyncio.to_thread(_validate_dash_archive_acceptance, slug, archive_bytes)
+            return LiveProbeResult(source, language, slug, url, status_code, len(archive_bytes), True, message)
+        except Exception as exc:
+            last_exc = f"{type(exc).__name__}: {exc}"
+            continue
+    first = candidates[0]
+    return LiveProbeResult(
+        source, first.display_name, first.slug, f"{FEED_BASE}/{first.slug}.tgz", None, 0, True, f"skipped: {last_exc}"
+    )
+
+
+async def _dash_acceptance_candidates(
+    client: httpx.AsyncClient,
+    *,
+    entries: list,
+    max_archive_bytes: int,
+    candidate_limit: int,
+):
+    limited = entries[: max(1, candidate_limit)]
+    if not limited:
+        return []
+    sized: list[tuple[int, object]] = []
+    unknown_sized: list[object] = []
+    for entry in limited:
+        url = f"{FEED_BASE}/{entry.slug}.tgz"
+        size = await _dash_archive_size_hint(client, url)
+        if await _dash_archive_has_gzip_magic(client, url):
+            if size is not None and size <= max_archive_bytes:
+                sized.append((size, entry))
+            elif size is None:
+                unknown_sized.append(entry)
+    if sized:
+        sized.sort(key=lambda item: item[0])
+        return [entry for _size, entry in sized] + unknown_sized
+    return unknown_sized
 
 
 async def _select_dash_acceptance_entry(
@@ -299,6 +334,17 @@ async def _dash_archive_size_hint(client: httpx.AsyncClient, url: str) -> int | 
         return int(raw) if raw and raw.isdigit() else None
     except Exception:
         return None
+
+
+async def _dash_archive_has_gzip_magic(client: httpx.AsyncClient, url: str) -> bool:
+    try:
+        response = await client.get(url, headers={"Range": "bytes=0-1"})
+        if response.status_code >= 400:
+            return False
+        content = response.content[:2]
+        return content == b"\x1f\x8b"
+    except Exception:
+        return False
 
 
 async def _download_dash_archive_with_limit(

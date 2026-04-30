@@ -56,9 +56,7 @@ def decide_cache_refresh(
             metadata=metadata,
         )
     if policy == "validate-if-possible":
-        return CacheDecision(
-            should_refresh=False, reason="validator_unavailable_use_present", policy=policy, metadata=metadata
-        )
+        return CacheDecision(should_refresh=True, reason="validate_with_conditional", policy=policy, metadata=metadata)
     return CacheDecision(should_refresh=False, reason="use_present", policy=policy, metadata=metadata)
 
 
@@ -88,6 +86,8 @@ def write_cache_metadata(
     url: str = "",
     policy: CacheFreshnessPolicy = "use-if-present",
     response: httpx.Response | None = None,
+    etag: str | None = None,
+    last_modified: str | None = None,
     source_version: str = "",
     refreshed_by_force: bool = False,
     mdn_commit_sha: str = "",
@@ -98,8 +98,10 @@ def write_cache_metadata(
         cache_key=cache_key,
         url=url,
         source_version=source_version,
-        etag=response.headers.get("etag", "") if response is not None else "",
-        last_modified=response.headers.get("last-modified", "") if response is not None else "",
+        etag=etag if etag is not None else (response.headers.get("etag", "") if response is not None else ""),
+        last_modified=last_modified
+        if last_modified is not None
+        else (response.headers.get("last-modified", "") if response is not None else ""),
         checksum=hashlib.sha256(payload).hexdigest() if payload else "",
         byte_count=len(payload),
         policy=policy,
@@ -119,6 +121,8 @@ def write_cache_metadata_for_bytes(
     url: str = "",
     policy: CacheFreshnessPolicy = "use-if-present",
     response: httpx.Response | None = None,
+    etag: str | None = None,
+    last_modified: str | None = None,
     source_version: str = "",
     refreshed_by_force: bool = False,
     mdn_commit_sha: str = "",
@@ -128,8 +132,10 @@ def write_cache_metadata_for_bytes(
         cache_key=cache_key,
         url=url,
         source_version=source_version,
-        etag=response.headers.get("etag", "") if response is not None else "",
-        last_modified=response.headers.get("last-modified", "") if response is not None else "",
+        etag=etag if etag is not None else (response.headers.get("etag", "") if response is not None else ""),
+        last_modified=last_modified
+        if last_modified is not None
+        else (response.headers.get("last-modified", "") if response is not None else ""),
         checksum=hashlib.sha256(payload).hexdigest() if payload else "",
         byte_count=len(payload),
         policy=policy,

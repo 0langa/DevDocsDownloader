@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import AppConfig
 from .models import BulkConcurrencyPolicy, CacheFreshnessPolicy, CrawlMode
@@ -32,6 +32,10 @@ class DesktopSettings(BaseModel):
     bulk_concurrency_policy: BulkConcurrencyPolicy = "static"
     adaptive_min_concurrency: int = 1
     adaptive_max_concurrency: int = 6
+    catalog_stale_warning_days: int = 7
+    dash_large_docset_warning_mb: int = 50
+    dash_warning_suppressed_slugs: list[str] = Field(default_factory=list)
+    dash_profile_overrides: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
 
 class DesktopSettingsStore:

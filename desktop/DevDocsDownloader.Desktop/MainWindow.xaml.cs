@@ -1,6 +1,7 @@
 using DevDocsDownloader.Desktop.Pages;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -38,6 +39,7 @@ public sealed partial class MainWindow : Window
     private readonly Border _errorHintBorder;
     private readonly TextBlock _errorHintTextBlock;
     private readonly ProgressBar _progressBar;
+    private readonly TextBlock _sourceHealthTextBlock;
     private readonly Button _cancelJobButton;
     private readonly Frame _contentFrame;
     private readonly nint _windowHandle;
@@ -89,6 +91,15 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 0, 0, 12),
         };
         sidebar.Children.Add(_outputRootTextBlock);
+        _sourceHealthTextBlock = new TextBlock
+        {
+            Opacity = 0.85,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 180, 188, 204)),
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+        sidebar.Children.Add(_sourceHealthTextBlock);
 
         sidebar.Children.Add(new Border
         {
@@ -259,7 +270,8 @@ public sealed partial class MainWindow : Window
             or nameof(ViewModels.MainWindowViewModel.ProgressVisible)
             or nameof(ViewModels.MainWindowViewModel.ProgressIndeterminate)
             or nameof(ViewModels.MainWindowViewModel.ProgressValue)
-            or nameof(ViewModels.MainWindowViewModel.BackendReady))
+            or nameof(ViewModels.MainWindowViewModel.BackendReady)
+            or nameof(ViewModels.MainWindowViewModel.SourceHealth))
         {
             ApplyShellState();
         }
@@ -314,6 +326,7 @@ public sealed partial class MainWindow : Window
         _outputRootTextBlock.Text = string.IsNullOrWhiteSpace(App.MainViewModel.CurrentOutputRoot)
             ? "Output root loading..."
             : $"Output root\n{App.MainViewModel.CurrentOutputRoot}";
+        _sourceHealthTextBlock.Text = BuildSourceHealthText(App.MainViewModel.SourceHealth);
         _jobLabelTextBlock.Text = string.IsNullOrWhiteSpace(App.MainViewModel.ActiveJobLabel)
             ? "No active job."
             : App.MainViewModel.ActiveJobLabel;
@@ -331,6 +344,28 @@ public sealed partial class MainWindow : Window
         _cancelJobButton.Visibility = !string.IsNullOrWhiteSpace(App.MainViewModel.ActiveJobId) && App.MainViewModel.BackendReady
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    private static string BuildSourceHealthText(JsonObject payload)
+    {
+        if (payload.Count == 0)
+        {
+            return "Sources: unknown";
+        }
+        var dots = new List<string>();
+        foreach (var source in new[] { "devdocs", "mdn", "dash", "web_page" })
+        {
+            var node = payload[source] as JsonObject;
+            var status = node?["status"]?.GetValue<string>() ?? "unknown";
+            var icon = status switch
+            {
+                "ok" => "●",
+                "degraded" => "◐",
+                _ => "○",
+            };
+            dots.Add($"{source}:{icon}");
+        }
+        return $"Sources {string.Join(" ", dots)}";
     }
 
     private void UpdateNavState()

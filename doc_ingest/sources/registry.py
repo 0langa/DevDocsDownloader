@@ -13,6 +13,7 @@ from .base import DocumentationSource, LanguageCatalog
 from .dash import DashFeedSource
 from .devdocs import DevDocsSource
 from .mdn import MdnContentSource
+from .web_page import WebPageSource
 
 LOGGER = logging.getLogger("doc_ingest.sources.registry")
 
@@ -49,6 +50,7 @@ class SourceRegistry:
             DevDocsSource(cache_dir=cache_dir, core_topics_path=core_topics_path, runtime=self.runtime),
             MdnContentSource(cache_dir=cache_dir, runtime=self.runtime),
             DashFeedSource(cache_dir=cache_dir, runtime=self.runtime),
+            WebPageSource(cache_dir=cache_dir, runtime=self.runtime),
         ]
         self._load_entry_point_sources()
 
@@ -119,7 +121,11 @@ class SourceRegistry:
                     return source, match
             return None
 
-        priority = ["mdn", "devdocs", "dash"] if needle in _MDN_PREFERRED else ["devdocs", "mdn", "dash"]
+        priority = (
+            ["mdn", "devdocs", "dash", "web_page"]
+            if needle in _MDN_PREFERRED
+            else ["devdocs", "mdn", "dash", "web_page"]
+        )
         for name in priority:
             match = _exact_match(catalogs.get(name, []), needle)
             if match:
@@ -155,7 +161,7 @@ class SourceRegistry:
         """Every language across every source, deduplicated on display name (best pick per name)."""
         catalogs = await self.catalog(force_refresh=force_refresh)
         picked: dict[str, tuple[DocumentationSource, LanguageCatalog]] = {}
-        priority = {name: idx for idx, name in enumerate(["devdocs", "mdn", "dash"])}
+        priority = {name: idx for idx, name in enumerate(["devdocs", "mdn", "dash", "web_page"])}
         for source_name, entries in catalogs.items():
             source = self.get(source_name)
             if source is None:
@@ -179,7 +185,9 @@ class SourceRegistry:
         priority = {
             name: idx
             for idx, name in enumerate(
-                ["mdn", "devdocs", "dash"] if needle in _MDN_PREFERRED else ["devdocs", "mdn", "dash"]
+                ["mdn", "devdocs", "dash", "web_page"]
+                if needle in _MDN_PREFERRED
+                else ["devdocs", "mdn", "dash", "web_page"]
             )
         }
         scored: list[tuple[tuple[int, int, str, tuple, str], str, str]] = []

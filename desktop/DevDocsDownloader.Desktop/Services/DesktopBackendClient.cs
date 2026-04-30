@@ -27,6 +27,9 @@ public sealed class DesktopBackendClient
     public Task<JsonNode?> GetVersionAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("/version", cancellationToken);
 
+    public Task<JsonNode?> GetSourcesHealthAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync("/sources/health", cancellationToken);
+
     public Task<JsonArray?> GetLanguagesAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/languages", cancellationToken);
 

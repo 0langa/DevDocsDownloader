@@ -362,6 +362,11 @@ def create_app(
     async def version() -> dict[str, str]:
         return {"api_version": BACKEND_API_VERSION, "app_version": BACKEND_API_VERSION}
 
+    @app.get("/sources/health", dependencies=[Depends(require_auth)])
+    async def sources_health() -> dict[str, Any]:
+        snapshot = await service.source_health()
+        return {name: row.model_dump(mode="json") for name, row in snapshot.items()}
+
     @app.post("/shutdown", dependencies=[Depends(require_auth)])
     async def shutdown_endpoint() -> dict[str, str]:
         server = getattr(app.state, "server", None)

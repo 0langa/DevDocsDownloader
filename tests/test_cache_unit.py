@@ -16,7 +16,7 @@ from doc_ingest.cache import decide_cache_refresh, read_cache_metadata, write_ca
         ("ttl", 1, False, "ttl_fresh"),
         ("ttl", 48, True, "ttl_expired"),
         ("always-refresh", 1, True, "always_refresh"),
-        ("validate-if-possible", 1, False, "validator_unavailable_use_present"),
+        ("validate-if-possible", 1, True, "validate_with_conditional"),
     ],
 )
 def test_decide_cache_refresh_covers_common_policy_states(
