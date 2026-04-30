@@ -19,8 +19,33 @@
             </Grid.ColumnDefinitions>
             <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="10">
-                    <Button Content="Refresh checkpoints" Click="OnList" />
-                    <ListView x:Name="CheckpointList" SelectionChanged="OnSelectionChanged" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Refresh checkpoints" Click="OnList" />
+                        <Button x:Name="DeleteStaleButton" Content="Delete stale" Click="OnDeleteStale" />
+                    </StackPanel>
+                    <ListView x:Name="CheckpointList" SelectionChanged="OnSelectionChanged">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding PrimaryText}" FontWeight="SemiBold" TextWrapping="WrapWholeWords" />
+                                        <TextBlock Text="{Binding SecondaryText}" Opacity="0.72" TextWrapping="WrapWholeWords" />
+                                    </StackPanel>
+                                    <Border Grid.Column="1"
+                                            Padding="8,2"
+                                            CornerRadius="999"
+                                            Background="{ThemeResource SystemFillColorCautionBrush}"
+                                            Opacity="{Binding StaleBadgeOpacity}">
+                                        <TextBlock Text="{Binding StaleBadgeText}" FontSize="11" FontWeight="SemiBold" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button x:Name="UseCheckpointButton" Content="Use in Run" Click="OnUseCheckpoint" IsEnabled="False" />
                         <Button x:Name="DeleteCheckpointButton" Content="Delete checkpoint" Click="OnDelete" IsEnabled="False" />

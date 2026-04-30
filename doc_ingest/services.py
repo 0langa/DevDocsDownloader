@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,6 +25,7 @@ from .progress import CrawlProgressTracker
 from .runtime import SourceRuntime
 from .sources.presets import PRESETS
 from .sources.registry import SourceRegistry
+from .state import load_checkpoint_payload
 from .utils.filesystem import read_json
 
 
@@ -222,7 +223,10 @@ class CheckpointSummary(BaseModel):
     document_inventory_position: int | None = None
     output_path: str | None = None
     updated_at: str = ""
+    age_seconds: int = 0
     failure_count: int = 0
+    is_stale: bool = False
+    stale_reason: str = ""
 
 
 class CacheMetadataSummary(BaseModel):
@@ -689,11 +693,18 @@ class DocumentationService:
         )
 
     def list_checkpoints(self) -> list[CheckpointSummary]:
+        resolvable_catalogs = self._catalog_slug_index()
         summaries: list[CheckpointSummary] = []
         for path in sorted(self.config.paths.checkpoints_dir.glob("*.json")):
             checkpoint = self._load_checkpoint(path)
             if checkpoint is None:
                 continue
+            is_stale, stale_reason = self._checkpoint_staleness(
+                checkpoint,
+                checkpoint_path=path,
+                resolvable_catalogs=resolvable_catalogs,
+            )
+            age_seconds = max(0, int((datetime.now(UTC) - checkpoint.updated_at).total_seconds()))
             summaries.append(
                 CheckpointSummary(
                     language=checkpoint.language,
@@ -707,21 +718,48 @@ class DocumentationService:
                     document_inventory_position=checkpoint.document_inventory_position,
                     output_path=checkpoint.output_path,
                     updated_at=checkpoint.updated_at.isoformat(),
+                    age_seconds=age_seconds,
                     failure_count=len(checkpoint.failures),
+                    is_stale=is_stale,
+                    stale_reason=stale_reason,
                 )
             )
         return summaries
 
     def read_checkpoint(self, checkpoint_name: str) -> dict[str, Any]:
         path = self._checkpoint_path(checkpoint_name)
-        return read_json(path, {})
+        checkpoint = self._load_checkpoint(path)
+        if checkpoint is None:
+            raise FileNotFoundError(f"Checkpoint not found or invalid: {checkpoint_name}")
+        is_stale, stale_reason = self._checkpoint_staleness(
+            checkpoint,
+            checkpoint_path=path,
+            resolvable_catalogs=self._catalog_slug_index(),
+        )
+        payload = checkpoint.model_dump(mode="json")
+        payload["age_seconds"] = max(0, int((datetime.now(UTC) - checkpoint.updated_at).total_seconds()))
+        payload["is_stale"] = is_stale
+        payload["stale_reason"] = stale_reason
+        return payload
 
     def delete_checkpoint(self, checkpoint_name: str) -> bool:
         path = self._checkpoint_path(checkpoint_name)
         if not path.exists():
             return False
+        checkpoint = self._load_checkpoint(path)
         path.unlink()
+        slug = checkpoint.slug if checkpoint is not None else path.stem
+        (self.config.paths.state_dir / f"{slug}.json").unlink(missing_ok=True)
         return True
+
+    def delete_stale_checkpoints(self) -> int:
+        deleted = 0
+        for checkpoint in self.list_checkpoints():
+            if not checkpoint.is_stale:
+                continue
+            if self.delete_checkpoint(checkpoint.slug):
+                deleted += 1
+        return deleted
 
     def list_cache_metadata(self) -> list[CacheMetadataSummary]:
         root = self.config.paths.cache_dir
@@ -895,10 +933,51 @@ class DocumentationService:
         return self._resolve_under(self.config.paths.checkpoints_dir, name)
 
     def _load_checkpoint(self, path: Path) -> LanguageRunCheckpoint | None:
-        try:
-            return LanguageRunCheckpoint.model_validate(read_json(path, {}))
-        except Exception:
-            return None
+        return load_checkpoint_payload(read_json(path, {}), path=path)
+
+    def _catalog_slug_index(self) -> dict[str, set[str]]:
+        catalogs: dict[str, set[str]] = {}
+        catalogs_root = self.config.paths.cache_dir / "catalogs"
+        for path in sorted(catalogs_root.glob("*.json")):
+            payload = read_json(path, {})
+            if not isinstance(payload, dict):
+                continue
+            source_name = str(payload.get("source") or path.stem).strip().lower()
+            slugs = catalogs.setdefault(source_name, set())
+            entries = payload.get("entries")
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                slug = str(entry.get("slug") or "").strip()
+                if slug:
+                    slugs.add(slug)
+        return catalogs
+
+    def _checkpoint_staleness(
+        self,
+        checkpoint: LanguageRunCheckpoint,
+        *,
+        checkpoint_path: Path,
+        resolvable_catalogs: dict[str, set[str]],
+    ) -> tuple[bool, str]:
+        output_root = self.config.paths.markdown_dir
+        if not output_root.exists():
+            return True, f"Output root missing: {output_root}"
+        if checkpoint.output_path:
+            try:
+                Path(checkpoint.output_path).resolve().relative_to(output_root.resolve())
+            except ValueError:
+                return True, "Checkpoint output path is outside the current output root."
+        source_slugs = resolvable_catalogs.get(checkpoint.source.strip().lower())
+        if source_slugs is None:
+            return True, f"Source catalog unavailable for {checkpoint.source}."
+        if checkpoint.source_slug not in source_slugs:
+            return True, f"Language slug {checkpoint.source_slug} is no longer resolvable in {checkpoint.source}."
+        if not checkpoint_path.exists():
+            return True, "Checkpoint file missing."
+        return False, ""
 
     def _catalog_refresh_result(
         self,

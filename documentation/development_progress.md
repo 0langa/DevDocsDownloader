@@ -1,10 +1,10 @@
 # Development Progress
 
-## Current state summary (post-1.1.5 development)
+## Current state summary (v1.2.0)
 
 The repository ships as a working Windows desktop application backed by a frozen Python FastAPI process. The active Python package is a source-adapter ingestion pipeline for DevDocs, MDN, and Dash/Kapeli. The WinUI3 shell covers all operator workflows: Languages, Run, Bulk, Presets, Reports, Output Browser, Checkpoints, Cache, and Settings.
 
-Highlights shipped in `v1.1.5`:
+Highlights shipped in `v1.2.0`:
 - Cooperative cancellation via `asyncio.sleep(0)` in the event sink between documents
 - Job history persisted to `logs/job_history.jsonl` and restored on backend startup
 - 30s backend health monitor with dispatcher-safe UI updates on failure/recovery
@@ -25,6 +25,7 @@ Highlights shipped in `v1.1.5`:
 - cache budget enforcement plus budget display in Settings and Cache
 - dry-run preview jobs that resolve a source and show estimated document inventory before a real run
 - focused unit suites for conversion, cache policy/metadata, adaptive scheduling, backend job lifecycle, and mocked source adapters
+- checkpoint resume hardening with content-hashed artifact manifests, schema-versioned checkpoints, atomic checkpoint persistence, stale checkpoint detection, and bulk stale cleanup in the desktop shell
 
 ## What works today
 
@@ -91,7 +92,7 @@ Highlights shipped in `v1.1.5`:
 - Quality trend reports in `trends.json` / `trends.md`
 - Report history under `output/reports/history/`
 - Active checkpoints under `state/checkpoints/` during runs; removed on success
-- Automatic checkpoint resume when artifacts still exist
+- Automatic checkpoint resume when artifact identity and content hashes still verify
 
 ### Desktop backend and WinUI shell
 
@@ -185,7 +186,7 @@ See `documentation/roadmap.md` for the full prioritized list. Summary of remaini
 - ~~SSE stream drops silently~~ — done (reconnect with from_index)
 - ~~Startup failure shows blank window~~ — done (ContentDialog)
 
-### Medium priority (v1.1.x - v1.2.0)
+### Medium priority (post-v1.2.0)
 
 1. Better desktop cleanup breadth (cache + richer retention controls)
 2. Broader Dash acceptance depth in CI

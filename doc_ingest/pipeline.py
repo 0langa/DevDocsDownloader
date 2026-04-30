@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -374,7 +375,7 @@ class DocumentationPipeline:
                 f"emitted={previous_checkpoint.emitted_document_count}, "
                 f"position={previous_checkpoint.document_inventory_position}."
             )
-            resume_artifacts, resume_boundary = _validated_resume(
+            resume_artifacts, resume_boundary, resume_warnings = _validated_resume(
                 previous_checkpoint,
                 language_slug=language_slug,
                 source=source.name,
@@ -382,6 +383,7 @@ class DocumentationPipeline:
                 mode=mode,
                 output_path=consolidated_path,
             )
+            report.warnings.extend(resume_warnings)
             if resume_boundary is None:
                 report.warnings.append("Checkpoint resume artifacts were missing or stale; replaying from the start.")
             else:
@@ -621,20 +623,40 @@ def _validated_resume(
     source_slug: str,
     mode: CrawlMode,
     output_path: Path,
-) -> tuple[list[DocumentArtifactCheckpoint], ResumeBoundary | None]:
+) -> tuple[list[DocumentArtifactCheckpoint], ResumeBoundary | None, list[str]]:
     if checkpoint.slug != language_slug:
-        return [], None
+        return [], None, []
     if checkpoint.source != source or checkpoint.source_slug != source_slug or checkpoint.mode != mode:
-        return [], None
+        return [], None, []
     if checkpoint.output_path and Path(checkpoint.output_path) != output_path:
-        return [], None
+        return [], None, []
     if checkpoint.document_inventory_position is None or not checkpoint.emitted_documents:
-        return [], None
+        return [], None, []
 
-    artifacts = checkpoint.emitted_documents
-    for artifact in artifacts:
-        if not Path(artifact.path).exists():
-            return [], None
+    warnings: list[str] = []
+    verified: list[DocumentArtifactCheckpoint] = []
+    for artifact in checkpoint.emitted_documents:
+        artifact_path = Path(artifact.path)
+        if not artifact_path.exists():
+            warnings.append(
+                f"Dropped checkpoint artifact {artifact.slug}: durable document file is missing; rolling back resume boundary."
+            )
+            break
+        if artifact.content_sha256:
+            actual_hash = _artifact_content_sha256(artifact_path)
+            if actual_hash != artifact.content_sha256:
+                LOGGER.warning(
+                    "Checkpoint artifact hash mismatch for %s/%s: expected=%s actual=%s",
+                    source,
+                    artifact.slug,
+                    artifact.content_sha256,
+                    actual_hash,
+                )
+                warnings.append(
+                    f"Dropped checkpoint artifact {artifact.slug}: content hash mismatch; rolling back resume boundary."
+                )
+                break
+        verified.append(artifact)
         fragment_path = Path(artifact.fragment_path)
         if not fragment_path.exists():
             LOGGER.warning(
@@ -643,11 +665,45 @@ def _validated_resume(
                 artifact.slug,
                 artifact.path,
             )
+            warnings.append(
+                f"Checkpoint fragment missing for {artifact.slug}; rebuilding the consolidated fragment from the durable document file."
+            )
 
-    return artifacts, ResumeBoundary(
-        document_inventory_position=checkpoint.document_inventory_position,
-        emitted_document_count=checkpoint.emitted_document_count,
+    if not verified:
+        return [], None, warnings
+
+    last_verified = verified[-1]
+    return (
+        verified,
+        ResumeBoundary(
+            document_inventory_position=last_verified.order_hint,
+            emitted_document_count=len(verified),
+        ),
+        warnings,
     )
+
+
+def _artifact_content_sha256(path: Path) -> str:
+    markdown = _document_markdown_from_rendered_artifact(path)
+    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+
+
+def _document_markdown_from_rendered_artifact(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        parts = text.split("\n---\n", 1)
+        if len(parts) == 2:
+            text = parts[1].lstrip()
+    lines = text.splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+    while lines and not lines[0].strip():
+        lines = lines[1:]
+    while lines and lines[0].startswith("_") and lines[0].endswith("_"):
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+    return "\n".join(lines).strip()
 
 
 def _telemetry_snapshot(runtime: SourceRuntime) -> RuntimeTelemetrySnapshot:

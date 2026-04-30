@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import (
+    CHECKPOINT_SCHEMA_VERSION,
     CheckpointFailure,
     CheckpointPhase,
     DocumentArtifactCheckpoint,
@@ -12,6 +14,8 @@ from .models import (
     LanguageRunState,
 )
 from .utils.filesystem import read_json, write_json
+
+LOGGER = logging.getLogger("doc_ingest")
 
 
 class RunStateStore:
@@ -42,14 +46,14 @@ class RunCheckpointStore:
             return None
         try:
             payload = read_json(self.path, {})
-            return LanguageRunCheckpoint.model_validate(payload)
+            return load_checkpoint_payload(payload, path=self.path)
         except Exception:
             return None
 
     def save(self, checkpoint: LanguageRunCheckpoint) -> None:
         checkpoint.updated_at = datetime.now(UTC)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(self.path, checkpoint.model_dump(mode="json"))
+        write_json(self.path, checkpoint.model_dump(mode="json"), durability="strict")
 
     def update_phase(
         self,
@@ -110,3 +114,22 @@ class RunCheckpointStore:
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+
+
+def load_checkpoint_payload(payload: object, *, path: Path) -> LanguageRunCheckpoint | None:
+    if not isinstance(payload, dict):
+        return None
+    schema_version = payload.get("schema_version")
+    if schema_version != CHECKPOINT_SCHEMA_VERSION:
+        LOGGER.warning(
+            "Discarding checkpoint %s due to schema version mismatch: expected=%s actual=%r",
+            path,
+            CHECKPOINT_SCHEMA_VERSION,
+            schema_version,
+        )
+        return None
+    try:
+        return LanguageRunCheckpoint.model_validate(payload)
+    except Exception as exc:
+        LOGGER.warning("Discarding invalid checkpoint %s: %s", path, exc)
+        return None

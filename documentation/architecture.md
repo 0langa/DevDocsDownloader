@@ -354,10 +354,10 @@ This subsystem is intentionally lightweight. It validates output structure, not 
 - last emitted document metadata
 - current document inventory position from `Document.order_hint`
 - emitted document count
-- emitted document artifact manifest with per-document path and consolidated fragment path
+- emitted document artifact manifest with per-document path, consolidated fragment path, and content hash
 - failure records with phase, error type, message, and document position
 
-Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection and automatic resume. A matching rerun resumes only when the checkpoint identity matches the current language/source/mode/output path and the durable per-document artifact files still exist. Missing temporary consolidated fragments are rebuilt from those durable document files; missing durable artifacts still force a safe replay from the start.
+Successful runs remove the active checkpoint after the stable `LanguageRunState` is saved. Failed runs leave the checkpoint in place for inspection and automatic resume. A matching rerun resumes only when the checkpoint identity matches the current language/source/mode/output path and the durable per-document artifact files still exist and still hash to their checkpointed content records. Missing temporary consolidated fragments are rebuilt from those durable document files; missing or hash-mismatched durable artifacts roll back the resume boundary or force a safe replay from the start.
 
 **Source diagnostics contents:**
 

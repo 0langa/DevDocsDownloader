@@ -59,12 +59,20 @@ def test_service_output_reading_and_path_safety(tmp_path: Path) -> None:
 
 def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
     config = load_config(root=tmp_path)
+    config.paths.markdown_dir.mkdir(parents=True, exist_ok=True)
     write_json(config.paths.reports_dir / "run_summary.json", {"reports": [{"language": "Synthetic"}]})
     write_text(config.paths.reports_dir / "run_summary.md", "# Report\n")
     write_text(config.paths.reports_dir / "validation_documents.jsonl", '{"language":"Synthetic","issues":[]}\n')
     write_json(config.paths.reports_dir / "trends.json", {"languages": {"Synthetic": {"runs": 1}}})
     write_text(config.paths.reports_dir / "trends.md", "# Trends\n")
     write_json(config.paths.reports_dir / "history" / "20260101T000000Z-run_summary.json", {"reports": []})
+    write_json(
+        config.paths.cache_dir / "catalogs" / "devdocs.json",
+        {
+            "source": "devdocs",
+            "entries": [{"source": "devdocs", "slug": "synthetic", "display_name": "Synthetic"}],
+        },
+    )
 
     checkpoint = LanguageRunCheckpoint(
         language="Synthetic",
@@ -76,6 +84,7 @@ def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
         document_inventory_position=20,
     )
     write_json(config.paths.checkpoints_dir / "synthetic.json", checkpoint.model_dump(mode="json"))
+    write_json(config.paths.state_dir / "synthetic.json", {"language": "Synthetic"})
 
     metadata = CacheEntryMetadata(
         source="devdocs",
@@ -98,11 +107,13 @@ def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
     assert len(reports.history_reports) == 1
     assert checkpoints[0].slug == "synthetic"
     assert checkpoints[0].phase == "failed"
+    assert checkpoints[0].is_stale is False
     assert service.read_checkpoint("synthetic")["language"] == "Synthetic"
     assert cache[0].source == "devdocs"
     assert cache[0].cache_key == "docs-json"
     assert service.delete_checkpoint("synthetic") is True
     assert not (config.paths.checkpoints_dir / "synthetic.json").exists()
+    assert not (config.paths.state_dir / "synthetic.json").exists()
     pruned = service.prune_report_history(keep_latest=0)
     assert pruned.deleted is True
     assert pruned.deleted_files == 1
@@ -112,6 +123,61 @@ def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
         service.read_report_file("..\\state\\synthetic.json")
     with pytest.raises(ValueError):
         service.delete_checkpoint("..\\synthetic")
+
+
+def test_service_flags_and_deletes_stale_checkpoints(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    config.paths.markdown_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        config.paths.cache_dir / "catalogs" / "devdocs.json",
+        {
+            "source": "devdocs",
+            "entries": [{"source": "devdocs", "slug": "something-else", "display_name": "Other"}],
+        },
+    )
+    write_json(
+        config.paths.checkpoints_dir / "stale.json",
+        LanguageRunCheckpoint(
+            language="Stale",
+            slug="stale",
+            source="devdocs",
+            source_slug="missing-slug",
+            phase="failed",
+        ).model_dump(mode="json"),
+    )
+    write_json(
+        config.paths.state_dir / "stale.json",
+        {"language": "Stale"},
+    )
+
+    service = DocumentationService(config)
+    checkpoints = service.list_checkpoints()
+
+    assert checkpoints[0].is_stale is True
+    assert "no longer resolvable" in checkpoints[0].stale_reason
+    assert service.delete_stale_checkpoints() == 1
+    assert not (config.paths.checkpoints_dir / "stale.json").exists()
+    assert not (config.paths.state_dir / "stale.json").exists()
+
+
+def test_service_discards_checkpoint_with_missing_schema_version(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    write_json(
+        config.paths.checkpoints_dir / "legacy.json",
+        {
+            "language": "Legacy",
+            "slug": "legacy",
+            "source": "devdocs",
+            "source_slug": "legacy",
+            "phase": "failed",
+        },
+    )
+
+    service = DocumentationService(config)
+
+    assert service.list_checkpoints() == []
+    with pytest.raises(FileNotFoundError):
+        service.read_checkpoint("legacy")
 
 
 def test_refresh_catalogs_returns_structured_statuses(tmp_path: Path) -> None:

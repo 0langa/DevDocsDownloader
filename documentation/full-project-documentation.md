@@ -462,7 +462,7 @@ Behavior:
 - successful runs save the stable `LanguageRunState` and remove the active checkpoint
 - failed runs leave the checkpoint on disk for inspection and for automatic resume on the next matching run
 
-Resume is conservative. The pipeline only resumes when language slug, source, source slug, mode, output path, and durable per-document artifact paths still match. DevDocs and Dash skip ordered inventory rows before the boundary; MDN skips sorted `index.md` paths before the boundary. Missing temporary consolidated fragments are rebuilt from the durable per-document files. If durable artifacts are stale, the run replays from the beginning.
+Resume is conservative. The pipeline only resumes when language slug, source, source slug, mode, output path, and durable per-document artifact paths still match, and when those durable documents still hash to the checkpointed content records. DevDocs and Dash skip ordered inventory rows before the boundary; MDN skips sorted `index.md` paths before the boundary. Missing temporary consolidated fragments are rebuilt from the durable per-document files. If durable artifacts are missing or hash-mismatched, the resume boundary rolls back to the last verified artifact or the run replays from the beginning.
 
 Source diagnostics are saved in final language state and reports. Adapters record source-level inventory and skip reasons, while the pipeline records topic include/exclude skips after documents are normalized.
 

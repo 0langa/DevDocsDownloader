@@ -14,8 +14,13 @@ public sealed partial class CheckpointsPage : Page
         public required string Language { get; init; }
         public required string Source { get; init; }
         public required string Phase { get; init; }
+        public required string SecondaryText { get; init; }
+        public required bool IsStale { get; init; }
+        public required string StaleReason { get; init; }
 
-        public override string ToString() => $"{Language} [{Source}] - {Phase}";
+        public string PrimaryText => Language;
+        public string StaleBadgeText => IsStale ? "STALE" : "";
+        public double StaleBadgeOpacity => IsStale ? 1 : 0;
     }
 
     private readonly Dictionary<string, JsonObject> _details = [];
@@ -57,8 +62,12 @@ public sealed partial class CheckpointsPage : Page
             {
                 _details[item.Slug] = detail;
             }
-            DetailTitleText.Text = $"{item.Language} checkpoint";
+            DetailTitleText.Text = item.IsStale ? $"{item.Language} checkpoint (stale)" : $"{item.Language} checkpoint";
             ContentBox.Text = JsonFormatter.Format(detail);
+            if (item.IsStale && !string.IsNullOrWhiteSpace(item.StaleReason))
+            {
+                ContentBox.Text = $"Stale reason: {item.StaleReason}\n\n{ContentBox.Text}";
+            }
         }
         catch (Exception exc)
         {
@@ -108,6 +117,39 @@ public sealed partial class CheckpointsPage : Page
         }
     }
 
+    private async void OnDeleteStale(object sender, RoutedEventArgs e)
+    {
+        var staleItems = (CheckpointList.ItemsSource as IEnumerable<CheckpointItem>)?.Where(item => item.IsStale).ToList() ?? [];
+        if (staleItems.Count == 0)
+        {
+            ContentBox.Text = "No stale checkpoints found.";
+            return;
+        }
+        var dialog = new ContentDialog
+        {
+            Title = "Delete stale checkpoints?",
+            Content = $"Delete {staleItems.Count} stale checkpoint(s)? This also removes their saved run state files.",
+            PrimaryButtonText = "Delete stale",
+            CloseButtonText = "Cancel",
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            var result = await App.BackendHost.Client.DeleteStaleCheckpointsAsync() as JsonObject;
+            var deleted = result?["deleted"]?.GetValue<int>() ?? 0;
+            await RefreshAsync();
+            ContentBox.Text = $"Deleted {deleted} stale checkpoint(s).";
+        }
+        catch (Exception exc)
+        {
+            ContentBox.Text = exc.Message;
+        }
+    }
+
     private async Task RefreshAsync()
     {
         try
@@ -121,10 +163,15 @@ public sealed partial class CheckpointsPage : Page
                     Language = item["language"]?.GetValue<string>() ?? "",
                     Source = item["source"]?.GetValue<string>() ?? "",
                     Phase = item["phase"]?.GetValue<string>() ?? "",
+                    SecondaryText =
+                        $"{item["source"]?.GetValue<string>() ?? ""} • {item["phase"]?.GetValue<string>() ?? ""} • emitted {item["emitted_document_count"]?.GetValue<int>() ?? 0}",
+                    IsStale = item["is_stale"]?.GetValue<bool>() ?? false,
+                    StaleReason = item["stale_reason"]?.GetValue<string>() ?? "",
                 })
                 .OrderBy(item => item.Language)
                 .ToList();
             CheckpointList.ItemsSource = items;
+            DeleteStaleButton.IsEnabled = items.Any(item => item.IsStale);
             UseCheckpointButton.IsEnabled = false;
             DeleteCheckpointButton.IsEnabled = false;
             DetailTitleText.Text = items.Count == 0 ? "No active checkpoints." : "Select a checkpoint.";
@@ -136,6 +183,7 @@ public sealed partial class CheckpointsPage : Page
         catch (Exception exc)
         {
             DetailTitleText.Text = exc.Message;
+            DeleteStaleButton.IsEnabled = false;
         }
     }
 }

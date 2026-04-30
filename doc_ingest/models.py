@@ -10,6 +10,7 @@ CrawlMode = Literal["important", "full"]
 CheckpointPhase = Literal["initialized", "fetching", "compiling", "validating", "cancelling", "completed", "failed"]
 CacheFreshnessPolicy = Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"]
 BulkConcurrencyPolicy = Literal["static", "adaptive"]
+CHECKPOINT_SCHEMA_VERSION = 1
 
 
 class TopicStats(BaseModel):
@@ -185,6 +186,7 @@ class DocumentCheckpoint(BaseModel):
 class DocumentArtifactCheckpoint(DocumentCheckpoint):
     path: str
     fragment_path: str
+    content_sha256: str = ""
 
 
 class ResumeBoundary(BaseModel):
@@ -224,6 +226,7 @@ class CheckpointFailure(BaseModel):
 
 
 class LanguageRunCheckpoint(BaseModel):
+    schema_version: int = CHECKPOINT_SCHEMA_VERSION
     language: str
     slug: str
     source: str

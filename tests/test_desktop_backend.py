@@ -325,6 +325,33 @@ def test_desktop_backend_cache_summary_and_entry_delete_endpoints(tmp_path: Path
     asyncio.run(scenario())
 
 
+def test_desktop_backend_checkpoint_stale_endpoints(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config = load_config(root=tmp_path, runtime_mode="repo")
+        (config.paths.checkpoints_dir / "stale.json").parent.mkdir(parents=True, exist_ok=True)
+        (config.paths.checkpoints_dir / "stale.json").write_text(
+            '{"schema_version":1,"language":"Stale","slug":"stale","source":"devdocs","source_slug":"missing","phase":"failed"}',
+            encoding="utf-8",
+        )
+        (config.paths.state_dir / "stale.json").write_text('{"language":"Stale"}', encoding="utf-8")
+
+        app = create_app(config, token="secret")
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            listed = await client.get("/checkpoints", headers=headers)
+            assert listed.status_code == 200
+            assert listed.json()[0]["is_stale"] is True
+
+            deleted = await client.delete("/checkpoints/stale", headers=headers)
+            assert deleted.status_code == 200
+            assert deleted.json()["deleted"] == 1
+            assert not (config.paths.checkpoints_dir / "stale.json").exists()
+            assert not (config.paths.state_dir / "stale.json").exists()
+
+    asyncio.run(scenario())
+
+
 def test_desktop_backend_dry_run_returns_preview_summary(tmp_path: Path, monkeypatch) -> None:
     async def fake_run_language(self, request: RunLanguageRequest, *, progress_tracker=None, event_sink=None):
         assert request.dry_run is True

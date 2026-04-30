@@ -1,7 +1,7 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.1.5  
-> **Document scope:** All planned work from 1.1.5 through the 2.0.0 premium release.  
+> **Current release:** 1.2.0  
+> **Document scope:** All planned work from 1.2.0 through the 2.0.0 premium release.  
 > **Last updated:** 2026-04-30
 
 ---
@@ -183,7 +183,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.7 — Resume Hardening & Checkpoint Integrity
+### 1.1.7 — Resume Hardening & Checkpoint Integrity ✅ IMPLEMENTED
 
 **Goal:** A resumed run never silently skips or duplicates content.
 
@@ -203,7 +203,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.2.0 — Foundation Milestone Release
+### 1.2.0 — Foundation Milestone Release ✅ SHIPPED
 
 **Summary of what ships:**
 - Streaming compilation (OOM risk eliminated).
@@ -1247,8 +1247,9 @@ All `documentation/` files reviewed, updated, and consistent with 2.0.0 feature 
 | 1.1.2 | → 1.2.0 | Catalog-driven language selection and source dropdowns |
 | 1.1.3 | → 1.2.0 | Streaming writes, MDN delta, circuit breaker |
 | 1.1.4 | → 1.2.0 | Job queue and actionable error messaging |
-| 1.1.5 | → 1.2.0 | Cache management UI, cache budgets, dry-run previews, test coverage expansion |
-| 1.1.6 | → 1.2.0 | Resume hardening, checkpoint integrity |
+| 1.1.5 | → 1.2.0 | Cache management UI, cache budgets, and dry-run previews |
+| 1.1.6 | → 1.2.0 | Test coverage expansion |
+| 1.1.7 | → 1.2.0 | Resume hardening and checkpoint integrity |
 | 1.2.1 | → 1.3.0 | Conditional GET caching |
 | 1.2.2 | → 1.3.0 | Dash pre-download intelligence |
 | 1.2.3 | → 1.3.0 | Per-docset conversion profiles |

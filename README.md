@@ -1,5 +1,5 @@
 # DevDocsDownloader	
-## Public Version: 1.1.5
+## Public Version: 1.2.0
 
 `DevDocsDownloader` is a documentation ingestion engine with a Windows desktop release path and a Python automation surface. The active implementation resolves a language against catalogs from DevDocs, MDN, and Dash/Kapeli, fetches source data, converts or normalizes content into Markdown, organizes documents by topic, emits a consolidated language file, and writes validation, diagnostics, and run reports.
 
@@ -380,7 +380,7 @@ The validator emits a backward-compatible composite `score` plus component score
 
 ### Checkpoint behavior
 
-During an active language run, the pipeline writes `state/checkpoints/<language>.json` with the source slug, mode, current phase, emitted document count, last document metadata, emitted artifact manifest, and any failure records. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the next matching run can automatically resume after the last safe document boundary when the saved per-document files are still present. Missing temporary consolidated fragments are rebuilt from durable per-document files during resume; missing durable documents still trigger a safe replay from the start.
+During an active language run, the pipeline writes `state/checkpoints/<language>.json` with `schema_version`, source/mode identity, current phase, emitted document count, last document metadata, emitted artifact manifest, and any failure records. Each emitted artifact record includes a content hash for the durable per-document Markdown file. A successful run persists the stable summary to `state/<language>.json` and removes the active checkpoint. A failed run leaves the checkpoint in place so the next matching run can automatically resume after the last safe document boundary when the saved per-document files still match their checkpointed hashes. Missing temporary consolidated fragments are rebuilt from durable per-document files during resume; missing or hash-mismatched durable documents roll the boundary back to the last verified artifact or trigger a safe replay from the start.
 
 ### Source diagnostics behavior
 

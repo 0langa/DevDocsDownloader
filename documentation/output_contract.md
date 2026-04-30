@@ -96,7 +96,7 @@ Each `<topic>/<document>.md` file must contain:
 
 `state/<language>.json` is the stable completed-run summary. It must include language/source identity, mode, topics, total document count, source diagnostics when available, `output_path`, `completed`, warnings, failures, and timestamps.
 
-`state/checkpoints/<language>.json` is only for active or failed runs. Successful runs remove it after the stable state file is saved. Failed checkpoints must retain phase, document inventory position, emitted document count, last document metadata, emitted artifact metadata, and structured failure records.
+`state/checkpoints/<language>.json` is only for active or failed runs. Successful runs remove it after the stable state file is saved. Failed checkpoints must retain `schema_version`, phase, document inventory position, emitted document count, last document metadata, emitted artifact metadata, and structured failure records.
 
 When a checkpoint has a valid emitted artifact manifest, each `emitted_documents` entry includes:
 
@@ -107,8 +107,9 @@ When a checkpoint has a valid emitted artifact manifest, each `emitted_documents
 - `order_hint`
 - `path`, pointing to the emitted per-document Markdown file
 - `fragment_path`, pointing to the temporary consolidated fragment used for resume when it still exists
+- `content_sha256`, the SHA256 of the normalized durable document Markdown body used for resume verification
 
-On the next matching run, the pipeline may automatically resume after `document_inventory_position` if language, source, source slug, mode, output path, and all manifest artifact paths are still valid. Missing or stale artifacts must cause a full replay rather than a partial final output.
+On the next matching run, the pipeline may automatically resume after `document_inventory_position` if language, source, source slug, mode, output path, and the saved artifact manifest still match. Resume verification is sequential and content-aware: durable per-document Markdown files must still exist and hash to their checkpointed `content_sha256` values. Missing or hash-mismatched durable artifacts roll the resume boundary back to the last verified artifact; if nothing verifies, the run replays from the start.
 
 ## Reports and Diagnostics
 
@@ -122,7 +123,7 @@ When available, `SourceRunDiagnostics` must report:
 
 Standard skip reasons currently include `filtered_mode`, `filtered_topic_include`, `filtered_topic_exclude`, `checkpoint_resume_skip`, `malformed_frontmatter`, `duplicate_or_empty_path`, `missing_content`, `empty_markdown`, `missing_path_or_type`, `duplicate_path`, and `missing_file`.
 
-Resume is conservative but no longer all-or-nothing on temporary fragments. If a checkpoint identity matches and the durable per-document artifact files still exist, the compiler may rebuild missing temporary consolidated fragments from those durable documents during resume. Missing durable document artifacts still force a replay from the start.
+Resume is conservative but no longer all-or-nothing on temporary fragments. If a checkpoint identity matches and the durable per-document artifact files still exist and still hash to their checkpoint records, the compiler may rebuild missing temporary consolidated fragments from those durable documents during resume. Missing or hash-mismatched durable document artifacts roll the boundary back or force a replay from the start.
 
 Validation results must include `score`, `quality_score`, `issues`, language, and output path. They may also include additive `component_scores` for completeness, structure, conversion, consistency, and document quality. Validation checks structural output shape and basic quality signals; it does not certify source-document correctness.
 

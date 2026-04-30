@@ -94,6 +94,8 @@ def test_failed_run_manifest_allows_complete_adapter_level_resume(tmp_path: Path
     assert first_report.failures == ["RuntimeError: fixture interruption"]
     assert checkpoint["emitted_document_count"] == 2
     assert len(checkpoint["emitted_documents"]) == 2
+    assert checkpoint["schema_version"] == 1
+    assert checkpoint["emitted_documents"][0]["content_sha256"]
     assert Path(checkpoint["emitted_documents"][0]["fragment_path"]).exists()
 
     second_source = ResumeFixtureSource(catalog, _resume_docs())
@@ -179,6 +181,62 @@ def test_missing_resume_document_still_falls_back_to_full_replay(tmp_path: Path)
     assert report.failures == []
     assert source.seen_boundaries == [None]
     assert any("replaying from the start" in warning for warning in report.warnings)
+
+
+def test_resume_hash_mismatch_rolls_back_to_last_verified_artifact(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    catalog = LanguageCatalog(source="devdocs", slug="resume-lang", display_name="Resume Lang")
+    pipeline = DocumentationPipeline(config)
+    asyncio.run(
+        pipeline._run_language(
+            source=ResumeFixtureSource(catalog, _resume_docs(), fail_after=2),
+            catalog=catalog,
+            mode="full",
+            progress_tracker=None,
+            validate_only=False,
+        )
+    )
+    checkpoint = read_json(config.paths.checkpoints_dir / "resume-lang.json", {})
+    Path(checkpoint["emitted_documents"][1]["path"]).write_text("# Beta\n\ncorrupted\n", encoding="utf-8")
+
+    source = ResumeFixtureSource(catalog, _resume_docs())
+    report = asyncio.run(
+        pipeline._run_language(
+            source=source,
+            catalog=catalog,
+            mode="full",
+            progress_tracker=None,
+            validate_only=False,
+        )
+    )
+
+    assert report.failures == []
+    assert source.seen_boundaries == [1]
+    assert any("content hash mismatch" in warning for warning in report.warnings)
+
+
+def test_schema_mismatched_checkpoint_is_ignored_by_pipeline(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    catalog = LanguageCatalog(source="devdocs", slug="resume-lang", display_name="Resume Lang")
+    write_text(
+        config.paths.checkpoints_dir / "resume-lang.json",
+        '{"language":"Resume Lang","slug":"resume-lang","source":"devdocs","source_slug":"resume-lang","phase":"failed","document_inventory_position":2,"emitted_document_count":2,"emitted_documents":[]}',
+    )
+    pipeline = DocumentationPipeline(config)
+    source = ResumeFixtureSource(catalog, _resume_docs())
+
+    report = asyncio.run(
+        pipeline._run_language(
+            source=source,
+            catalog=catalog,
+            mode="full",
+            progress_tracker=None,
+            validate_only=False,
+        )
+    )
+
+    assert report.failures == []
+    assert source.seen_boundaries == [None]
 
 
 def test_devdocs_resume_boundary_skips_inventory_rows(tmp_path: Path) -> None:

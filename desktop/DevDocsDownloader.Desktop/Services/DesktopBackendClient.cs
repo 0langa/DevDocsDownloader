@@ -260,6 +260,9 @@ public sealed class DesktopBackendClient
     public Task<JsonNode?> DeleteCheckpointAsync(string slug, CancellationToken cancellationToken = default) =>
         DeleteJsonAsync($"/checkpoints/{slug}", cancellationToken);
 
+    public Task<JsonNode?> DeleteStaleCheckpointsAsync(CancellationToken cancellationToken = default) =>
+        DeleteJsonAsync("/checkpoints/stale", cancellationToken);
+
     public Task<JsonArray?> GetCacheMetadataAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/cache/metadata", cancellationToken);
 

@@ -483,6 +483,10 @@ def create_app(
     async def checkpoints() -> list[dict[str, Any]]:
         return [item.model_dump(mode="json") for item in service.list_checkpoints()]
 
+    @app.delete("/checkpoints/stale", dependencies=[Depends(require_auth)])
+    async def delete_stale_checkpoints() -> dict[str, int]:
+        return {"deleted": service.delete_stale_checkpoints()}
+
     @app.get("/checkpoints/{slug}", dependencies=[Depends(require_auth)])
     async def checkpoint(slug: str) -> dict[str, Any]:
         return service.read_checkpoint(slug)

@@ -44,6 +44,7 @@ class CompilationDocument:
     path: Path
     fragment_path: Path | None = None
     raw_path: Path | None = None
+    content_sha256: str = ""
     document: Document | None = None
 
 
@@ -176,6 +177,7 @@ class LanguageOutputBuilder:
             path=per_doc_path,
             fragment_path=fragment_path,
             raw_path=raw_path,
+            content_sha256=_markdown_sha256(_normalize_markdown(document.markdown)),
             document=None,
         )
         self._topic_docs[topic].append(artifact)
@@ -199,6 +201,7 @@ class LanguageOutputBuilder:
                 path=Path(artifact.path),
                 fragment_path=fragment_path if fragment_path.exists() else None,
                 raw_path=_raw_fragment_path(fragment_path) if fragment_path.exists() else None,
+                content_sha256=artifact.content_sha256,
                 document=None,
             )
         )
@@ -538,6 +541,7 @@ def artifact_checkpoint(document: CompilationDocument, *, topic: str) -> Documen
         order_hint=document.order_hint,
         path=str(document.path),
         fragment_path=str(document.fragment_path),
+        content_sha256=document.content_sha256,
     )
 
 
@@ -841,6 +845,10 @@ def _normalize_markdown(markdown: str) -> str:
             lines.append(line)
     collapsed = re.sub(r"\n{3,}", "\n\n", "\n".join(lines))
     return collapsed.strip()
+
+
+def _markdown_sha256(markdown: str) -> str:
+    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
 
 
 @dataclass(slots=True)

@@ -14,7 +14,7 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         HelpBox.Text = """
-            DevDocsDownloader 1.1.5 desktop shell
+            DevDocsDownloader 1.2.0 desktop shell
 
             What this app does
             - Download official documentation from DevDocs, MDN, and Dash-backed catalogs.
