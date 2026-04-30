@@ -35,6 +35,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _jobLabelTextBlock;
     private readonly TextBlock _activityTextBlock;
     private readonly TextBlock _warningTextBlock;
+    private readonly Border _errorHintBorder;
     private readonly TextBlock _errorHintTextBlock;
     private readonly ProgressBar _progressBar;
     private readonly Button _cancelJobButton;
@@ -131,14 +132,17 @@ public sealed partial class MainWindow : Window
                         FontSize = 12,
                         Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 206, 120)),
                     }),
-                    (_errorHintTextBlock = new TextBlock
+                    (_errorHintBorder = new Border
                     {
-                        TextWrapping = TextWrapping.Wrap,
-                        FontSize = 12,
                         Padding = new Thickness(8),
                         Background = new SolidColorBrush(ColorHelper.FromArgb(255, 74, 52, 18)),
-                        Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 220, 160)),
                         Visibility = Visibility.Collapsed,
+                        Child = (_errorHintTextBlock = new TextBlock
+                        {
+                            TextWrapping = TextWrapping.Wrap,
+                            FontSize = 12,
+                            Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 255, 220, 160)),
+                        }),
                     }),
                     (_cancelJobButton = new Button
                     {
@@ -318,7 +322,7 @@ public sealed partial class MainWindow : Window
             ? $"Warnings: {App.MainViewModel.WarningCount}   Failures: {App.MainViewModel.FailureCount}"
             : "";
         _errorHintTextBlock.Text = App.MainViewModel.LastErrorHint;
-        _errorHintTextBlock.Visibility = string.IsNullOrWhiteSpace(App.MainViewModel.LastErrorHint)
+        _errorHintBorder.Visibility = string.IsNullOrWhiteSpace(App.MainViewModel.LastErrorHint)
             ? Visibility.Collapsed
             : Visibility.Visible;
         _progressBar.Visibility = App.MainViewModel.ProgressVisible ? Visibility.Visible : Visibility.Collapsed;
