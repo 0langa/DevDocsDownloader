@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import unicodedata
@@ -40,10 +41,16 @@ _TRAILING_DIGITS_RE = re.compile(r"^(?P<base>[a-z][a-z0-9]*?)(?P<digits>\d+)$")
 
 class SourceRegistry:
     def __init__(
-        self, *, cache_dir: Path, package_root: Path | None = None, runtime: SourceRuntime | None = None
+        self,
+        *,
+        cache_dir: Path,
+        package_root: Path | None = None,
+        runtime: SourceRuntime | None = None,
+        quality_history_path: Path | None = None,
     ) -> None:
         self.cache_dir = cache_dir
         self.runtime = runtime or SourceRuntime()
+        self.quality_history_path = quality_history_path
         source_root = package_root or Path(__file__).parent
         core_topics_path = source_root / "devdocs_core.json"
         self.sources: list[DocumentationSource] = [
@@ -126,12 +133,20 @@ class SourceRegistry:
             if needle in _MDN_PREFERRED
             else ["devdocs", "mdn", "dash", "web_page"]
         )
-        for name in priority:
+        ranked_matches: list[tuple[int, float, tuple, DocumentationSource, LanguageCatalog]] = []
+        quality_scores = self._latest_quality_scores()
+        for index, name in enumerate(priority):
             match = _exact_match(catalogs.get(name, []), needle)
-            if match:
-                source = self.get(name)
-                if source is not None:
-                    return source, match
+            if not match:
+                continue
+            source = self.get(name)
+            if source is None:
+                continue
+            score = quality_scores.get((name, match.slug), -1.0)
+            ranked_matches.append((index, score, _version_key(match), source, match))
+        if ranked_matches:
+            best = sorted(ranked_matches, key=lambda row: (-row[1], row[0], row[2]), reverse=False)[0]
+            return best[3], best[4]
         return None
 
     async def resolve_many(
@@ -241,6 +256,35 @@ class SourceRegistry:
             if len(out) >= limit:
                 break
         return out
+
+    def _latest_quality_scores(self) -> dict[tuple[str, str], float]:
+        if self.quality_history_path is None or not self.quality_history_path.exists():
+            return {}
+        latest: dict[tuple[str, str], tuple[str, float]] = {}
+        for line in self.quality_history_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            source = str(payload.get("source") or "").strip().lower()
+            slug = str(payload.get("slug") or "").strip()
+            run_date = str(payload.get("run_date") or "")
+            if not source or not slug:
+                continue
+            try:
+                score = float(payload.get("validation_score") or 0.0)
+            except Exception:
+                score = 0.0
+            key = (source, slug)
+            prev = latest.get(key)
+            if prev is None or run_date >= prev[0]:
+                latest[key] = (run_date, score)
+        return {key: value[1] for key, value in latest.items()}
 
 
 def _version_key(catalog: LanguageCatalog) -> tuple:

@@ -21,6 +21,7 @@
                 <StackPanel Spacing="10">
                     <Button Content="Refresh reports" Click="OnRefresh" />
                     <TextBlock x:Name="SummaryText" TextWrapping="WrapWholeWords" />
+                    <TextBlock x:Name="TrendText" TextWrapping="WrapWholeWords" Opacity="0.8" />
                     <TextBlock Text="History files" FontWeight="SemiBold" />
                     <ListView x:Name="HistoryList" SelectionChanged="OnHistorySelectionChanged" />
                 </StackPanel>

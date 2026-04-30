@@ -98,6 +98,9 @@ class LanguageEntry(BaseModel):
     size_hint: int | None = None
     discovery_metadata: dict[str, Any] = Field(default_factory=dict)
     confidence: str = ""
+    preferred_source: bool = False
+    latest_validation_score: float | None = None
+    quality_trend: str = ""
 
 
 class SourceHealthEntry(BaseModel):
@@ -171,6 +174,7 @@ class OutputBundleSummary(BaseModel):
     topics: list[dict[str, Any]] = Field(default_factory=list)
     has_chunks: bool = False
     has_frontmatter: bool = False
+    latest_quality: dict[str, Any] = Field(default_factory=dict)
 
 
 class OutputStorageSummary(BaseModel):
@@ -221,6 +225,7 @@ class ReportBundle(BaseModel):
     validation_documents: list[dict[str, Any]] = Field(default_factory=list)
     trends_json: dict[str, Any] = Field(default_factory=dict)
     trends_markdown: str = ""
+    quality_trends: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
 
 class CheckpointSummary(BaseModel):
@@ -418,6 +423,9 @@ class DocumentationService:
 
     async def list_languages(self, *, source: str | None = None, force_refresh: bool = False) -> list[LanguageEntry]:
         registry = self._registry()
+        quality_rows = self._read_quality_history()
+        latest_quality_by_key = self._latest_quality_by_source_slug(quality_rows)
+        preferred_for_language = self._preferred_source_by_language(quality_rows)
         try:
             catalogs = await registry.catalog(force_refresh=force_refresh, source_name=source)
         finally:
@@ -436,6 +444,12 @@ class DocumentationService:
                         size_hint=entry.size_hint or None,
                         discovery_metadata=dict(entry.discovery_metadata or {}),
                         confidence=str(entry.discovery_metadata.get("confidence") or ""),
+                        preferred_source=preferred_for_language.get(entry.display_name.strip().lower(), "")
+                        == source_name,
+                        latest_validation_score=latest_quality_by_key.get((source_name, entry.slug), {}).get(
+                            "validation_score"
+                        ),
+                        quality_trend=self._trend_for_language(quality_rows, entry.display_name),
                     )
                 )
         return sorted(rows, key=lambda item: (item.language.lower(), item.source))
@@ -612,6 +626,11 @@ class DocumentationService:
                     has_chunks=(language_dir / "chunks" / "manifest.jsonl").exists()
                     or bool(outputs.get("chunks", False)),
                     has_frontmatter=bool(outputs.get("document_frontmatter", False)),
+                    latest_quality=self._latest_quality_record_for(
+                        language=str(meta.get("language") or language_dir.name),
+                        source=str(meta.get("source") or ""),
+                        slug=str(meta.get("source_slug") or ""),
+                    ),
                 )
             )
         return bundles
@@ -737,6 +756,7 @@ class DocumentationService:
             validation_documents=_read_jsonl(validation_path),
             trends_json=read_json(trends_json_path, {}) if trends_json_path.exists() else {},
             trends_markdown=trends_markdown_path.read_text(encoding="utf-8") if trends_markdown_path.exists() else "",
+            quality_trends=self._quality_trends_map(limit=10),
         )
 
     def read_report_file(self, relative_path: str) -> OutputFileContent:
@@ -969,7 +989,96 @@ class DocumentationService:
                 cache_root=self.config.paths.cache_dir,
                 max_cache_size_bytes=self.config.max_cache_size_mb * 1024 * 1024,
             ),
+            quality_history_path=self.config.paths.logs_dir / "quality_history.jsonl",
         )
+
+    def _quality_history_path(self) -> Path:
+        return self.config.paths.logs_dir / "quality_history.jsonl"
+
+    def _read_quality_history(self) -> list[dict[str, Any]]:
+        return _read_jsonl(self._quality_history_path())
+
+    def _latest_quality_by_source_slug(self, rows: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+        latest: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            source = str(row.get("source") or "").strip().lower()
+            slug = str(row.get("slug") or "").strip()
+            run_date = str(row.get("run_date") or "")
+            if not source or not slug:
+                continue
+            key = (source, slug)
+            prev = latest.get(key)
+            if prev is None or run_date >= str(prev.get("run_date") or ""):
+                latest[key] = row
+        return latest
+
+    def _preferred_source_by_language(self, rows: list[dict[str, Any]]) -> dict[str, str]:
+        by_language: dict[str, tuple[float, str, str]] = {}
+        for row in rows:
+            language = str(row.get("language") or "").strip().lower()
+            source = str(row.get("source") or "").strip().lower()
+            run_date = str(row.get("run_date") or "")
+            if not language or not source:
+                continue
+            try:
+                score = float(row.get("validation_score") or 0.0)
+            except Exception:
+                score = 0.0
+            prev = by_language.get(language)
+            if prev is None or score > prev[0] or (score == prev[0] and run_date >= prev[2]):
+                by_language[language] = (score, source, run_date)
+        return {language: value[1] for language, value in by_language.items()}
+
+    def _trend_for_language(self, rows: list[dict[str, Any]], language: str) -> str:
+        key = language.strip().lower()
+        history = [
+            float(row.get("validation_score") or 0.0)
+            for row in rows
+            if str(row.get("language") or "").strip().lower() == key
+        ]
+        if len(history) < 2:
+            return "stable"
+        recent = history[-1]
+        prior = history[-2]
+        if recent > prior + 0.01:
+            return "improving"
+        if recent < prior - 0.01:
+            return "degrading"
+        return "stable"
+
+    def _latest_quality_record_for(self, *, language: str, source: str, slug: str) -> dict[str, Any]:
+        rows = self._read_quality_history()
+        best: dict[str, Any] = {}
+        for row in rows:
+            if (
+                str(row.get("language") or "").strip().lower() != language.strip().lower()
+                or str(row.get("source") or "").strip().lower() != source.strip().lower()
+                or str(row.get("slug") or "").strip() != slug
+            ):
+                continue
+            if not best or str(row.get("run_date") or "") >= str(best.get("run_date") or ""):
+                best = row
+        return best
+
+    def _quality_trends_map(self, *, limit: int = 10) -> dict[str, list[dict[str, Any]]]:
+        trends: dict[str, list[dict[str, Any]]] = {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in self._read_quality_history():
+            language = str(row.get("language") or "").strip()
+            if not language:
+                continue
+            grouped.setdefault(language, []).append(row)
+        for language, rows in grouped.items():
+            ordered = sorted(rows, key=lambda item: str(item.get("run_date") or ""))[-limit:]
+            trends[language] = [
+                {
+                    "run_date": str(item.get("run_date") or ""),
+                    "validation_score": float(item.get("validation_score") or 0.0),
+                    "source": str(item.get("source") or ""),
+                }
+                for item in ordered
+            ]
+        return trends
 
     def _resolve_under(self, root: Path, requested: str | Path) -> Path:
         root_resolved = root.resolve()

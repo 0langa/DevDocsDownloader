@@ -279,3 +279,15 @@ class RunSummary(BaseModel):
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reports: list[LanguageRunReport] = Field(default_factory=list)
     adaptive_telemetry: AdaptiveBulkTelemetry | None = None
+
+
+class SourceQualityRecord(BaseModel):
+    language: str
+    source: str
+    slug: str
+    run_date: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    document_count: int = 0
+    topics: list[str] = Field(default_factory=list)
+    validation_score: float = 0.0
+    conversion_success_rate: float = 0.0
+    skip_rate: float = 0.0

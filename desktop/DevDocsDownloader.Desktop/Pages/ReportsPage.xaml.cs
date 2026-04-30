@@ -69,6 +69,7 @@ public sealed partial class ReportsPage : Page
             var warnings = (latestReport?["warnings"] as JsonArray)?.Count ?? 0;
             var failures = (latestReport?["failures"] as JsonArray)?.Count ?? 0;
             SummaryText.Text = $"Score: {(score.HasValue ? score.Value.ToString("0.00") : "n/a")}   Issues: {issueCount}   Warnings: {warnings}   Failures: {failures}";
+            TrendText.Text = BuildTrendSummary(_latestReports["quality_trends"] as JsonObject, latestReport?["language"]?.GetValue<string>() ?? "");
             HistoryList.ItemsSource = history?.Select(item => item?.GetValue<string>() ?? "").Where(item => !string.IsNullOrWhiteSpace(item)).ToList();
             PreviewTitleText.Text = "Latest run summary";
             ContentBox.Text = BuildLatestPreview(latestJson, latestReport);
@@ -138,5 +139,50 @@ public sealed partial class ReportsPage : Page
         lines.Add("Raw JSON");
         lines.Add(JsonFormatter.Format(latestJson));
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildTrendSummary(JsonObject? qualityTrends, string language)
+    {
+        if (qualityTrends is null || string.IsNullOrWhiteSpace(language))
+        {
+            return "Quality trend: n/a";
+        }
+        if (qualityTrends[language] is not JsonArray rows || rows.Count == 0)
+        {
+            return "Quality trend: n/a";
+        }
+        var scores = rows
+            .OfType<JsonObject>()
+            .Select(row => row["validation_score"]?.GetValue<double?>() ?? 0.0)
+            .ToList();
+        var spark = BuildSparkline(scores);
+        var trend = "stable";
+        if (scores.Count >= 2)
+        {
+            var delta = scores[^1] - scores[^2];
+            trend = delta > 0.01 ? "improving" : delta < -0.01 ? "degrading" : "stable";
+        }
+        return $"Quality trend ({scores.Count} runs): {trend}  {spark}";
+    }
+
+    private static string BuildSparkline(IReadOnlyList<double> scores)
+    {
+        if (scores.Count == 0)
+        {
+            return "";
+        }
+        var levels = new[] { '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█' };
+        var min = scores.Min();
+        var max = scores.Max();
+        if (Math.Abs(max - min) < 0.0001)
+        {
+            return new string('▅', scores.Count);
+        }
+        return string.Concat(scores.Select(score =>
+        {
+            var normalized = (score - min) / (max - min);
+            var idx = Math.Clamp((int)Math.Round(normalized * (levels.Length - 1)), 0, levels.Length - 1);
+            return levels[idx];
+        }));
     }
 }

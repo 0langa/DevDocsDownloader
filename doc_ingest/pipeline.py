@@ -5,6 +5,7 @@ import hashlib
 import logging
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -24,6 +25,7 @@ from .models import (
     ResumeBoundary,
     RunSummary,
     RuntimeTelemetrySnapshot,
+    SourceQualityRecord,
     SourceRunDiagnostics,
     SourceWarningRecord,
     TopicStats,
@@ -63,7 +65,11 @@ class DocumentationPipeline:
             cache_root=config.paths.cache_dir,
             max_cache_size_bytes=config.max_cache_size_mb * 1024 * 1024,
         )
-        self.registry = SourceRegistry(cache_dir=config.paths.cache_dir, runtime=self.runtime)
+        self.registry = SourceRegistry(
+            cache_dir=config.paths.cache_dir,
+            runtime=self.runtime,
+            quality_history_path=config.paths.logs_dir / "quality_history.jsonl",
+        )
 
     async def close(self) -> None:
         await self.runtime.close()
@@ -580,6 +586,19 @@ class DocumentationPipeline:
                     completed=True,
                 )
             )
+            self._append_quality_record(
+                SourceQualityRecord(
+                    language=catalog.display_name,
+                    source=source.name,
+                    slug=catalog.slug,
+                    run_date=datetime.now(UTC),
+                    document_count=compiled.total_documents,
+                    topics=[topic.topic for topic in compiled.topics],
+                    validation_score=float(report.validation.score if report.validation is not None else 0.0),
+                    conversion_success_rate=_conversion_success_rate(diagnostics),
+                    skip_rate=_skip_rate(diagnostics),
+                )
+            )
         except Exception as exc:
             LOGGER.exception("Failed to finalize %s from %s", catalog.display_name, source.name)
             report.failures.append(_failure_detail_from_exception(exc))
@@ -609,6 +628,12 @@ class DocumentationPipeline:
 
         report.duration_seconds = time.perf_counter() - started
         return report
+
+    def _append_quality_record(self, record: SourceQualityRecord) -> None:
+        path = self.config.paths.logs_dir / "quality_history.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(record.model_dump_json() + "\n")
 
 
 def _normalize_topic_filter(values: list[str] | None) -> set[str]:
@@ -718,6 +743,19 @@ def _telemetry_snapshot(runtime: SourceRuntime) -> RuntimeTelemetrySnapshot:
         conditional_get_skips=telemetry.conditional_get_skips,
         circuit_breaker_rejections=telemetry.circuit_breaker_rejections,
     )
+
+
+def _conversion_success_rate(diagnostics: SourceRunDiagnostics) -> float:
+    if diagnostics.discovered <= 0:
+        return 0.0
+    return round(min(1.0, max(0.0, diagnostics.emitted / diagnostics.discovered)), 4)
+
+
+def _skip_rate(diagnostics: SourceRunDiagnostics) -> float:
+    if diagnostics.discovered <= 0:
+        return 0.0
+    skipped = sum(diagnostics.skipped.values())
+    return round(min(1.0, max(0.0, skipped / diagnostics.discovered)), 4)
 
 
 def _failure_detail_from_exception(exc: Exception) -> FailureDetail:

@@ -1,6 +1,6 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.2.5  
+> **Current release:** 1.3.0  
 > **Document scope:** All planned work from 1.2.0 through the 2.0.0 premium release.  
 > **Last updated:** 2026-04-30
 
@@ -307,6 +307,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.2.6 — Per-Source Quality Metrics
 
+**Status:** ✅ Done
+
 **Goal:** Every compiled language has a measurable quality score that informs future source selection.
 
 **Changes:**
@@ -323,6 +325,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.3.0 — Source Excellence Milestone Release
+
+**Status:** ✅ Done
 
 **Summary of what ships:**
 - Conditional GET caching eliminating redundant downloads.

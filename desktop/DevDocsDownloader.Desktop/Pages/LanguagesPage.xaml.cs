@@ -15,6 +15,9 @@ public sealed partial class LanguagesPage : Page
         public string Version { get; init; } = "";
         public int SizeHint { get; init; }
         public string Confidence { get; init; } = "";
+        public bool PreferredSource { get; init; }
+        public double? LatestValidationScore { get; init; }
+        public string QualityTrend { get; init; } = "stable";
         public List<string> Categories { get; init; } = [];
 
         public override string ToString()
@@ -83,6 +86,15 @@ public sealed partial class LanguagesPage : Page
         SelectionCategoriesText.Text = item.Categories.Count == 0
             ? "Categories: Uncategorized"
             : $"Categories: {string.Join(", ", item.Categories)}";
+        SelectionQualityText.Text = $"Preferred: {(item.PreferredSource ? "yes" : "no")}  Score: {(item.LatestValidationScore.HasValue ? item.LatestValidationScore.Value.ToString("0.00") : "n/a")}  Trend: {item.QualityTrend}";
+        var sourcesForLanguage = _languages
+            .Where(entry => entry.Language.Equals(item.Language, StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.Source)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(entry => entry, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        PreferredSourceBox.ItemsSource = sourcesForLanguage;
+        PreferredSourceBox.SelectedItem = item.Source;
         UseInRunButton.IsEnabled = true;
         UseInBulkButton.IsEnabled = true;
     }
@@ -142,6 +154,9 @@ public sealed partial class LanguagesPage : Page
                     Version = string.IsNullOrWhiteSpace(version) ? "latest" : version,
                     SizeHint = row["size_hint"]?.GetValue<int?>() ?? 0,
                     Confidence = row["confidence"]?.GetValue<string>() ?? "",
+                    PreferredSource = row["preferred_source"]?.GetValue<bool?>() ?? false,
+                    LatestValidationScore = row["latest_validation_score"]?.GetValue<double?>(),
+                    QualityTrend = row["quality_trend"]?.GetValue<string>() ?? "stable",
                     Categories = ResolveCategories(language),
                 });
             }
@@ -232,9 +247,26 @@ public sealed partial class LanguagesPage : Page
             SelectionSourceText.Text = "";
             SelectionSlugText.Text = "";
             SelectionCategoriesText.Text = "";
+            SelectionQualityText.Text = "";
             UseInRunButton.IsEnabled = false;
             UseInBulkButton.IsEnabled = false;
         }
+    }
+
+    private void OnApplyPreferredSource(object sender, RoutedEventArgs e)
+    {
+        if (_selectedLanguage is null)
+        {
+            return;
+        }
+        var source = PreferredSourceBox.SelectedItem?.ToString();
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return;
+        }
+        var runPage = App.MainWindow.GetCachedPage<RunPage>();
+        runPage?.ApplySuggestedLanguage(_selectedLanguage.Language, source);
+        App.MainWindow.NavigateTo("RunPage");
     }
 
     private void BuildSourceFirstTree(IEnumerable<LanguageItem> items)

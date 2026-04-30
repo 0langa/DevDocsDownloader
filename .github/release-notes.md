@@ -1,6 +1,6 @@
-# DevDocsDownloader 1.2.5
+# DevDocsDownloader 1.3.0
 
-`1.2.5` completes roadmap steps `1.2.2` through `1.2.5` in one Source Excellence release train.
+`1.3.0` completes the Source Excellence milestone (`1.2.1` through `1.2.6`) with quality-first source selection and source-level observability.
 
 Highlights:
 
@@ -12,11 +12,14 @@ Highlights:
 - Desktop shell now consumes source-health data and shows compact source health state in the sidebar.
 - Run flow now warns before large Dash downloads and supports per-docset suppression.
 - Languages payload now includes `size_hint`, `discovery_metadata`, and confidence fields for richer UI signals.
+- New quality history log (`logs/quality_history.jsonl`) records per-run source validation and conversion outcomes.
+- Source resolution is now quality-first when multiple sources match, with deterministic fallback to existing static priority/version logic.
+- Languages and Reports views now surface preferred source and quality trend signals for recent runs.
 
 Included artifacts:
 
-- `DevDocsDownloader-Setup-1.2.5.exe`
-- `DevDocsDownloader-Portable-1.2.5.zip`
+- `DevDocsDownloader-Setup-1.3.0.exe`
+- `DevDocsDownloader-Portable-1.3.0.zip`
 - `SHA256SUMS.txt`
 
 Notes:

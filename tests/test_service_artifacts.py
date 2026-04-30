@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,7 @@ def test_service_output_reading_and_path_safety(tmp_path: Path) -> None:
     assert bundles[0].bundle_bytes > 0
     assert bundles[0].file_count >= 4
     assert bundles[0].chunk_count == 1
+    assert isinstance(bundles[0].latest_quality, dict)
     tree = service.output_tree("synthetic")
     assert any(child.name == "synthetic.md" for child in tree.children)
     assert service.read_output_file("synthetic", "synthetic.md").content == "# Synthetic\n"
@@ -104,6 +106,7 @@ def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
     assert reports.latest_json["reports"][0]["language"] == "Synthetic"
     assert reports.latest_markdown == "# Report\n"
     assert reports.validation_documents[0]["language"] == "Synthetic"
+    assert isinstance(reports.quality_trends, dict)
     assert len(reports.history_reports) == 1
     assert checkpoints[0].slug == "synthetic"
     assert checkpoints[0].phase == "failed"
@@ -123,6 +126,61 @@ def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
         service.read_report_file("..\\state\\synthetic.json")
     with pytest.raises(ValueError):
         service.delete_checkpoint("..\\synthetic")
+
+
+def test_service_languages_include_quality_fields(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    write_json(
+        config.paths.cache_dir / "catalogs" / "devdocs.json",
+        {
+            "source": "devdocs",
+            "entries": [
+                {
+                    "source": "devdocs",
+                    "slug": "python~3.13",
+                    "display_name": "Python",
+                    "version": "3.13",
+                    "discovery_metadata": {},
+                }
+            ],
+        },
+    )
+    write_json(
+        config.paths.cache_dir / "catalogs" / "mdn.json",
+        {
+            "source": "mdn",
+            "entries": [
+                {
+                    "source": "mdn",
+                    "slug": "python",
+                    "display_name": "Python",
+                    "version": "live",
+                    "discovery_metadata": {},
+                }
+            ],
+        },
+    )
+    quality_path = config.paths.logs_dir / "quality_history.jsonl"
+    quality_path.parent.mkdir(parents=True, exist_ok=True)
+    quality_path.write_text(
+        json.dumps(
+            {
+                "language": "Python",
+                "source": "mdn",
+                "slug": "python",
+                "run_date": "2026-05-01T00:00:00+00:00",
+                "validation_score": 0.9,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    service = DocumentationService(config)
+    rows = asyncio.run(service.list_languages())
+    python_rows = [row for row in rows if row.language == "Python"]
+    assert len(python_rows) == 2
+    assert any(row.preferred_source for row in python_rows)
+    assert any(row.latest_validation_score is not None for row in python_rows)
 
 
 def test_service_flags_and_deletes_stale_checkpoints(tmp_path: Path) -> None:

@@ -44,6 +44,9 @@
                     <TextBlock x:Name="SelectionSourceText" Opacity="0.8" TextWrapping="WrapWholeWords" />
                     <TextBlock x:Name="SelectionSlugText" Opacity="0.8" TextWrapping="WrapWholeWords" />
                     <TextBlock x:Name="SelectionCategoriesText" Opacity="0.8" TextWrapping="WrapWholeWords" />
+                    <TextBlock x:Name="SelectionQualityText" Opacity="0.8" TextWrapping="WrapWholeWords" />
+                    <ComboBox x:Name="PreferredSourceBox" Header="Preferred source for this language" />
+                    <Button Content="Apply Source To Run" Click="OnApplyPreferredSource" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button x:Name="UseInRunButton" Content="Use in Run" Click="OnUseInRun" IsEnabled="False" />
                         <Button x:Name="UseInBulkButton" Content="Add to Bulk" Click="OnUseInBulk" IsEnabled="False" />

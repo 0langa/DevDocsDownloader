@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from doc_ingest.sources.base import LanguageCatalog
@@ -71,3 +72,42 @@ def test_registry_suggestions_include_alias_and_version_variants(tmp_path: Path)
 
     assert ("devdocs", "Python") in py_suggestions
     assert ("mdn", "JavaScript") in js_suggestions
+
+
+def test_registry_prefers_higher_quality_score_when_multiple_sources_match(tmp_path: Path) -> None:
+    quality_history = tmp_path / "logs" / "quality_history.jsonl"
+    quality_history.parent.mkdir(parents=True, exist_ok=True)
+    quality_history.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "language": "Python",
+                        "source": "devdocs",
+                        "slug": "python~3.13",
+                        "run_date": "2026-05-01T00:00:00+00:00",
+                        "validation_score": 0.72,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "language": "Python",
+                        "source": "mdn",
+                        "slug": "python",
+                        "run_date": "2026-05-01T00:00:00+00:00",
+                        "validation_score": 0.91,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = SourceRegistry(cache_dir=tmp_path, quality_history_path=quality_history)
+    registry.sources = [
+        _StaticSource("devdocs", [LanguageCatalog(source="devdocs", slug="python~3.13", display_name="Python")]),
+        _StaticSource("mdn", [LanguageCatalog(source="mdn", slug="python", display_name="Python")]),
+    ]
+    source, catalog = asyncio.run(registry.resolve("python"))
+    assert source.name == "mdn"
+    assert catalog.slug == "python"

@@ -14,9 +14,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\DevDocsDownloader.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);MVVMTK0045</NoWarn>
-    <Version>1.2.5</Version>
-    <FileVersion>1.2.5</FileVersion>
-    <AssemblyVersion>1.2.5</AssemblyVersion>
+    <Version>1.3.0</Version>
+    <FileVersion>1.3.0</FileVersion>
+    <AssemblyVersion>1.3.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,4 +29,15 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
   </ItemGroup>
+
+  <Target Name="EnsureDesktopPriAlias" AfterTargets="Publish">
+    <ItemGroup>
+      <_ResourcesPri Include="$(PublishDir)resources.pri" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_ResourcesPri)"
+      DestinationFiles="$(PublishDir)DevDocsDownloader.Desktop.pri"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(PublishDir)resources.pri')" />
+  </Target>
 </Project>
