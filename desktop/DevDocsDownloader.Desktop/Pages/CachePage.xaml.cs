@@ -79,13 +79,15 @@ public sealed partial class CachePage : Page
         {
             DetailTitleText.Text = "Select a cache entry.";
             ContentBox.Text = "";
-            EntryActionPanel.IsEnabled = false;
+            RefreshEntryButton.IsEnabled = false;
+            DeleteEntryButton.IsEnabled = false;
             return;
         }
 
         DetailTitleText.Text = $"{item.Source} / {item.Slug}";
         ContentBox.Text = BuildDetailText(item);
-        EntryActionPanel.IsEnabled = true;
+        RefreshEntryButton.IsEnabled = true;
+        DeleteEntryButton.IsEnabled = true;
     }
 
     private async void OnRefreshEntry(object sender, RoutedEventArgs e)
@@ -320,7 +322,8 @@ public sealed partial class CachePage : Page
         {
             DetailTitleText.Text = "No cache entries found.";
             ContentBox.Text = "";
-            EntryActionPanel.IsEnabled = false;
+            RefreshEntryButton.IsEnabled = false;
+            DeleteEntryButton.IsEnabled = false;
         }
     }
 
