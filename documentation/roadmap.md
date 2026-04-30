@@ -1,7 +1,7 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.1.1  
-> **Document scope:** All planned work from 1.1.1 through the 2.0.0 premium release.  
+> **Current release:** 1.1.2  
+> **Document scope:** All planned work from 1.1.2 through the 2.0.0 premium release.  
 > **Last updated:** 2026-04-30
 
 ---
@@ -77,7 +77,33 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.2 — Streaming Pipeline & MDN Efficiency
+### 1.1.2 — Catalog-Driven Language Selection & Source Dropdowns ✅ SHIPPED
+
+**Goal:** Replace error-prone free-text inputs with catalog-backed dropdowns. Make "download everything" a single click.
+
+**Changes (shipped):**
+
+1. **Source dropdown on Run page**  
+   Replaced the freeform `TextBox` for "Preferred source" with a `ComboBox` populated with `Any (auto)`, `devdocs`, `mdn`, `dash`. Eliminates typos; selection is persisted to `SourcePreference` in the ViewModel.
+
+2. **Searchable multi-select language picker on Bulk page**  
+   Replaced the comma-separated `TextBox` with an `AutoSuggestBox` backed by the live catalog (`/languages`). Typing filters by language name or slug; selecting from suggestions adds an item to a scrollable selected-languages list with per-item ✕ removal and a "Clear all" button. Catalog loads asynchronously on first navigation — UI remains usable while loading.
+
+3. **Version filter on Bulk page**  
+   New `ComboBox` with two options: `Latest only` groups entries by slug family (part before `~`) and picks the versionless entry or highest major version per family. `All versions` passes all catalog entries through. Filter applies to both the autocomplete suggestions and "Download all".
+
+4. **Download All button**  
+   One-click "Download all" fetches all catalog entries, applies the version filter, populates the selected-languages list, and immediately submits a bulk job. Works across any catalog size.
+
+5. **Source dropdown on Bulk page**  
+   New `ComboBox` with `Any (auto)`, `devdocs`, `mdn`, `dash`. Selection is forwarded to `BulkRunRequest.source` which passes it to `pipeline.run_many` as `source_name`. Previously `BulkRunRequest` had no source field.
+
+6. **Backend: `BulkRunRequest.source` field**  
+   Added `source: str | None = None` to `BulkRunRequest` in `services.py`. `run_bulk()` passes it to `pipeline.run_many(source_name=...)`. No other backend changes.
+
+---
+
+### 1.1.3 — Streaming Pipeline & MDN Efficiency
 
 **Goal:** Prevent OOM for large docsets. Make MDN refresh non-blocking.
 
@@ -100,7 +126,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.3 — Job Queue & Error Messaging
+### 1.1.4 — Job Queue & Error Messaging
 
 **Goal:** Never tell the user "busy, try again." Make error messages actionable.
 
@@ -120,7 +146,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.4 — Cache Management Desktop UI
+### 1.1.5 — Cache Management Desktop UI
 
 **Goal:** Users can see, understand, and clean up cached source data without touching the filesystem.
 
@@ -137,7 +163,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.5 — Test Coverage Expansion
+### 1.1.6 — Test Coverage Expansion
 
 **Goal:** Converter functions, adapter edge cases, and backend job logic all have unit tests.
 
@@ -155,7 +181,7 @@ Before planning forward, an honest accounting of current state.
 
 ---
 
-### 1.1.6 — Resume Hardening & Checkpoint Integrity
+### 1.1.7 — Resume Hardening & Checkpoint Integrity
 
 **Goal:** A resumed run never silently skips or duplicates content.
 
