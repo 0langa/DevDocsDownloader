@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json.Nodes;
 using System.Collections.Generic;
+using Windows.System;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -12,6 +13,14 @@ namespace DevDocsDownloader.Desktop.Pages;
 
 public sealed partial class OutputBrowserPage : Page
 {
+    private sealed class FavoriteItem
+    {
+        public required string Language { get; init; }
+        public required string Path { get; init; }
+        public string Title { get; init; } = "";
+        public override string ToString() => $"{Language}: {(string.IsNullOrWhiteSpace(Title) ? Path : Title)}";
+    }
+
     private sealed class BundleItem
     {
         public required string LanguageSlug { get; init; }
@@ -40,6 +49,9 @@ public sealed partial class OutputBrowserPage : Page
     private readonly List<BundleItem> _bundles = [];
     private BundleItem? _selectedBundle;
     private JsonObject? _currentValidation;
+    private string _lastFindTerm = "";
+    private string _selectedRelativePath = "";
+    private List<FavoriteItem> _favorites = [];
     private bool _initialized;
 
     public OutputBrowserPage()
@@ -57,12 +69,27 @@ public sealed partial class OutputBrowserPage : Page
             return;
         }
         _initialized = true;
+        await LoadFavoritesAsync();
         await RefreshBundlesAsync();
     }
 
     public async Task FocusBundleAsync(string languageSlug)
     {
         await RefreshBundlesAsync(languageSlug);
+    }
+
+    public async Task OpenRelativePathAsync(string relativePath)
+    {
+        if (_selectedBundle is null || string.IsNullOrWhiteSpace(relativePath))
+        {
+            return;
+        }
+        var result = await App.BackendHost.Client.GetOutputFileAsync(_selectedBundle.LanguageSlug, relativePath);
+        _selectedRelativePath = relativePath;
+        PreviewPathText.Text = $"{_selectedBundle.LanguageSlug}/{relativePath}";
+        PreviewBox.Text = result?["content"]?.GetValue<string>() ?? JsonFormatter.Format(result);
+        FavoriteButton.IsEnabled = true;
+        FavoriteButton.Content = IsFavorite(_selectedBundle.LanguageSlug, relativePath) ? "★ Favorited" : "☆ Favorite";
     }
 
     public void UpdateOutputRoot()
@@ -131,10 +158,20 @@ public sealed partial class OutputBrowserPage : Page
         try
         {
             var result = await App.BackendHost.Client.GetOutputFileAsync(_selectedBundle.LanguageSlug, node.RelativePath);
+            _selectedRelativePath = node.RelativePath;
             PreviewPathText.Text = $"{_selectedBundle.LanguageSlug}/{node.RelativePath}";
             PreviewBox.Text = result?["content"]?.GetValue<string>() ?? JsonFormatter.Format(result);
             AppendQualityHint(node.RelativePath);
             App.MainViewModel.RecordOutputSelection(_selectedBundle.LanguageSlug, node.RelativePath);
+            FavoriteButton.IsEnabled = true;
+            FavoriteButton.Content = IsFavorite(_selectedBundle.LanguageSlug, node.RelativePath) ? "★ Favorited" : "☆ Favorite";
+            await App.BackendHost.Client.AddRecentAsync(new JsonObject
+            {
+                ["language"] = _selectedBundle.LanguageSlug,
+                ["path"] = node.RelativePath,
+                ["title"] = Path.GetFileNameWithoutExtension(node.RelativePath),
+            });
+            await RefreshRelatedDocsAsync(result?["content"]?.GetValue<string>() ?? "");
         }
         catch (Exception exc)
         {
@@ -202,6 +239,10 @@ public sealed partial class OutputBrowserPage : Page
         {
             PreviewPathText.Text = $"{bundle.LanguageSlug}";
             PreviewBox.Text = "";
+            _selectedRelativePath = "";
+            FavoriteButton.IsEnabled = false;
+            FavoriteButton.Content = "☆ Favorite";
+            RelatedDocsList.ItemsSource = null;
             FilesTree.RootNodes.Clear();
             var tree = await App.BackendHost.Client.GetOutputTreeAsync(bundle.LanguageSlug);
             if (tree is not JsonObject root)
@@ -220,6 +261,195 @@ public sealed partial class OutputBrowserPage : Page
         {
             StatusText.Text = exc.Message;
         }
+    }
+
+    private async Task LoadFavoritesAsync()
+    {
+        try
+        {
+            var payload = await App.BackendHost.Client.GetFavoritesAsync() as JsonObject;
+            var items = payload?["items"] as JsonArray;
+            _favorites = items?.OfType<JsonObject>().Select(item => new FavoriteItem
+            {
+                Language = item["language"]?.GetValue<string>() ?? "",
+                Path = item["path"]?.GetValue<string>() ?? "",
+                Title = item["title"]?.GetValue<string>() ?? "",
+            }).Where(item => !string.IsNullOrWhiteSpace(item.Language) && !string.IsNullOrWhiteSpace(item.Path)).ToList() ?? [];
+            FavoritesList.ItemsSource = _favorites;
+        }
+        catch
+        {
+            FavoritesList.ItemsSource = null;
+        }
+    }
+
+    private bool IsFavorite(string language, string path)
+    {
+        return _favorites.Any(item =>
+            item.Language.Equals(language, StringComparison.OrdinalIgnoreCase)
+            && item.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async void OnToggleFavorite(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBundle is null || string.IsNullOrWhiteSpace(_selectedRelativePath))
+        {
+            return;
+        }
+        var existing = _favorites.FirstOrDefault(item =>
+            item.Language.Equals(_selectedBundle.LanguageSlug, StringComparison.OrdinalIgnoreCase)
+            && item.Path.Equals(_selectedRelativePath, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            _favorites.Add(new FavoriteItem
+            {
+                Language = _selectedBundle.LanguageSlug,
+                Path = _selectedRelativePath,
+                Title = Path.GetFileNameWithoutExtension(_selectedRelativePath),
+            });
+        }
+        else
+        {
+            _favorites.Remove(existing);
+        }
+        await App.BackendHost.Client.PutFavoritesAsync(new JsonObject
+        {
+            ["items"] = new JsonArray(_favorites.Select(item => (JsonNode)new JsonObject
+            {
+                ["language"] = item.Language,
+                ["path"] = item.Path,
+                ["title"] = item.Title,
+            }).ToArray()),
+        });
+        FavoritesList.ItemsSource = null;
+        FavoritesList.ItemsSource = _favorites.ToList();
+        FavoriteButton.Content = IsFavorite(_selectedBundle.LanguageSlug, _selectedRelativePath) ? "★ Favorited" : "☆ Favorite";
+    }
+
+    private async void OnFavoriteSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (FavoritesList.SelectedItem is not FavoriteItem favorite)
+        {
+            return;
+        }
+        await FocusBundleAsync(favorite.Language);
+        if (_selectedBundle is null)
+        {
+            return;
+        }
+        try
+        {
+            var result = await App.BackendHost.Client.GetOutputFileAsync(_selectedBundle.LanguageSlug, favorite.Path);
+            _selectedRelativePath = favorite.Path;
+            PreviewPathText.Text = $"{_selectedBundle.LanguageSlug}/{favorite.Path}";
+            PreviewBox.Text = result?["content"]?.GetValue<string>() ?? JsonFormatter.Format(result);
+            FavoriteButton.IsEnabled = true;
+            FavoriteButton.Content = "★ Favorited";
+        }
+        catch (Exception exc)
+        {
+            PreviewBox.Text = exc.Message;
+        }
+    }
+
+    private async Task RefreshRelatedDocsAsync(string content)
+    {
+        var identifiers = System.Text.RegularExpressions.Regex.Matches(
+            content,
+            @"\b([A-Z][A-Za-z0-9]+|[a-z]+_[a-z0-9_]+|[A-Za-z_][A-Za-z0-9_]*\(\))\b")
+            .Select(m => m.Value.EndsWith("()", StringComparison.Ordinal) ? m.Value[..^2] : m.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var related = new List<string>();
+        foreach (var term in identifiers)
+        {
+            var payload = await App.BackendHost.Client.GetXrefAsync(term, 10) as JsonObject;
+            var rows = payload?["results"]?[_selectedBundle?.LanguageSlug ?? ""] as JsonArray;
+            foreach (var row in rows?.OfType<JsonObject>() ?? [])
+            {
+                var path = row["path"]?.GetValue<string>() ?? "";
+                if (string.IsNullOrWhiteSpace(path) || path.Equals(_selectedRelativePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                related.Add(path);
+            }
+            if (related.Count >= 10)
+            {
+                break;
+            }
+        }
+        RelatedDocsList.ItemsSource = related.Distinct(StringComparer.OrdinalIgnoreCase).Take(10).ToList();
+    }
+
+    private async void OnRelatedSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_selectedBundle is null || RelatedDocsList.SelectedItem is not string relativePath)
+        {
+            return;
+        }
+        var result = await App.BackendHost.Client.GetOutputFileAsync(_selectedBundle.LanguageSlug, relativePath);
+        _selectedRelativePath = relativePath;
+        PreviewPathText.Text = $"{_selectedBundle.LanguageSlug}/{relativePath}";
+        PreviewBox.Text = result?["content"]?.GetValue<string>() ?? JsonFormatter.Format(result);
+        FavoriteButton.IsEnabled = true;
+        FavoriteButton.Content = IsFavorite(_selectedBundle.LanguageSlug, relativePath) ? "★ Favorited" : "☆ Favorite";
+    }
+
+    private async void OnPreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control);
+        var ctrlDown = ctrl.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (ctrlDown && e.Key == VirtualKey.G)
+        {
+            var input = new TextBox { Text = _lastFindTerm };
+            var dialog = new ContentDialog
+            {
+                Title = "Find in document",
+                Content = input,
+                PrimaryButtonText = "Find",
+                CloseButtonText = "Cancel",
+                XamlRoot = XamlRoot,
+            };
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                _lastFindTerm = input.Text;
+                FindInPreview(next: true);
+            }
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == VirtualKey.F3)
+        {
+            var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+            var backwards = shift.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            FindInPreview(next: !backwards);
+            e.Handled = true;
+        }
+    }
+
+    private void FindInPreview(bool next)
+    {
+        if (string.IsNullOrWhiteSpace(_lastFindTerm) || string.IsNullOrWhiteSpace(PreviewBox.Text))
+        {
+            return;
+        }
+        var comparison = StringComparison.OrdinalIgnoreCase;
+        var current = PreviewBox.SelectionStart;
+        var text = PreviewBox.Text;
+        var idx = next
+            ? text.IndexOf(_lastFindTerm, Math.Min(text.Length, current + 1), comparison)
+            : text.LastIndexOf(_lastFindTerm, Math.Max(0, current - 1), comparison);
+        if (idx < 0)
+        {
+            idx = next ? text.IndexOf(_lastFindTerm, comparison) : text.LastIndexOf(_lastFindTerm, comparison);
+        }
+        if (idx < 0)
+        {
+            return;
+        }
+        PreviewBox.Select(idx, _lastFindTerm.Length);
     }
 
     private async void OnDeleteBundle(object sender, RoutedEventArgs e)

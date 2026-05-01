@@ -33,6 +33,41 @@ public sealed class DesktopBackendClient
     public Task<JsonArray?> GetLanguagesAsync(CancellationToken cancellationToken = default) =>
         GetArrayAsync("/languages", cancellationToken);
 
+    public Task<JsonNode?> SearchAsync(string query, int limit = 25, string? language = null, CancellationToken cancellationToken = default)
+    {
+        var qs = $"/search?q={Uri.EscapeDataString(query)}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            qs += $"&language={Uri.EscapeDataString(language)}";
+        }
+        return GetJsonAsync(qs, cancellationToken);
+    }
+
+    public Task<JsonNode?> SearchSemanticAsync(string query, int limit = 25, string? language = null, CancellationToken cancellationToken = default)
+    {
+        var qs = $"/search/semantic?q={Uri.EscapeDataString(query)}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            qs += $"&language={Uri.EscapeDataString(language)}";
+        }
+        return GetJsonAsync(qs, cancellationToken);
+    }
+
+    public Task<JsonNode?> GetXrefAsync(string term, int limit = 100, CancellationToken cancellationToken = default) =>
+        GetJsonAsync($"/xref?term={Uri.EscapeDataString(term)}&limit={limit}", cancellationToken);
+
+    public Task<JsonNode?> GetFavoritesAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync("/favorites", cancellationToken);
+
+    public Task<JsonNode?> PutFavoritesAsync(JsonNode payload, CancellationToken cancellationToken = default) =>
+        PutJsonAsync("/favorites", payload, cancellationToken);
+
+    public Task<JsonNode?> GetRecentsAsync(CancellationToken cancellationToken = default) =>
+        GetJsonAsync("/recents", cancellationToken);
+
+    public Task<JsonNode?> AddRecentAsync(JsonNode payload, CancellationToken cancellationToken = default) =>
+        PostJsonAsync("/recents", payload, cancellationToken);
+
     public Task<JsonNode?> GetPresetsAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("/presets", cancellationToken);
 

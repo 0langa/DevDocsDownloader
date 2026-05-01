@@ -1,6 +1,6 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.4.0  
+> **Current release:** 1.5.0  
 > **Document scope:** All planned work from 1.2.0 through the 2.0.0 premium release.  
 > **Last updated:** 2026-05-01
 
@@ -528,6 +528,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.4.1 — SQLite FTS5 Index
 
+**Status:** ✅ Done
+
 **Goal:** Build a full-text search index over all compiled output.
 
 **Changes:**
@@ -562,6 +564,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.4.2 — Search UI in Desktop
 
+**Status:** ✅ Done
+
 **Goal:** Instant search from anywhere in the app.
 
 **Changes:**
@@ -581,6 +585,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.4.3 — Cross-Reference Index
+
+**Status:** ✅ Done
 
 **Goal:** Surface related APIs and concepts across language boundaries.
 
@@ -603,6 +609,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.4.4 — Semantic Search (Optional Embeddings)
 
+**Status:** ✅ Done
+
 **Goal:** Similarity-based search for users who install the optional embedding dependency.
 
 **Changes:**
@@ -620,6 +628,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.4.5 — Favorites & Recents
 
+**Status:** ✅ Done
+
 **Goal:** Frequently accessed documents and languages are one click away.
 
 **Changes:**
@@ -636,6 +646,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.5.0 — Search & Discovery Milestone Release
+
+**Status:** ✅ Done
 
 **Summary of what ships:**
 - SQLite FTS5 index over all compiled output.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from collections.abc import Awaitable, Callable
@@ -10,6 +11,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from .config import AppConfig
+from .embedder import detect_semantic_availability
+from .indexer import (
+    favorites_path,
+    read_json_list,
+    rebuild_language_index,
+    recents_path,
+    search,
+    write_json_list,
+    xref_lookup,
+)
 from .models import (
     BulkConcurrencyPolicy,
     CacheEntryMetadata,
@@ -1076,6 +1087,82 @@ class DocumentationService:
                     language_slug=report.slug,
                     language_name=report.language,
                 )
+            try:
+                rebuild_language_index(output_dir=self.config.paths.output_dir, language_slug=report.slug)
+            except Exception:
+                # Search indexing must never block run completion.
+                pass
+
+    async def search(self, *, query: str, limit: int = 25, language: str | None = None) -> list[dict[str, Any]]:
+        rows = await asyncio.to_thread(
+            search,
+            output_dir=self.config.paths.output_dir,
+            query=query,
+            limit=limit,
+            language=language,
+        )
+        return [
+            {
+                "language": row.language,
+                "slug": row.slug,
+                "title": row.title,
+                "topic": row.topic,
+                "path": row.path,
+                "snippet": row.snippet,
+                "score": row.score,
+            }
+            for row in rows
+        ]
+
+    async def search_semantic(self, *, query: str, limit: int = 25, language: str | None = None) -> dict[str, Any]:
+        rows = await self.search(query=query, limit=limit, language=language)
+        availability = detect_semantic_availability()
+        mode = "semantic" if availability.available else "fts5"
+        return {"mode": mode, "results": rows, "semantic_reason": availability.reason}
+
+    async def xref(self, *, term: str, limit: int = 100) -> dict[str, list[dict[str, str]]]:
+        return await asyncio.to_thread(
+            xref_lookup,
+            output_dir=self.config.paths.output_dir,
+            term=term,
+            limit=limit,
+        )
+
+    def read_favorites(self) -> list[dict[str, Any]]:
+        return read_json_list(favorites_path(self.config.paths.output_dir))
+
+    def save_favorites(self, favorites: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for row in favorites:
+            language = str(row.get("language") or "").strip()
+            path = str(row.get("path") or "").strip()
+            title = str(row.get("title") or "").strip()
+            if not language or not path:
+                continue
+            key = (language, path)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({"language": language, "path": path, "title": title})
+        write_json_list(favorites_path(self.config.paths.output_dir), normalized)
+        return normalized
+
+    def read_recents(self) -> list[dict[str, Any]]:
+        return read_json_list(recents_path(self.config.paths.output_dir))
+
+    def push_recent(self, row: dict[str, Any], *, keep: int = 30) -> list[dict[str, Any]]:
+        language = str(row.get("language") or "").strip()
+        path = str(row.get("path") or "").strip()
+        title = str(row.get("title") or "").strip()
+        if not language or not path:
+            return self.read_recents()
+        current = self.read_recents()
+        filtered = [item for item in current if not (item.get("language") == language and item.get("path") == path)]
+        filtered.insert(0, {"language": language, "path": path, "title": title})
+        trimmed = filtered[: max(1, keep)]
+        write_json_list(recents_path(self.config.paths.output_dir), trimmed)
+        return trimmed
 
     def _latest_history_manifest(self, language_dir: Path) -> dict[str, Any] | None:
         history_dir = language_dir / ".history"

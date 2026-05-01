@@ -24,12 +24,19 @@ public sealed partial class RunPage : Page
 
         public override string ToString() => DisplayText;
     }
+    private sealed class QuickLaunchItem
+    {
+        public required string LanguageSlug { get; init; }
+        public required string Label { get; init; }
+        public override string ToString() => Label;
+    }
 
     private static readonly string[] FallbackSources = ["Any (auto)", "dash", "devdocs", "mdn"];
 
     private readonly List<CatalogEntry> _catalog = [];
     private bool _initialized;
     private CatalogEntry? _selectedLanguage;
+    private List<QuickLaunchItem> _quickLaunch = [];
     private Task? _catalogLoadTask;
 
     public RunPage()
@@ -59,6 +66,7 @@ public sealed partial class RunPage : Page
             RefreshProgress();
             ValidateForm();
             await EnsureCatalogLoadedAsync();
+            await LoadQuickLaunchAsync();
             return;
         }
 
@@ -68,6 +76,7 @@ public sealed partial class RunPage : Page
         }
         OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
         RefreshProgress();
+        await LoadQuickLaunchAsync();
     }
 
     public void ApplySuggestedLanguage(string language, string source)
@@ -137,6 +146,54 @@ public sealed partial class RunPage : Page
         {
             PopulateSourceBox();
         }
+    }
+
+    private async Task LoadQuickLaunchAsync()
+    {
+        try
+        {
+            var bundles = await App.BackendHost.Client.GetOutputBundlesAsync();
+            _quickLaunch = bundles?.OfType<JsonObject>()
+                .Select(row =>
+                {
+                    var slug = row["language_slug"]?.GetValue<string>() ?? "";
+                    var language = row["language"]?.GetValue<string>() ?? slug;
+                    var documents = row["total_documents"]?.GetValue<int?>() ?? 0;
+                    var validation = row["latest_quality"]?["validation_score"]?.GetValue<double?>() ?? 0.0;
+                    return new QuickLaunchItem
+                    {
+                        LanguageSlug = slug,
+                        Label = $"{language} | docs {documents} | score {validation:0.00}",
+                    };
+                })
+                .Where(item => !string.IsNullOrWhiteSpace(item.LanguageSlug))
+                .Take(8)
+                .ToList() ?? [];
+            QuickLaunchList.ItemsSource = _quickLaunch;
+        }
+        catch
+        {
+            QuickLaunchList.ItemsSource = null;
+        }
+    }
+
+    private void OnQuickLaunchSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (QuickLaunchList.SelectedItem is not QuickLaunchItem item)
+        {
+            return;
+        }
+        var match = _catalog.FirstOrDefault(entry => entry.Slug.Equals(item.LanguageSlug, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            LanguageBox.Text = item.LanguageSlug;
+            _selectedLanguage = null;
+        }
+        else
+        {
+            ApplyLanguageEntry(match);
+        }
+        ValidateForm();
     }
 
     private async void OnStartRun(object sender, RoutedEventArgs e)

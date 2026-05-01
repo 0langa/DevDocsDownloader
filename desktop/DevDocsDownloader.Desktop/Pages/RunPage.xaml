@@ -66,10 +66,15 @@
             <Grid Grid.Row="2" RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <TextBlock Text="Recent activity" FontSize="20" FontWeight="SemiBold" />
-                <ListView x:Name="EventsList" Grid.Row="1" />
+                <StackPanel Grid.Row="1" Spacing="6">
+                    <TextBlock Text="Quick launch" FontWeight="SemiBold" />
+                    <ListView x:Name="QuickLaunchList" SelectionChanged="OnQuickLaunchSelectionChanged" MaxHeight="130" />
+                </StackPanel>
+                <ListView x:Name="EventsList" Grid.Row="2" />
             </Grid>
         </Grid>
     </ScrollViewer>

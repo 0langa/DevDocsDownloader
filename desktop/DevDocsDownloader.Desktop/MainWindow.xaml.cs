@@ -1,4 +1,5 @@
 using DevDocsDownloader.Desktop.Pages;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
@@ -41,6 +42,9 @@ public sealed partial class MainWindow : Window
     private readonly ProgressBar _progressBar;
     private readonly TextBlock _sourceHealthTextBlock;
     private readonly Button _cancelJobButton;
+    private readonly AutoSuggestBox _globalSearchBox;
+    private readonly DispatcherTimer _searchDebounce;
+    private readonly ObservableCollection<string> _globalSearchResults = [];
     private readonly Frame _contentFrame;
     private readonly nint _windowHandle;
     private readonly SubclassProc _subclassProc;
@@ -100,6 +104,17 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 0, 0, 10),
         };
         sidebar.Children.Add(_sourceHealthTextBlock);
+        _globalSearchBox = new AutoSuggestBox
+        {
+            Header = "Global search",
+            PlaceholderText = "Search docs...",
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+        _globalSearchBox.TextChanged += OnGlobalSearchTextChanged;
+        _globalSearchBox.QuerySubmitted += OnGlobalSearchQuerySubmitted;
+        _globalSearchBox.SuggestionChosen += OnGlobalSearchSuggestionChosen;
+        _globalSearchBox.ItemsSource = _globalSearchResults;
+        sidebar.Children.Add(_globalSearchBox);
 
         sidebar.Children.Add(new Border
         {
@@ -234,6 +249,8 @@ public sealed partial class MainWindow : Window
         root.Children.Add(headerBorder);
         root.Children.Add(_contentFrame);
         Content = root;
+        _searchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _searchDebounce.Tick += OnSearchDebounceTick;
         var iconCandidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "DevDocsDownloader.ico"),
@@ -250,6 +267,84 @@ public sealed partial class MainWindow : Window
         App.MainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
         ApplyShellState();
         NavigateTo("RunPage");
+    }
+
+    private void OnGlobalSearchTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
+        {
+            return;
+        }
+        _searchDebounce.Stop();
+        _searchDebounce.Start();
+    }
+
+    private async void OnSearchDebounceTick(object? sender, object e)
+    {
+        _searchDebounce.Stop();
+        var query = _globalSearchBox.Text.Trim();
+        _globalSearchResults.Clear();
+        if (query.Length < 2)
+        {
+            return;
+        }
+        try
+        {
+            var payload = await App.BackendHost.Client.SearchAsync(query, 10) as JsonObject;
+            var results = payload?["results"] as JsonArray;
+            foreach (var row in results?.OfType<JsonObject>() ?? [])
+            {
+                var language = row["slug"]?.GetValue<string>() ?? "";
+                var path = row["path"]?.GetValue<string>() ?? "";
+                var title = row["title"]?.GetValue<string>() ?? path;
+                if (string.IsNullOrWhiteSpace(language) || string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+                _globalSearchResults.Add($"{language}|{path}|{title}");
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async void OnGlobalSearchQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        if (args.ChosenSuggestion is string chosen)
+        {
+            await OpenSearchResultAsync(chosen);
+            return;
+        }
+        if (_globalSearchResults.Count > 0)
+        {
+            await OpenSearchResultAsync(_globalSearchResults[0]);
+        }
+    }
+
+    private async void OnGlobalSearchSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is string chosen)
+        {
+            await OpenSearchResultAsync(chosen);
+        }
+    }
+
+    private async Task OpenSearchResultAsync(string encoded)
+    {
+        var parts = encoded.Split('|', 3);
+        if (parts.Length < 2)
+        {
+            return;
+        }
+        NavigateTo("OutputBrowserPage");
+        var page = GetCachedPage<OutputBrowserPage>();
+        if (page is null)
+        {
+            return;
+        }
+        await page.FocusBundleAsync(parts[0]);
+        await page.OpenRelativePathAsync(parts[1]);
     }
 
     private void OnClosed(object sender, WindowEventArgs args)

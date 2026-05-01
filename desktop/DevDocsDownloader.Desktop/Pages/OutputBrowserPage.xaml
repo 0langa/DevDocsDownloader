@@ -36,7 +36,12 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <ListView x:Name="BundlesList" SelectionChanged="OnBundleSelectionChanged" />
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Favorites" FontWeight="SemiBold" />
+                    <ListView x:Name="FavoritesList" SelectionChanged="OnFavoriteSelectionChanged" MaxHeight="140" />
+                    <TextBlock Text="Bundles" FontWeight="SemiBold" />
+                    <ListView x:Name="BundlesList" SelectionChanged="OnBundleSelectionChanged" />
+                </StackPanel>
                 <TextBlock x:Name="StorageSummaryText" Grid.Row="1" Opacity="0.75" TextWrapping="WrapWholeWords" />
             </Grid>
             <controls:TreeView x:Name="FilesTree" Grid.Column="1" SelectionChanged="OnTreeSelectionChanged" />
@@ -45,10 +50,18 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TextBlock x:Name="PreviewPathText" FontWeight="SemiBold" TextWrapping="WrapWholeWords" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock x:Name="PreviewPathText" FontWeight="SemiBold" TextWrapping="WrapWholeWords" />
+                    <Button x:Name="FavoriteButton" Content="☆ Favorite" Click="OnToggleFavorite" IsEnabled="False" />
+                </StackPanel>
                 <TextBlock x:Name="BundleDetailText" Grid.Row="1" Opacity="0.75" TextWrapping="WrapWholeWords" />
-                <TextBox x:Name="PreviewBox" Grid.Row="2" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" />
+                <TextBox x:Name="PreviewBox" Grid.Row="2" AcceptsReturn="True" TextWrapping="Wrap" IsReadOnly="True" KeyDown="OnPreviewKeyDown" />
+                <StackPanel Grid.Row="3" Spacing="4">
+                    <TextBlock Text="Related documents" FontWeight="SemiBold" />
+                    <ListView x:Name="RelatedDocsList" SelectionChanged="OnRelatedSelectionChanged" MaxHeight="140" />
+                </StackPanel>
             </Grid>
         </Grid>
     </Grid>

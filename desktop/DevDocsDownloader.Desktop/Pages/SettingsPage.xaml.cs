@@ -113,6 +113,8 @@ public sealed partial class SettingsPage : Page
                         .ToArray()
                 ),
                 ["dash_profile_overrides"] = ParseJsonObjectOrEmpty(DashProfileOverridesBox.Text),
+                ["semantic_search_enabled"] = SemanticEnabledBox.IsChecked == true,
+                ["semantic_search_model"] = SemanticModelBox.Text?.Trim() ?? "",
             });
             App.MainWindow.GetCachedPage<OutputBrowserPage>()?.UpdateOutputRoot();
             var outputChanged = !string.Equals(previousOutputRoot, App.MainViewModel.CurrentOutputRoot, StringComparison.OrdinalIgnoreCase);
@@ -145,6 +147,14 @@ public sealed partial class SettingsPage : Page
             DashProfileOverridesBox.Text = string.IsNullOrWhiteSpace(App.MainViewModel.DashProfileOverridesJson)
                 ? "{}"
                 : App.MainViewModel.DashProfileOverridesJson;
+            var settings = await App.BackendHost.Client.GetSettingsAsync() as JsonObject ?? new JsonObject();
+            SemanticEnabledBox.IsChecked = settings["semantic_search_enabled"]?.GetValue<bool?>() ?? true;
+            SemanticModelBox.Text = settings["semantic_search_model"]?.GetValue<string>() ?? "";
+            var semanticProbe = await App.BackendHost.Client.SearchSemanticAsync("test", 1) as JsonObject;
+            var mode = semanticProbe?["mode"]?.GetValue<string>() ?? "fts5";
+            SemanticStatusText.Text = mode.Equals("semantic", StringComparison.OrdinalIgnoreCase)
+                ? "Semantic backend: active"
+                : "Semantic backend: unavailable, FTS5 fallback active";
             StatusText.Text = $"Loaded settings from desktop backend. Log path: {App.MainViewModel.BackendLogPath}";
         }
         catch (Exception exc)

@@ -379,6 +379,49 @@ def create_app(
         rows = await service.list_languages(source=source, force_refresh=force_refresh)
         return [row.model_dump(mode="json") for row in rows]
 
+    @app.get("/search", dependencies=[Depends(require_auth)])
+    async def search_endpoint(
+        q: str,
+        limit: int = Query(default=25, ge=1, le=100),
+        language: str | None = None,
+    ) -> dict[str, Any]:
+        rows = await service.search(query=q, limit=limit, language=language)
+        return {"mode": "fts5", "results": rows}
+
+    @app.get("/search/semantic", dependencies=[Depends(require_auth)])
+    async def semantic_search_endpoint(
+        q: str,
+        limit: int = Query(default=25, ge=1, le=100),
+        language: str | None = None,
+    ) -> JSONResponse:
+        payload = await service.search_semantic(query=q, limit=limit, language=language)
+        response = JSONResponse(content=payload)
+        response.headers["X-Search-Mode"] = str(payload.get("mode") or "fts5")
+        return response
+
+    @app.get("/xref", dependencies=[Depends(require_auth)])
+    async def xref_endpoint(term: str, limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+        return {"term": term, "results": await service.xref(term=term, limit=limit)}
+
+    @app.get("/favorites", dependencies=[Depends(require_auth)])
+    async def get_favorites() -> dict[str, Any]:
+        return {"items": service.read_favorites()}
+
+    @app.put("/favorites", dependencies=[Depends(require_auth)])
+    async def put_favorites(payload: dict[str, Any]) -> dict[str, Any]:
+        items = payload.get("items")
+        if not isinstance(items, list):
+            items = []
+        return {"items": service.save_favorites([item for item in items if isinstance(item, dict)])}
+
+    @app.get("/recents", dependencies=[Depends(require_auth)])
+    async def get_recents() -> dict[str, Any]:
+        return {"items": service.read_recents()}
+
+    @app.post("/recents", dependencies=[Depends(require_auth)])
+    async def post_recent(payload: dict[str, Any]) -> dict[str, Any]:
+        return {"items": service.push_recent(payload)}
+
     @app.get("/presets", dependencies=[Depends(require_auth)])
     async def presets() -> dict[str, list[str]]:
         return service.list_presets()

@@ -8,6 +8,7 @@ import httpx
 from doc_ingest.config import load_config
 from doc_ingest.desktop_backend import create_app
 from doc_ingest.desktop_settings import DesktopSettings, DesktopSettingsStore
+from doc_ingest.indexer import rebuild_language_index
 from doc_ingest.models import DryRunResult, RunSummary
 from doc_ingest.services import (
     CatalogRefreshResult,
@@ -471,5 +472,59 @@ def test_desktop_backend_cancel_sets_cancelling_then_cancelled(tmp_path: Path, m
             stream = await client.get(f"/jobs/{job_id}/events", headers=headers)
             assert stream.status_code == 200
             assert '"phase": "cancelling"' in stream.text or '"phase": "cancelled"' in stream.text
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_search_xref_favorites_recents_endpoints(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config = load_config(root=tmp_path, runtime_mode="repo")
+        language_dir = config.paths.markdown_dir / "python" / "docs" / "guide"
+        language_dir.mkdir(parents=True, exist_ok=True)
+        (language_dir / "intro.md").write_text(
+            "---\ntitle: Intro\n---\n# Intro\n\nUse asyncio and event_loop().\n", encoding="utf-8"
+        )
+        rebuild_language_index(output_dir=config.paths.output_dir, language_slug="python")
+
+        app = create_app(config, token="secret")
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            search_response = await client.get("/search?q=asyncio", headers=headers)
+            assert search_response.status_code == 200
+            assert search_response.json()["mode"] == "fts5"
+            assert search_response.json()["results"][0]["slug"] == "python"
+
+            semantic_response = await client.get("/search/semantic?q=asyncio", headers=headers)
+            assert semantic_response.status_code == 200
+            assert semantic_response.headers["X-Search-Mode"] == "fts5"
+
+            xref_response = await client.get("/xref?term=event_loop", headers=headers)
+            assert xref_response.status_code == 200
+            assert "python" in xref_response.json()["results"]
+
+            put_favorites = await client.put(
+                "/favorites",
+                headers=headers,
+                json={"items": [{"language": "python", "path": "docs/guide/intro.md", "title": "Intro"}]},
+            )
+            assert put_favorites.status_code == 200
+            assert len(put_favorites.json()["items"]) == 1
+
+            get_favorites = await client.get("/favorites", headers=headers)
+            assert get_favorites.status_code == 200
+            assert get_favorites.json()["items"][0]["title"] == "Intro"
+
+            post_recent = await client.post(
+                "/recents",
+                headers=headers,
+                json={"language": "python", "path": "docs/guide/intro.md", "title": "Intro"},
+            )
+            assert post_recent.status_code == 200
+            assert post_recent.json()["items"][0]["language"] == "python"
+
+            get_recents = await client.get("/recents", headers=headers)
+            assert get_recents.status_code == 200
+            assert get_recents.json()["items"][0]["path"] == "docs/guide/intro.md"
 
     asyncio.run(scenario())

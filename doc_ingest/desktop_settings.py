@@ -38,6 +38,9 @@ class DesktopSettings(BaseModel):
     dash_large_docset_warning_mb: int = 50
     dash_warning_suppressed_slugs: list[str] = Field(default_factory=list)
     dash_profile_overrides: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+    semantic_search_enabled: bool = True
+    semantic_search_model: str = ""
+    semantic_search_available: bool = False
 
 
 class DesktopSettingsStore:
