@@ -59,6 +59,55 @@ def test_service_output_reading_and_path_safety(tmp_path: Path) -> None:
     assert not language_dir.exists()
 
 
+def test_service_reads_output_validation_and_bundle_format_flags(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    language_dir = config.paths.markdown_dir / "python"
+    write_json(language_dir / "_meta.json", {"language": "Python", "source": "devdocs", "source_slug": "python"})
+    write_json(language_dir / "validation.json", {"score": 0.91, "document_results": []})
+    write_text(language_dir / "python.epub", "epub")
+    write_text(language_dir / "_site" / "python" / "index.html", "<html></html>")
+
+    service = DocumentationService(config)
+    validation = service.read_output_validation("python")
+    bundles = service.list_output_bundles()
+
+    assert validation["score"] == 0.91
+    assert bundles[0].has_html_site is True
+    assert bundles[0].epub_path == "python.epub"
+
+
+def test_service_compare_output_runs(tmp_path: Path) -> None:
+    config = load_config(root=tmp_path)
+    language_dir = config.paths.markdown_dir / "python"
+    write_json(
+        language_dir / "manifest.json",
+        {
+            "documents": [
+                {"path": "reference/a.md", "sha256": "new"},
+                {"path": "reference/b.md", "sha256": "same"},
+            ]
+        },
+    )
+    write_json(
+        language_dir / ".history" / "20260501T000000Z.json",
+        {
+            "documents": [
+                {"path": "reference/a.md", "sha256": "old"},
+                {"path": "reference/c.md", "sha256": "gone"},
+                {"path": "reference/b.md", "sha256": "same"},
+            ]
+        },
+    )
+
+    service = DocumentationService(config)
+    reports = service.read_reports()
+    diff = service.compare_output_runs("python", "manifest.json", ".history/20260501T000000Z.json")
+
+    assert "python" in reports.run_manifests
+    assert reports.run_manifests["python"][0] == "manifest.json"
+    assert diff["summary"] == {"added": 0, "removed": 1, "changed": 1}
+
+
 def test_service_report_checkpoint_and_cache_readers(tmp_path: Path) -> None:
     config = load_config(root=tmp_path)
     config.paths.markdown_dir.mkdir(parents=True, exist_ok=True)

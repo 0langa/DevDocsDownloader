@@ -79,12 +79,15 @@ class AppConfig(BaseModel):
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
-    chunk_strategy: Literal["chars", "tokens"] = "chars"
+    chunk_strategy: Literal["chars", "tokens", "semantic"] = "chars"
     chunk_max_tokens: int = 1_000
     chunk_overlap_tokens: int = 100
     cache_policy: Literal["use-if-present", "ttl", "always-refresh", "validate-if-possible"] = "use-if-present"
     cache_ttl_hours: int | None = None
     max_cache_size_mb: int = 2048
+    output_template: str = "default"
+    output_formats: list[Literal["markdown", "html", "epub"]] = ["markdown"]
+    manifest_history_keep: int = 10
 
 
 def load_config(

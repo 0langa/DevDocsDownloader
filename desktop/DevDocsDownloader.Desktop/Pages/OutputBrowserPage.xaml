@@ -19,6 +19,7 @@
             <Button Content="Refresh bundles" Click="OnRefreshBundles" />
             <Button x:Name="RefreshTreeButton" Content="Reload selected bundle" Click="OnReloadTree" IsEnabled="False" />
             <Button Content="Open output folder" Click="OnOpenOutputFolder" />
+            <Button x:Name="OpenWebsiteButton" Content="Open as website" Click="OnOpenWebsite" IsEnabled="False" />
             <Button x:Name="DeleteBundleButton" Content="Delete selected bundle" Click="OnDeleteBundle" IsEnabled="False" />
             <Button Content="Prune report history" Click="OnPruneReportHistory" />
             <TextBlock x:Name="StatusText" VerticalAlignment="Center" Opacity="0.75" />

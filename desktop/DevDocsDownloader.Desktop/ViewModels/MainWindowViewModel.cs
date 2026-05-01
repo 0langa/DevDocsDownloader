@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DevDocsDownloader.Desktop.Services;
@@ -115,6 +116,15 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private string _dashWarningSuppressedSlugs = "";
+
+    [ObservableProperty]
+    private string _outputTemplate = "default";
+
+    [ObservableProperty]
+    private string _outputFormats = "markdown";
+
+    [ObservableProperty]
+    private string _dashProfileOverridesJson = "{}";
 
     [ObservableProperty]
     private JsonObject _sourceHealth = new();
@@ -427,6 +437,18 @@ public partial class MainWindowViewModel : ObservableObject
         if (settings["dash_warning_suppressed_slugs"] is JsonArray slugs)
         {
             DashWarningSuppressedSlugs = string.Join(",", slugs.Select(x => x?.GetValue<string>() ?? "").Where(x => !string.IsNullOrWhiteSpace(x)));
+        }
+        OutputTemplate = settings["output_template"]?.GetValue<string>() ?? OutputTemplate;
+        if (settings["output_formats"] is JsonArray outputFormats)
+        {
+            OutputFormats = string.Join(",", outputFormats.Select(x => x?.GetValue<string>() ?? "").Where(x => !string.IsNullOrWhiteSpace(x)));
+        }
+        if (settings["dash_profile_overrides"] is JsonObject overrides)
+        {
+            DashProfileOverridesJson = overrides.ToJsonString(new()
+            {
+                WriteIndented = true,
+            });
         }
     }
 

@@ -1097,6 +1097,8 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
                 chunk_iterable = (
                     _token_chunks(text, **token_kwargs)
                     if plan.chunk_strategy == "tokens"
+                    else _semantic_chunks(text, max_chars=max_chars)
+                    if plan.chunk_strategy == "semantic"
                     else _char_chunks(text, **char_kwargs)
                 )
                 for chunk in chunk_iterable:
@@ -1116,6 +1118,7 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
                         "source_url": doc.source_url,
                         "order_hint": doc.order_hint,
                         "chunk_index": index,
+                        "chunk_total": 0,
                         "text_path": f"chunks/{filename}",
                         "char_start": start,
                         "char_end": end,
@@ -1129,6 +1132,8 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
                                 "token_count": token_end - token_start,
                             }
                         )
+                    if plan.chunk_strategy == "semantic":
+                        record.update(_semantic_chunk_metadata(chunk_text, doc.slug))
                     handle.write(json.dumps(record, ensure_ascii=False).encode("utf-8"))
                     handle.write(b"\n")
                     chunk_count += 1
@@ -1136,7 +1141,36 @@ def write_chunks(plan: CompilationPlan, *, durability: DurabilityMode = "balance
         if durability == "strict":
             os.fsync(handle.fileno())
     temp_path.replace(manifest_path)
+    _fill_chunk_totals(manifest_path)
     return chunk_count
+
+
+def _fill_chunk_totals(manifest_path: Path) -> None:
+    lines = [line for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for line in lines:
+        row = json.loads(line)
+        grouped.setdefault(str(row.get("document_slug") or ""), []).append(row)
+    for rows in grouped.values():
+        total = len(rows)
+        for row in rows:
+            row["chunk_total"] = total
+            if row.get("chunk_strategy") == "semantic":
+                chunk_path = manifest_path.parent.parent / str(row.get("text_path") or "")
+                if chunk_path.exists():
+                    original = chunk_path.read_text(encoding="utf-8")
+                    if not original.startswith("<!-- chunk:"):
+                        heading = str(
+                            row.get("section_heading") or row.get("parent_heading") or row.get("document_title") or ""
+                        )
+                        header = f"<!-- chunk: {int(row.get('chunk_index', 0)) + 1}/{total} -->\n"
+                        if heading:
+                            header += f"# {heading}\n\n"
+                        chunk_path.write_text((header + original.lstrip()).rstrip() + "\n", encoding="utf-8")
+    out: list[str] = []
+    for rows in grouped.values():
+        out.extend(json.dumps(row, ensure_ascii=False) for row in rows)
+    write_text(manifest_path, "\n".join(out) + "\n")
 
 
 def _char_chunks(text: str, *, max_chars: int, overlap: int) -> Iterable[tuple[int, int, int, str, int, int]]:
@@ -1182,6 +1216,137 @@ def _token_chunks(text: str, *, max_tokens: int, overlap_tokens: int) -> Iterabl
         token_start = max(token_end - overlap, token_start + 1)
         char_start = max(0, len(encoding.decode(tokens[:token_start])))
         index += 1
+
+
+def _semantic_chunks(text: str, *, max_chars: int) -> Iterable[tuple[int, int, int, str, int, int]]:
+    if not text:
+        return
+
+    @dataclass(slots=True)
+    class _Section:
+        text: str
+        start: int
+        end: int
+        heading_level: int
+        heading: str
+        parent_h2: str
+
+    lines = text.splitlines(keepends=True)
+    offsets: list[int] = []
+    cursor = 0
+    for line in lines:
+        offsets.append(cursor)
+        cursor += len(line)
+
+    sections: list[_Section] = []
+    start_line = 0
+    heading_level = 0
+    heading = ""
+    parent_h2 = ""
+    current_parent_h2 = ""
+    in_fence = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+        if in_fence:
+            continue
+        is_h2 = stripped.startswith("## ")
+        is_h3 = stripped.startswith("### ")
+        if not (is_h2 or is_h3):
+            continue
+        if i > start_line:
+            section_text = "".join(lines[start_line:i])
+            if section_text.strip():
+                sections.append(
+                    _Section(
+                        text=section_text,
+                        start=offsets[start_line] if start_line < len(offsets) else 0,
+                        end=offsets[i] if i < len(offsets) else len(text),
+                        heading_level=heading_level,
+                        heading=heading,
+                        parent_h2=parent_h2,
+                    )
+                )
+        if is_h2:
+            current_parent_h2 = stripped[3:].strip()
+            heading_level = 2
+            heading = current_parent_h2
+            parent_h2 = current_parent_h2
+        else:
+            heading_level = 3
+            heading = stripped[4:].strip()
+            parent_h2 = current_parent_h2
+        start_line = i
+    if start_line < len(lines):
+        section_text = "".join(lines[start_line:])
+        if section_text.strip():
+            sections.append(
+                _Section(
+                    text=section_text,
+                    start=offsets[start_line] if start_line < len(offsets) else 0,
+                    end=len(text),
+                    heading_level=heading_level,
+                    heading=heading,
+                    parent_h2=parent_h2,
+                )
+            )
+    if not sections:
+        yield 0, 0, len(text), text, 0, 0
+        return
+
+    soft_limit = int(max_chars * 1.5)
+    pending: list[_Section] = []
+    index = 0
+
+    def _emit(group: list[_Section], chunk_index: int) -> tuple[int, int, int, str, int, int]:
+        body = "".join(item.text for item in group).lstrip()
+        if group and group[0].heading_level == 3 and group[0].parent_h2:
+            prefix = f"## {group[0].parent_h2}\n\n"
+            if not body.startswith(prefix):
+                body = prefix + body
+        start = group[0].start
+        end = group[-1].end
+        return chunk_index, start, end, body, 0, 0
+
+    for section in sections:
+        if pending and len("".join(item.text for item in pending)) + len(section.text) > soft_limit:
+            yield _emit(pending, index)
+            index += 1
+            pending = [section]
+            continue
+
+        if pending:
+            last = pending[-1]
+            if last.heading_level == 2 and section.heading_level == 3:
+                combined_size = len("".join(item.text for item in pending)) + len(section.text)
+                if combined_size <= soft_limit:
+                    pending.append(section)
+                    continue
+            pending.append(section)
+            continue
+
+        pending = [section]
+
+    if pending:
+        yield _emit(pending, index)
+
+
+def _semantic_chunk_metadata(chunk_text: str, parent_slug: str) -> dict[str, Any]:
+    parent_heading = ""
+    section_heading = ""
+    for line in chunk_text.splitlines():
+        if line.startswith("# ") and not section_heading:
+            section_heading = line[2:].strip()
+        if line.startswith("## ") and not parent_heading:
+            parent_heading = line[3:].strip()
+        if line.startswith("### ") and not section_heading:
+            section_heading = line[4:].strip()
+    return {
+        "parent_slug": parent_slug,
+        "parent_heading": parent_heading,
+        "section_heading": section_heading or parent_heading,
+    }
 
 
 def _anchor(text: str) -> str:

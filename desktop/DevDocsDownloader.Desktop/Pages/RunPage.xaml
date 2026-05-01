@@ -34,6 +34,13 @@
                             <x:String>full</x:String>
                         </ComboBox>
                         <ComboBox x:Name="SourceBox" Header="Preferred source" SelectionChanged="OnFormChanged" />
+                        <ComboBox x:Name="TemplateBox" Header="Template" SelectionChanged="OnFormChanged">
+                            <x:String>default</x:String>
+                            <x:String>detailed</x:String>
+                            <x:String>minimal</x:String>
+                            <x:String>api-reference</x:String>
+                        </ComboBox>
+                        <TextBox x:Name="OutputFormatsBox" Header="Output formats (comma-separated)" Text="markdown" />
                         <CheckBox x:Name="ValidateOnlyBox" Content="Validate only existing output" Checked="OnFormChanged" Unchecked="OnFormChanged" />
                         <CheckBox x:Name="ForceRefreshBox" Content="Force refresh source cache" Checked="OnFormChanged" Unchecked="OnFormChanged" />
                         <StackPanel Orientation="Horizontal" Spacing="8">

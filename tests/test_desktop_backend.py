@@ -16,6 +16,7 @@ from doc_ingest.services import (
     RunLanguageRequest,
     ServiceEvent,
 )
+from doc_ingest.utils.filesystem import write_json
 
 
 def test_load_config_desktop_mode_uses_per_user_style_paths(tmp_path: Path, monkeypatch) -> None:
@@ -351,6 +352,43 @@ def test_desktop_backend_checkpoint_stale_endpoints(tmp_path: Path) -> None:
             assert deleted.json()["deleted"] == 1
             assert not (config.paths.checkpoints_dir / "stale.json").exists()
             assert not (config.paths.state_dir / "stale.json").exists()
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_output_validation_endpoint(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config = load_config(root=tmp_path, runtime_mode="repo")
+        write_json(config.paths.markdown_dir / "python" / "validation.json", {"score": 0.88, "document_results": []})
+        app = create_app(config, token="secret")
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.get("/output/python/validation", headers=headers)
+            assert response.status_code == 200
+            assert response.json()["score"] == 0.88
+
+    asyncio.run(scenario())
+
+
+def test_desktop_backend_compare_runs_endpoint(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config = load_config(root=tmp_path, runtime_mode="repo")
+        language_dir = config.paths.markdown_dir / "python"
+        write_json(language_dir / "manifest.json", {"documents": [{"path": "a.md", "sha256": "new"}]})
+        write_json(
+            language_dir / ".history" / "20260501T000000Z.json", {"documents": [{"path": "a.md", "sha256": "old"}]}
+        )
+        app = create_app(config, token="secret")
+        transport = httpx.ASGITransport(app=app)
+        headers = {"Authorization": "Bearer secret"}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.get(
+                "/reports/compare-runs?language_slug=python&current_manifest=manifest.json&previous_manifest=.history%2F20260501T000000Z.json",
+                headers=headers,
+            )
+            assert response.status_code == 200
+            assert response.json()["summary"]["changed"] == 1
 
     asyncio.run(scenario())
 

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Text.Json.Nodes;
+using System.Collections.Generic;
 using DevDocsDownloader.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -21,6 +23,7 @@ public sealed partial class OutputBrowserPage : Page
         public int FileCount { get; init; }
         public int ChunkCount { get; init; }
         public string GeneratedAt { get; init; } = "";
+        public bool HasHtmlSite { get; init; }
 
         public override string ToString() => $"{Language} ({Source}, {TotalDocuments} docs, {FormatBytes(BundleBytes)})";
     }
@@ -36,6 +39,7 @@ public sealed partial class OutputBrowserPage : Page
 
     private readonly List<BundleItem> _bundles = [];
     private BundleItem? _selectedBundle;
+    private JsonObject? _currentValidation;
     private bool _initialized;
 
     public OutputBrowserPage()
@@ -112,7 +116,9 @@ public sealed partial class OutputBrowserPage : Page
         _selectedBundle = bundle;
         RefreshTreeButton.IsEnabled = true;
         DeleteBundleButton.IsEnabled = true;
+        OpenWebsiteButton.IsEnabled = bundle.HasHtmlSite;
         BundleDetailText.Text = FormatBundleDetail(bundle);
+        _currentValidation = await App.BackendHost.Client.GetOutputValidationAsync(bundle.LanguageSlug) as JsonObject;
         await LoadTreeAsync(bundle);
     }
 
@@ -127,6 +133,7 @@ public sealed partial class OutputBrowserPage : Page
             var result = await App.BackendHost.Client.GetOutputFileAsync(_selectedBundle.LanguageSlug, node.RelativePath);
             PreviewPathText.Text = $"{_selectedBundle.LanguageSlug}/{node.RelativePath}";
             PreviewBox.Text = result?["content"]?.GetValue<string>() ?? JsonFormatter.Format(result);
+            AppendQualityHint(node.RelativePath);
             App.MainViewModel.RecordOutputSelection(_selectedBundle.LanguageSlug, node.RelativePath);
         }
         catch (Exception exc)
@@ -159,12 +166,14 @@ public sealed partial class OutputBrowserPage : Page
                     FileCount = row["file_count"]?.GetValue<int?>() ?? 0,
                     ChunkCount = row["chunk_count"]?.GetValue<int?>() ?? 0,
                     GeneratedAt = row["generated_at"]?.GetValue<string>() ?? "",
+                    HasHtmlSite = row["has_html_site"]?.GetValue<bool?>() ?? false,
                 });
             }
             BundlesList.ItemsSource = null;
             BundlesList.ItemsSource = _bundles.OrderBy(item => item.Language).ToList();
             RefreshTreeButton.IsEnabled = false;
             DeleteBundleButton.IsEnabled = false;
+            OpenWebsiteButton.IsEnabled = false;
             BundleDetailText.Text = "";
             StatusText.Text = _bundles.Count == 0 ? "No output bundles found yet." : $"Loaded {_bundles.Count} bundles.";
             await RefreshStorageSummaryAsync();
@@ -200,7 +209,7 @@ public sealed partial class OutputBrowserPage : Page
                 StatusText.Text = "No tree data returned.";
                 return;
             }
-            FilesTree.RootNodes.Add(BuildTree(root));
+            FilesTree.RootNodes.Add(BuildTree(root, BuildValidationIndex()));
             StatusText.Text = $"Loaded {bundle.Language} output tree.";
             if (!string.IsNullOrWhiteSpace(App.MainViewModel.LastOutputRelativePath))
             {
@@ -313,6 +322,66 @@ public sealed partial class OutputBrowserPage : Page
             $"Bundle details: {bundle.TotalDocuments} docs, {bundle.FileCount} file(s), {bundle.ChunkCount} chunk(s), {FormatBytes(bundle.BundleBytes)}, generated {generated}.";
     }
 
+    private void AppendQualityHint(string relativePath)
+    {
+        if (_currentValidation?["document_results"] is not JsonArray docs)
+        {
+            return;
+        }
+        var hit = docs
+            .OfType<JsonObject>()
+            .FirstOrDefault(row =>
+            {
+                var path = row["document_path"]?.GetValue<string>() ?? "";
+                return path.Replace('\\', '/').EndsWith(relativePath, StringComparison.OrdinalIgnoreCase);
+            });
+        if (hit is null)
+        {
+            return;
+        }
+        var score = hit["quality_score"]?.GetValue<double?>() ?? 1.0;
+        var issues = hit["issues"] as JsonArray;
+        var topIssue = issues?.OfType<JsonObject>().FirstOrDefault()?["message"]?.GetValue<string>() ?? "No issues";
+        BundleDetailText.Text = $"{FormatBundleDetail(_selectedBundle!)} Quality {score:0.00} | {topIssue}";
+    }
+
+    private Dictionary<string, (double Score, string Issue)> BuildValidationIndex()
+    {
+        var map = new Dictionary<string, (double Score, string Issue)>(StringComparer.OrdinalIgnoreCase);
+        if (_currentValidation?["document_results"] is not JsonArray docs)
+        {
+            return map;
+        }
+        foreach (var row in docs.OfType<JsonObject>())
+        {
+            var path = (row["document_path"]?.GetValue<string>() ?? "").Replace('\\', '/');
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+            var score = row["quality_score"]?.GetValue<double?>() ?? 1.0;
+            var issue = (row["issues"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault()?["message"]?.GetValue<string>() ?? "No issues";
+            map[path] = (score, issue);
+        }
+        return map;
+    }
+
+    private void OnOpenWebsite(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBundle is null || !_selectedBundle.HasHtmlSite)
+        {
+            return;
+        }
+        var path = Path.Combine(_selectedBundle.Path, "_site", _selectedBundle.LanguageSlug, "index.html");
+        if (!File.Exists(path))
+        {
+            StatusText.Text = "Website index is missing.";
+            return;
+        }
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        StatusText.Text = $"Opened website: {path}";
+    }
+
     private static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB"];
@@ -326,20 +395,32 @@ public sealed partial class OutputBrowserPage : Page
         return string.Format(CultureInfo.InvariantCulture, "{0:0.#} {1}", value, units[unitIndex]);
     }
 
-    private static TreeViewNode BuildTree(JsonObject node)
+    private static TreeViewNode BuildTree(JsonObject node, IReadOnlyDictionary<string, (double Score, string Issue)> qualityMap)
     {
+        var relativePath = node["relative_path"]?.GetValue<string>() ?? ".";
+        var name = node["name"]?.GetValue<string>() ?? ".";
+        var isDir = node["is_dir"]?.GetValue<bool?>() ?? false;
+        if (!isDir)
+        {
+            var hit = qualityMap.FirstOrDefault(row => row.Key.EndsWith(relativePath, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(hit.Key))
+            {
+                var grade = hit.Value.Score >= 0.9 ? "A" : hit.Value.Score >= 0.75 ? "B" : hit.Value.Score >= 0.6 ? "C" : "D";
+                name = $"{name} [{grade}]";
+            }
+        }
         var outputNode = new OutputNode
         {
-            Name = node["name"]?.GetValue<string>() ?? ".",
-            RelativePath = node["relative_path"]?.GetValue<string>() ?? ".",
-            IsDir = node["is_dir"]?.GetValue<bool?>() ?? false,
+            Name = name,
+            RelativePath = relativePath,
+            IsDir = isDir,
         };
         var treeNode = new TreeViewNode { Content = outputNode, IsExpanded = outputNode.RelativePath is "." };
         if (node["children"] is JsonArray children)
         {
             foreach (var child in children.OfType<JsonObject>())
             {
-                treeNode.Children.Add(BuildTree(child));
+                treeNode.Children.Add(BuildTree(child, qualityMap));
             }
         }
         return treeNode;

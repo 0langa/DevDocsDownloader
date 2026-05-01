@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from pathlib import Path
@@ -421,6 +422,7 @@ def validate_documents(
             text = doc_path.read_text(encoding="utf-8")
             title = _first_heading(text)
             issues = _validate_links(text) + _validate_conversion_quality(text)
+            issues.extend(_check_links(text, current_path=doc_path, language_dir=language_dir))
             if doc_path.name in duplicate_links:
                 issues.append(
                     ValidationIssue(
@@ -442,9 +444,81 @@ def validate_documents(
                         source_url=_source_url(text),
                         issues=issues,
                         context=_first_non_empty_body_line(text),
+                        integrity_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                        quality_score=round(max(0.0, 1.0 - min(0.95, 0.12 * len(issues))), 2),
                     )
                 )
     return results
+
+
+def _check_links(text: str, *, current_path: Path, language_dir: Path) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for marker, _label, target in _iter_links_outside_code(text):
+        if marker:
+            continue
+        raw = target.strip()
+        if not raw or raw.startswith(("http://", "https://", "mailto:", "tel:", "dash://", "data:")):
+            continue
+        if raw.startswith("#"):
+            anchor = raw[1:]
+            if anchor and not _has_anchor(text, anchor):
+                issues.append(
+                    ValidationIssue(
+                        level="warning",
+                        code="broken_internal_link",
+                        message=f"Anchor target #{anchor} not found in current document.",
+                    )
+                )
+            continue
+        rel, anchor = (raw.split("#", 1) + [""])[:2]
+        target_path = (current_path.parent / rel).resolve()
+        try:
+            target_path.relative_to(language_dir.resolve())
+        except ValueError:
+            issues.append(
+                ValidationIssue(
+                    level="warning",
+                    code="broken_internal_link",
+                    message=f"Relative link escapes language root: {raw}",
+                )
+            )
+            continue
+        if not target_path.exists():
+            issues.append(
+                ValidationIssue(
+                    level="warning",
+                    code="broken_internal_link",
+                    message=f"Relative link target missing: {raw}",
+                )
+            )
+            continue
+        if anchor:
+            target_text = target_path.read_text(encoding="utf-8")
+            if not _has_anchor(target_text, anchor):
+                issues.append(
+                    ValidationIssue(
+                        level="warning",
+                        code="broken_internal_link",
+                        message=f"Anchor #{anchor} not found in target {rel}.",
+                    )
+                )
+    return issues
+
+
+def _has_anchor(text: str, anchor: str) -> bool:
+    if not anchor:
+        return True
+    normalized = anchor.strip().lower()
+    explicit = {value.strip().lower() for value in _ANCHOR_RE.findall(text)}
+    if normalized in explicit:
+        return True
+    for match in _HEADING_RE.finditer(text):
+        heading = match.group(2).strip().lower()
+        slug = re.sub(r"[^a-z0-9\\s-]", "", heading)
+        slug = re.sub(r"\\s+", "-", slug).strip("-")
+        if slug == normalized:
+            return True
+    return False
 
 
 def _validate_conversion_quality(text: str) -> list[ValidationIssue]:

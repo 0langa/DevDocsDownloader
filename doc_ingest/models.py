@@ -63,6 +63,8 @@ class DocumentValidationResult(BaseModel):
     source_url: str = ""
     issues: list[ValidationIssue] = Field(default_factory=list)
     context: str = ""
+    integrity_hash: str = ""
+    quality_score: float = 1.0
 
 
 class ValidationScoreComponents(BaseModel):

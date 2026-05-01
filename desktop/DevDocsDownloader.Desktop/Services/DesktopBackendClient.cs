@@ -239,6 +239,9 @@ public sealed class DesktopBackendClient
     public Task<JsonNode?> GetOutputMetaAsync(string languageSlug, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/output/{languageSlug}/meta", cancellationToken);
 
+    public Task<JsonNode?> GetOutputValidationAsync(string languageSlug, CancellationToken cancellationToken = default) =>
+        GetJsonAsync($"/output/{languageSlug}/validation", cancellationToken);
+
     public Task<JsonNode?> GetOutputFileAsync(string languageSlug, string path, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/output/{languageSlug}/file?path={Uri.EscapeDataString(path)}", cancellationToken);
 
@@ -247,6 +250,9 @@ public sealed class DesktopBackendClient
 
     public Task<JsonNode?> GetReportsAsync(CancellationToken cancellationToken = default) =>
         GetJsonAsync("/reports", cancellationToken);
+
+    public Task<JsonNode?> CompareRunsAsync(string languageSlug, string currentManifest, string previousManifest, CancellationToken cancellationToken = default) =>
+        GetJsonAsync($"/reports/compare-runs?language_slug={Uri.EscapeDataString(languageSlug)}&current_manifest={Uri.EscapeDataString(currentManifest)}&previous_manifest={Uri.EscapeDataString(previousManifest)}", cancellationToken);
 
     public Task<JsonNode?> GetReportFileAsync(string path, CancellationToken cancellationToken = default) =>
         GetJsonAsync($"/reports/file?path={Uri.EscapeDataString(path)}", cancellationToken);

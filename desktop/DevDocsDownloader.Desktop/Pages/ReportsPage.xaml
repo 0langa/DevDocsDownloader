@@ -20,8 +20,14 @@
             <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="10">
                     <Button Content="Refresh reports" Click="OnRefresh" />
+                    <ComboBox x:Name="CompareLanguageBox" Header="Compare language" SelectionChanged="OnCompareSelectionChanged" />
+                    <ComboBox x:Name="CompareCurrentBox" Header="Current manifest" SelectionChanged="OnCompareSelectionChanged" />
+                    <ComboBox x:Name="ComparePreviousBox" Header="Previous manifest" SelectionChanged="OnCompareSelectionChanged" />
+                    <Button Content="Compare selected runs" Click="OnCompareRuns" />
                     <TextBlock x:Name="SummaryText" TextWrapping="WrapWholeWords" />
                     <TextBlock x:Name="TrendText" TextWrapping="WrapWholeWords" Opacity="0.8" />
+                    <TextBlock x:Name="DiffText" TextWrapping="WrapWholeWords" Opacity="0.8" />
+                    <TextBlock x:Name="LowestDocsText" TextWrapping="WrapWholeWords" Opacity="0.8" />
                     <TextBlock Text="History files" FontWeight="SemiBold" />
                     <ListView x:Name="HistoryList" SelectionChanged="OnHistorySelectionChanged" />
                 </StackPanel>

@@ -101,6 +101,12 @@ public sealed partial class SettingsPage : Page
                 ["emit_chunks"] = App.MainViewModel.EmitChunks,
                 ["catalog_stale_warning_days"] = int.TryParse(CatalogStaleDaysBox.Text, out var staleDays) ? staleDays : 7,
                 ["dash_large_docset_warning_mb"] = int.TryParse(DashLargeWarningMbBox.Text, out var dashMb) ? dashMb : 50,
+                ["output_template"] = OutputTemplateBox.SelectedItem?.ToString() ?? "default",
+                ["output_formats"] = new JsonArray(
+                    OutputFormatsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(x => JsonValue.Create(x))
+                        .ToArray()
+                ),
                 ["dash_warning_suppressed_slugs"] = new JsonArray(
                     DashSuppressedSlugsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                         .Select(x => JsonValue.Create(x))
@@ -133,8 +139,12 @@ public sealed partial class SettingsPage : Page
             MaxCacheSizeBox.Text = App.MainViewModel.MaxCacheSizeMb.ToString();
             CatalogStaleDaysBox.Text = App.MainViewModel.CatalogStaleWarningDays.ToString();
             DashLargeWarningMbBox.Text = App.MainViewModel.DashLargeDocsetWarningMb.ToString();
+            OutputTemplateBox.SelectedItem = App.MainViewModel.OutputTemplate;
+            OutputFormatsBox.Text = App.MainViewModel.OutputFormats;
             DashSuppressedSlugsBox.Text = App.MainViewModel.DashWarningSuppressedSlugs;
-            DashProfileOverridesBox.Text = "{}";
+            DashProfileOverridesBox.Text = string.IsNullOrWhiteSpace(App.MainViewModel.DashProfileOverridesJson)
+                ? "{}"
+                : App.MainViewModel.DashProfileOverridesJson;
             StatusText.Text = $"Loaded settings from desktop backend. Log path: {App.MainViewModel.BackendLogPath}";
         }
         catch (Exception exc)

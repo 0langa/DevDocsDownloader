@@ -136,8 +136,8 @@ def _execute_run(
     cache_policy: CacheFreshnessPolicy = "use-if-present",
     cache_ttl_hours: int | None = None,
 ) -> None:
-    if chunk_strategy not in {"chars", "tokens"}:
-        console.print("[red]--chunk-strategy must be 'chars' or 'tokens'.[/red]")
+    if chunk_strategy not in {"chars", "tokens", "semantic"}:
+        console.print("[red]--chunk-strategy must be 'chars', 'tokens', or 'semantic'.[/red]")
         raise typer.Exit(code=1)
     config = load_config(output_dir=output_dir)
     _setup_logging(config.paths.logs_dir / "run.log", verbosity=verbosity)
@@ -341,7 +341,7 @@ def run(
         "--chunk-strategy",
         help=(
             "Chunk sizing strategy: 'chars' works with baseline dependencies; 'tokens' requires installing the "
-            "tokenizer extra."
+            "tokenizer extra; 'semantic' uses heading-aware chunk boundaries."
         ),
     ),
     chunk_max_tokens: int = typer.Option(
@@ -502,7 +502,9 @@ def bulk(
         400, "--chunk-overlap-chars", min=0, help="Character overlap between adjacent chunks."
     ),
     chunk_strategy: str = typer.Option(
-        "chars", "--chunk-strategy", help="Chunk strategy: chars or tokens. Token mode requires the tokenizer extra."
+        "chars",
+        "--chunk-strategy",
+        help="Chunk strategy: chars, tokens, or semantic. Token mode requires the tokenizer extra.",
     ),
     chunk_max_tokens: int = typer.Option(
         1000, "--chunk-max-tokens", min=100, help="Maximum tokens per chunk for token-based chunking."
@@ -534,8 +536,8 @@ def bulk(
     elif verbose:
         verbosity = "verbose"
 
-    if chunk_strategy not in {"chars", "tokens"}:
-        console.print("[red]--chunk-strategy must be 'chars' or 'tokens'.[/red]")
+    if chunk_strategy not in {"chars", "tokens", "semantic"}:
+        console.print("[red]--chunk-strategy must be 'chars', 'tokens', or 'semantic'.[/red]")
         raise typer.Exit(code=1)
 
     target_key = target.strip().lower()

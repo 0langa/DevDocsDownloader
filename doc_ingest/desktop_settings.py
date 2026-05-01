@@ -28,6 +28,8 @@ class DesktopSettings(BaseModel):
     chunk_strategy: str = "chars"
     chunk_max_tokens: int = 1_000
     chunk_overlap_tokens: int = 100
+    output_template: str = "default"
+    output_formats: list[str] = Field(default_factory=lambda: ["markdown"])
     language_concurrency: int = 3
     bulk_concurrency_policy: BulkConcurrencyPolicy = "static"
     adaptive_min_concurrency: int = 1
@@ -70,6 +72,8 @@ def settings_from_config(config: AppConfig) -> DesktopSettings:
         chunk_strategy=config.chunk_strategy,
         chunk_max_tokens=config.chunk_max_tokens,
         chunk_overlap_tokens=config.chunk_overlap_tokens,
+        output_template=config.output_template,
+        output_formats=list(config.output_formats),
         language_concurrency=config.language_concurrency,
         bulk_concurrency_policy=config.bulk_concurrency_policy,
         adaptive_min_concurrency=config.adaptive_min_concurrency,

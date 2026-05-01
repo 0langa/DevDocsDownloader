@@ -20,13 +20,21 @@ from .models import (
     LanguageRunCheckpoint,
     RunSummary,
 )
+from .output_intelligence import (
+    apply_output_template,
+    compare_manifests,
+    generate_epub,
+    generate_html_site,
+    write_language_manifest,
+    write_validation_json,
+)
 from .pipeline import DocumentationPipeline
 from .progress import CrawlProgressTracker
 from .runtime import SourceRuntime
 from .sources.presets import PRESETS
 from .sources.registry import SourceRegistry
 from .state import load_checkpoint_payload
-from .utils.filesystem import read_json
+from .utils.filesystem import read_json, write_json
 
 
 class ServiceEvent(BaseModel):
@@ -48,6 +56,10 @@ class ServiceEvent(BaseModel):
 ServiceEventSink = Callable[[ServiceEvent], None | Awaitable[None]]
 
 
+def _default_output_formats() -> list[Literal["markdown", "html", "epub"]]:
+    return ["markdown"]
+
+
 class RunLanguageRequest(BaseModel):
     language: str
     mode: CrawlMode = "important"
@@ -60,12 +72,14 @@ class RunLanguageRequest(BaseModel):
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
-    chunk_strategy: Literal["chars", "tokens"] = "chars"
+    chunk_strategy: Literal["chars", "tokens", "semantic"] = "chars"
     chunk_max_tokens: int = 1_000
     chunk_overlap_tokens: int = 100
     cache_policy: CacheFreshnessPolicy = "use-if-present"
     cache_ttl_hours: int | None = None
     dry_run: bool = False
+    template: str | None = None
+    output_formats: list[Literal["markdown", "html", "epub"]] = Field(default_factory=_default_output_formats)
 
 
 class BulkRunRequest(BaseModel):
@@ -83,11 +97,13 @@ class BulkRunRequest(BaseModel):
     emit_chunks: bool = False
     chunk_max_chars: int = 8_000
     chunk_overlap_chars: int = 400
-    chunk_strategy: Literal["chars", "tokens"] = "chars"
+    chunk_strategy: Literal["chars", "tokens", "semantic"] = "chars"
     chunk_max_tokens: int = 1_000
     chunk_overlap_tokens: int = 100
     cache_policy: CacheFreshnessPolicy = "use-if-present"
     cache_ttl_hours: int | None = None
+    template: str | None = None
+    output_formats: list[Literal["markdown", "html", "epub"]] = Field(default_factory=_default_output_formats)
 
 
 class LanguageEntry(BaseModel):
@@ -175,6 +191,8 @@ class OutputBundleSummary(BaseModel):
     has_chunks: bool = False
     has_frontmatter: bool = False
     latest_quality: dict[str, Any] = Field(default_factory=dict)
+    has_html_site: bool = False
+    epub_path: str = ""
 
 
 class OutputStorageSummary(BaseModel):
@@ -226,6 +244,8 @@ class ReportBundle(BaseModel):
     trends_json: dict[str, Any] = Field(default_factory=dict)
     trends_markdown: str = ""
     quality_trends: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    run_diffs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    run_manifests: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class CheckpointSummary(BaseModel):
@@ -341,6 +361,7 @@ class DocumentationService:
                 include_topics=request.include_topics,
                 exclude_topics=request.exclude_topics,
             )
+            self._postprocess_summary_outputs(summary)
             await self._emit_summary_events(summary, event_sink=event_sink)
             await _emit(
                 event_sink, ServiceEvent(event_type="phase_change", language=request.language, phase="completed")
@@ -398,6 +419,7 @@ class DocumentationService:
                 include_topics=request.include_topics,
                 exclude_topics=request.exclude_topics,
             )
+            self._postprocess_summary_outputs(summary)
             await self._emit_summary_events(summary, event_sink=event_sink)
             await _emit(event_sink, ServiceEvent(event_type="phase_change", phase="bulk_completed"))
             return summary
@@ -631,9 +653,17 @@ class DocumentationService:
                         source=str(meta.get("source") or ""),
                         slug=str(meta.get("source_slug") or ""),
                     ),
+                    has_html_site=(language_dir / "_site" / language_dir.name / "index.html").exists(),
+                    epub_path=self._epub_path_for(language_dir),
                 )
             )
         return bundles
+
+    def _epub_path_for(self, language_dir: Path) -> str:
+        candidates = sorted(language_dir.glob("*.epub"))
+        if not candidates:
+            return ""
+        return candidates[0].name
 
     def output_storage_summary(self) -> OutputStorageSummary:
         bundles = self.list_output_bundles()
@@ -737,6 +767,12 @@ class DocumentationService:
         language_root = self._resolve_under(self.config.paths.markdown_dir, language_slug)
         return read_json(self._resolve_under(language_root, "_meta.json"), {})
 
+    def read_output_validation(self, language_slug: str) -> dict[str, Any]:
+        language_root = self._resolve_under(self.config.paths.markdown_dir, language_slug)
+        path = self._resolve_under(language_root, "validation.json")
+        payload = read_json(path, {})
+        return payload if isinstance(payload, dict) else {}
+
     def read_reports(self) -> ReportBundle:
         reports_dir = self.config.paths.reports_dir
         latest_json_path = reports_dir / "run_summary.json"
@@ -757,7 +793,22 @@ class DocumentationService:
             trends_json=read_json(trends_json_path, {}) if trends_json_path.exists() else {},
             trends_markdown=trends_markdown_path.read_text(encoding="utf-8") if trends_markdown_path.exists() else "",
             quality_trends=self._quality_trends_map(limit=10),
+            run_diffs=self._latest_run_diffs(),
+            run_manifests=self._run_manifest_index(),
         )
+
+    def compare_output_runs(self, language_slug: str, current_manifest: str, previous_manifest: str) -> dict[str, Any]:
+        language_root = self._resolve_under(self.config.paths.markdown_dir, language_slug)
+        current_path = self._resolve_under(language_root, current_manifest)
+        previous_path = self._resolve_under(language_root, previous_manifest)
+        current = read_json(current_path, {})
+        previous = read_json(previous_path, {})
+        if not isinstance(current, dict) or not isinstance(previous, dict):
+            return {"summary": {"added": 0, "removed": 0, "changed": 0}, "added": [], "removed": [], "changed": []}
+        diff = compare_manifests(current, previous)
+        diff["current_manifest"] = current_manifest
+        diff["previous_manifest"] = previous_manifest
+        return diff
 
     def read_report_file(self, relative_path: str) -> OutputFileContent:
         path = self._resolve_under(self.config.paths.reports_dir, relative_path)
@@ -979,6 +1030,62 @@ class DocumentationService:
         self.config.chunk_overlap_tokens = request.chunk_overlap_tokens
         self.config.cache_policy = request.cache_policy
         self.config.cache_ttl_hours = request.cache_ttl_hours
+        self.config.output_template = request.template or "default"
+        self.config.output_formats = list(dict.fromkeys(request.output_formats or ["markdown"]))
+
+    def _postprocess_summary_outputs(self, summary: RunSummary) -> None:
+        for report in summary.reports:
+            if report.output_path is None:
+                continue
+            consolidated = Path(report.output_path)
+            language_dir = consolidated.parent
+            manifest = write_language_manifest(
+                language_dir=language_dir,
+                language=report.language,
+                source=report.source,
+                source_slug=report.source_slug,
+                mode=report.mode,
+                keep_history=self.config.manifest_history_keep,
+            )
+            previous = self._latest_history_manifest(language_dir)
+            diff = compare_manifests(manifest, previous)
+            meta_path = language_dir / "_meta.json"
+            meta = read_json(meta_path, {}) if meta_path.exists() else {}
+            if isinstance(meta, dict):
+                meta["latest_manifest"] = manifest
+                meta["latest_manifest_diff"] = diff
+                write_json(meta_path, meta)
+            write_validation_json(language_dir, report.validation)
+            apply_output_template(
+                language_dir,
+                template_name=self.config.output_template,
+                language=report.language,
+                source=report.source,
+                run_date=str(manifest.get("run_date") or ""),
+            )
+            formats = set(self.config.output_formats or ["markdown"])
+            if "html" in formats:
+                generate_html_site(
+                    language_dir,
+                    language_slug=report.slug,
+                    language_name=report.language,
+                )
+            if "epub" in formats:
+                generate_epub(
+                    language_dir,
+                    language_slug=report.slug,
+                    language_name=report.language,
+                )
+
+    def _latest_history_manifest(self, language_dir: Path) -> dict[str, Any] | None:
+        history_dir = language_dir / ".history"
+        if not history_dir.exists():
+            return None
+        manifests = sorted(history_dir.glob("*.json"))
+        if not manifests:
+            return None
+        latest = read_json(manifests[-1], {})
+        return latest if isinstance(latest, dict) else None
 
     def _registry(self) -> SourceRegistry:
         return SourceRegistry(
@@ -1079,6 +1186,38 @@ class DocumentationService:
                 for item in ordered
             ]
         return trends
+
+    def _latest_run_diffs(self) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        root = self.config.paths.markdown_dir
+        if not root.exists():
+            return out
+        for language_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+            manifest_path = language_dir / "manifest.json"
+            if not manifest_path.exists():
+                continue
+            current = read_json(manifest_path, {})
+            if not isinstance(current, dict):
+                continue
+            previous = self._latest_history_manifest(language_dir)
+            out[language_dir.name] = compare_manifests(current, previous)
+        return out
+
+    def _run_manifest_index(self) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        root = self.config.paths.markdown_dir
+        if not root.exists():
+            return out
+        for language_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+            manifests: list[str] = []
+            if (language_dir / "manifest.json").exists():
+                manifests.append("manifest.json")
+            history_dir = language_dir / ".history"
+            if history_dir.exists():
+                manifests.extend(f".history/{path.name}" for path in sorted(history_dir.glob("*.json"), reverse=True))
+            if manifests:
+                out[language_dir.name] = manifests
+        return out
 
     def _resolve_under(self, root: Path, requested: str | Path) -> Path:
         root_resolved = root.resolve()

@@ -49,6 +49,10 @@ public sealed partial class RunPage : Page
             LanguageBox.Text = "";
             PopulateSourceBox();
             ModeBox.SelectedItem = App.MainViewModel.DefaultMode;
+            TemplateBox.SelectedItem = App.MainViewModel.OutputTemplate;
+            OutputFormatsBox.Text = string.IsNullOrWhiteSpace(App.MainViewModel.OutputFormats)
+                ? "markdown"
+                : App.MainViewModel.OutputFormats;
             ValidateOnlyBox.IsChecked = false;
             ForceRefreshBox.IsChecked = false;
             OutputRootText.Text = $"Output root: {App.MainViewModel.CurrentOutputRoot}";
@@ -453,6 +457,16 @@ public sealed partial class RunPage : Page
             && LanguageBox.Text.Trim().Equals(_selectedLanguage.Language, StringComparison.OrdinalIgnoreCase)
             ? _selectedLanguage.Slug
             : LanguageBox.Text.Trim();
+        var outputFormats = OutputFormatsBox.Text
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(text => text is "markdown" or "html" or "epub")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(text => JsonValue.Create(text))
+            .ToArray();
+        if (outputFormats.Length == 0)
+        {
+            outputFormats = [JsonValue.Create("markdown")];
+        }
         return new JsonObject
         {
             ["language"] = requestedLanguage,
@@ -461,6 +475,8 @@ public sealed partial class RunPage : Page
             ["validate_only"] = ValidateOnlyBox.IsChecked == true,
             ["force_refresh"] = ForceRefreshBox.IsChecked == true,
             ["dry_run"] = dryRun,
+            ["template"] = TemplateBox.SelectedItem?.ToString() ?? "default",
+            ["output_formats"] = new JsonArray(outputFormats),
         };
     }
 

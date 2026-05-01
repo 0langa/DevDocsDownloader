@@ -38,6 +38,13 @@
                         <TextBox x:Name="MaxCacheSizeBox" Header="Max cache size (MB)" />
                         <TextBox x:Name="CatalogStaleDaysBox" Header="Catalog stale warning days" />
                         <TextBox x:Name="DashLargeWarningMbBox" Header="Dash large-docset warning (MB)" />
+                        <ComboBox x:Name="OutputTemplateBox" Header="Default output template">
+                            <x:String>default</x:String>
+                            <x:String>detailed</x:String>
+                            <x:String>minimal</x:String>
+                            <x:String>api-reference</x:String>
+                        </ComboBox>
+                        <TextBox x:Name="OutputFormatsBox" Header="Default output formats (comma-separated)" PlaceholderText="markdown,html,epub" />
                         <TextBox x:Name="DashSuppressedSlugsBox" Header="Dash warning-suppressed slugs (comma-separated)" />
                         <TextBox x:Name="DashProfileOverridesBox" Header="Dash profile overrides JSON" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" />
                         <StackPanel Orientation="Horizontal" Spacing="8">

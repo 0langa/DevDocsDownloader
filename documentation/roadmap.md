@@ -1,8 +1,8 @@
 # DevDocsDownloader — Roadmap to 2.0.0
 
-> **Current release:** 1.3.0  
+> **Current release:** 1.4.0  
 > **Document scope:** All planned work from 1.2.0 through the 2.0.0 premium release.  
-> **Last updated:** 2026-04-30
+> **Last updated:** 2026-05-01
 
 ---
 
@@ -353,6 +353,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.3.1 — Semantic Chunking
 
+**Status:** ✅ Done
+
 **Goal:** Produce chunks that respect document structure rather than splitting on arbitrary character counts.
 
 **Changes:**
@@ -374,6 +376,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.3.2 — Output Versioning
+
+**Status:** ✅ Done
 
 **Goal:** Every run's output is traceable; differences between runs are browsable.
 
@@ -407,6 +411,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.3.3 — Advanced Validation (Link Checking & Integrity)
 
+**Status:** ✅ Done
+
 **Goal:** Validation catches more real problems; integrity hashes make tampering detectable.
 
 **Changes:**
@@ -427,6 +433,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.3.4 — Per-Document Quality Scores in Desktop
 
+**Status:** ✅ Done
+
 **Goal:** Quality information is visible at the document level, not just aggregate.
 
 **Changes:**
@@ -443,6 +451,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.3.5 — Template System for Output Customization
+
+**Status:** ✅ Done
 
 **Goal:** Users control exactly how compiled output is structured and formatted.
 
@@ -467,6 +477,8 @@ Before planning forward, an honest accounting of current state.
 
 ### 1.3.6 — Multi-Format Output: HTML Site
 
+**Status:** ✅ Done
+
 **Goal:** Compiled documentation available as a navigable static HTML website.
 
 **Changes:**
@@ -487,6 +499,8 @@ Before planning forward, an honest accounting of current state.
 ---
 
 ### 1.4.0 — Output Intelligence Milestone Release
+
+**Status:** ✅ Done
 
 **Summary of what ships:**
 - Semantic heading-aware chunking with orientation context and hierarchy-aware overlap.

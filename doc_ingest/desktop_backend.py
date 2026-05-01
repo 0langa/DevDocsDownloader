@@ -464,6 +464,10 @@ def create_app(
     async def output_meta(language_slug: str) -> dict[str, Any]:
         return service.read_meta(language_slug)
 
+    @app.get("/output/{language_slug}/validation", dependencies=[Depends(require_auth)])
+    async def output_validation(language_slug: str) -> dict[str, Any]:
+        return service.read_output_validation(language_slug)
+
     @app.get("/output/{language_slug}/file", dependencies=[Depends(require_auth)])
     async def output_file(language_slug: str, path: str) -> dict[str, Any]:
         return service.read_output_file(language_slug, path).model_dump(mode="json")
@@ -475,6 +479,10 @@ def create_app(
     @app.get("/reports", dependencies=[Depends(require_auth)])
     async def reports() -> dict[str, Any]:
         return service.read_reports().model_dump(mode="json")
+
+    @app.get("/reports/compare-runs", dependencies=[Depends(require_auth)])
+    async def compare_runs(language_slug: str, current_manifest: str, previous_manifest: str) -> dict[str, Any]:
+        return service.compare_output_runs(language_slug, current_manifest, previous_manifest)
 
     @app.get("/reports/file", dependencies=[Depends(require_auth)])
     async def report_file(path: str) -> dict[str, Any]:
