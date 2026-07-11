@@ -4,6 +4,8 @@
       "Bash(python DevDocsDownloader.py --help)",
       "Bash(python DevDocsDownloader.py run --help)",
       "Bash(python DevDocsDownloader.py audit-presets --help)",
+      "Bash(.venv/Scripts/python.exe DevDocsDownloader.py --help)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -q --tb=short)",
       "Bash(python -m pytest -q)",
       "Bash(python -m ruff check .)",
       "Bash(python -m ruff format --check .)",

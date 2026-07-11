@@ -40,6 +40,9 @@ tmp_languages.txt
 .DS_Store
 Thumbs.db
 
+# Local agent config (machine-specific)
+.kimi/
+
 # Keep source-controlled project inputs/configs
 # (intentionally not ignored)
 # - source-documents/renamed-link-source.md
