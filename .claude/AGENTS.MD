@@ -1,32 +1,48 @@
 # DevDocsDownloader Agent Bootstrap
 
-Non-optional. Follow this before planning, searching, editing, or answering repo questions.
+Canonical agent bootstrap for DevDocsDownloader. Read before planning or
+editing. It describes the repo as it exists — if a path here is missing on
+disk, this file is stale: fix the file, do not build the missing scaffold.
 
-## Initialization Order
+> Corrected 2026-08-27: an earlier version routed everything through an
+> `.ai-context/` tree. That tree does not exist in this repository. The real
+> documentation lives in `documentation/`.
 
-1. Open `.ai-context/`.
-2. Read every file in `.ai-context/main-documentation/`.
-3. Read the newest 3 non-template files in `.ai-context/project-context/`.
-4. Read the newest 3 non-template files in `.ai-context/lessons-learned/`.
-5. If a folder has fewer than 3 non-template files, read all of them.
+## Read Order
 
-Do not read `.ai-context/other-documentation/` during normal bootstrap. Treat it as optional archival/supporting material and only open files there when the user explicitly asks for them or the current task directly depends on a specific file in that folder.
+1. `README.md` — what the project is and how to run it.
+2. `documentation/architecture.md` and `documentation/codemap.md` — structure.
+3. `documentation/development_progress.md` and `NEXT_STEPS.md` — current state
+   and what is planned next.
+4. Only the further files under `documentation/` your task actually needs
+   (`output_contract.md`, `release_checklist.md`, `implementation_state_*.md`,
+   `full-project-documentation.md`).
 
-Sort recent files by filename descending. Ignore files whose names start with `_TEMPLATE`.
+`documentation/archive/` is historical. Open it only when the task asks for
+history or needs a specific file there.
+
+## Repo Shape
+
+Python ingestion pipeline (`doc_ingest/`, `DevDocsDownloader.py`,
+`pyproject.toml`, `requirements.txt`) plus a C# desktop shell
+(`DevDocsDownloader.Desktop.sln`, `desktop/`). `scripts/` and `benchmarks/` are
+supporting tooling; `cache/`, `logs/`, and `output/` are generated — never a
+source of truth.
 
 ## Update Rules
 
-- After any code, config, test, doc, or workflow change, add one file to `.ai-context/project-context/` using `.ai-context/project-context/_TEMPLATE_CONTEXT.md`.
-- When you learn a reusable lesson, add or update a file in `.ai-context/lessons-learned/` using `.ai-context/lessons-learned/_TEMPLATE_LESSONS.md`.
-- If you are unsure where a non-core AI-facing note belongs, place it in `.ai-context/other-documentation/`.
-- Keep `AGENTS.md`, `devdocsdownloader.agent.md`, and the `.ai-context` docs aligned.
-- Keep all `.ai-context` loading and routing rules in `AGENTS.md` only.
-- Do not duplicate bootstrap/context-loading instructions in repo-specific agent files.
+- Code is source of truth. If a doc and the code disagree, trust the code, then
+  correct the doc in the same change.
+- After a change to behavior, architecture, the output contract, commands,
+  dependencies, or the release process, update the affected file under
+  `documentation/` in the same change set.
+- Small internal changes (refactors with no behavior change, comments,
+  formatting, test-only edits) need no doc update.
+- Update `NEXT_STEPS.md` when priorities or known gaps move.
+- Replace stale facts in place; do not append a duplicate section beside them.
 
 ## Style Rules
 
-- `.ai-context/main-documentation/` is the primary knowledge base and may be detailed.
-- `.ai-context/main-documentation/` contains `TODO.md`, `project_state.md`, and `project_architecture.md`.
-- `.ai-context/other-documentation/` does not need polished formatting and may contain raw exports, transcripts, or temporary archival material.
-- All other AI-facing docs must stay terse, factual, and low-token.
-- Replace stale facts; do not append duplicate guidance.
+- `documentation/` is the primary knowledge base and may be detailed.
+- Keep AI-facing notes terse, factual, and low-token.
+- Write docs in English.
